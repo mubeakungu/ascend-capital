@@ -12,6 +12,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TX_TYPES = ['deposit', 'withdrawal'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
+const ADMIN_USERNAME = 'admin';
 
 function accountView(row) {
   return {
@@ -20,6 +21,7 @@ function accountView(row) {
     email: row.email,
     role: row.role ?? 'member',
     status: row.status ?? 'active',
+    mustChangePassword: Boolean(row.must_change_password),
     createdAt: row.created_at,
   };
 }
@@ -86,6 +88,15 @@ function validationMessage({ name, email, password }, requireName) {
   }
   if (typeof email !== 'string' || email.length > 254 || !EMAIL_PATTERN.test(email.trim())) {
     return 'Enter a valid email address.';
+  }
+  return passwordError(password);
+}
+
+// Login accepts an email address, or the built-in admin username.
+function loginMessage({ email, password }) {
+  const identifier = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (identifier !== ADMIN_USERNAME && (identifier.length > 254 || !EMAIL_PATTERN.test(identifier))) {
+    return 'Enter a valid email address or username.';
   }
   return passwordError(password);
 }
@@ -173,6 +184,9 @@ export function createApp({ databasePath }) {
   }
   if (!accountColumns.some((column) => column.name === 'held_at')) {
     db.exec('ALTER TABLE accounts ADD COLUMN held_at TEXT');
+  }
+  if (!accountColumns.some((column) => column.name === 'must_change_password')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -303,7 +317,8 @@ export function createApp({ databasePath }) {
     const now = Date.now();
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now);
     const row = db.prepare(`
-      SELECT accounts.id, accounts.name, accounts.email, accounts.created_at, accounts.role, accounts.status
+      SELECT accounts.id, accounts.name, accounts.email, accounts.created_at, accounts.role, accounts.status,
+        accounts.must_change_password
       FROM sessions
       JOIN accounts ON accounts.id = sessions.account_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND accounts.status = 'active'
@@ -322,22 +337,23 @@ export function createApp({ databasePath }) {
     if (request.account.role !== 'admin') {
       return response.status(403).json({ error: 'Administrator access is required.' });
     }
+    if (request.account.must_change_password) {
+      return response.status(403).json({
+        error: 'Change your temporary password to continue.',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
+    }
     return next();
   }
 
   function seedInitialAdmin() {
-    const emailInput = process.env.INITIAL_ADMIN_EMAIL;
     const password = process.env.INITIAL_ADMIN_PASSWORD;
-    if (!emailInput && !password) return;
-    if (!emailInput || !password) {
-      throw new Error('Set both INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD to configure the initial admin.');
-    }
+    if (!password) return;
 
-    const email = emailInput.trim().toLowerCase();
-    const validationError = validationMessage({ email, password }, false);
+    const validationError = passwordError(password);
     if (validationError) throw new Error(`Invalid initial admin configuration: ${validationError}`);
 
-    const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(email);
+    const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(ADMIN_USERNAME);
     if (existing) {
       db.prepare("UPDATE accounts SET role = 'admin' WHERE id = ?").run(existing.id);
       return;
@@ -347,9 +363,9 @@ export function createApp({ databasePath }) {
     const passwordHash = scryptSync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
     const id = randomBytes(16).toString('hex');
     db.prepare(`
-      INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role)
-      VALUES (?, ?, ?, ?, ?, ?, 'admin')
-    `).run(id, emailInput.trim(), email, salt.toString('hex'), passwordHash.toString('hex'), new Date().toISOString());
+      INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role, must_change_password)
+      VALUES (?, 'Administrator', ?, ?, ?, ?, 'admin', 1)
+    `).run(id, ADMIN_USERNAME, salt.toString('hex'), passwordHash.toString('hex'), new Date().toISOString());
   }
 
   async function createAccountSession(accountId, response) {
@@ -390,7 +406,7 @@ export function createApp({ databasePath }) {
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, input.name.trim(), email, salt.toString('hex'), passwordHash.toString('hex'), createdAt);
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status FROM accounts WHERE id = ?').get(id);
+      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(id);
       await createAccountSession(id, response);
       return response.status(201).json({ account: accountView(account) });
     } catch (error) {
@@ -401,12 +417,12 @@ export function createApp({ databasePath }) {
   app.post('/api/auth/login', authRateLimit, async (request, response, next) => {
     try {
       const input = request.body ?? {};
-      const error = validationMessage(input, false);
+      const error = loginMessage(input);
       if (error) return response.status(400).json({ error });
 
       const email = input.email.trim().toLowerCase();
       const row = db.prepare(`
-        SELECT id, name, email, password_salt, password_hash, created_at, role, status
+        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
         FROM accounts WHERE email = ?
       `).get(email);
 
@@ -440,7 +456,7 @@ export function createApp({ databasePath }) {
       return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
     }
     db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), request.account.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status FROM accounts WHERE id = ?')
+    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
       .get(request.account.id);
     return response.json({ account: accountView(account) });
   });
@@ -471,7 +487,7 @@ export function createApp({ databasePath }) {
 
       const hashed = await hashPassword(newPassword);
       withTransaction(() => {
-        db.prepare('UPDATE accounts SET password_salt = ?, password_hash = ? WHERE id = ?')
+        db.prepare('UPDATE accounts SET password_salt = ?, password_hash = ?, must_change_password = 0 WHERE id = ?')
           .run(hashed.salt, hashed.hash, request.account.id);
         db.prepare('DELETE FROM sessions WHERE account_id = ?').run(request.account.id);
         recordAudit(request, 'password.change_self', request.account.id, { role: request.account.role });
@@ -600,7 +616,7 @@ export function createApp({ databasePath }) {
     if (target.role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
 
     db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), target.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status FROM accounts WHERE id = ?').get(target.id);
+    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
     return response.json({ account: accountView(account) });
   });
 
@@ -755,7 +771,7 @@ export function createApp({ databasePath }) {
         recordAudit(request, 'account.hold', target.id, { email: target.email, reason });
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status FROM accounts WHERE id = ?').get(target.id);
+      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
       return response.json({ account: accountView(account) });
     } catch (error) {
       return next(error);
@@ -777,7 +793,7 @@ export function createApp({ databasePath }) {
         recordAudit(request, 'account.release', target.id, { email: target.email, note });
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status FROM accounts WHERE id = ?').get(target.id);
+      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
       return response.json({ account: accountView(account) });
     } catch (error) {
       return next(error);
