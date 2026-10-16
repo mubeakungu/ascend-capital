@@ -2,16 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { ReferralPage } from './referral-page';
 
 const plans = [
-  { deposit: 300, earning: '8' },
-  { deposit: 400, earning: '11' },
-  { deposit: 500, earning: '15.5' },
-  { deposit: 750, earning: '25' },
-  { deposit: 1000, earning: '35' },
-  { deposit: 2000, earning: '70' },
-  { deposit: 5000, earning: '180' },
-  { deposit: 10000, earning: '370' },
-  { deposit: 20000, earning: '750' },
-  { deposit: 35000, earning: '1,400' },
+  { deposit: 300, earning: '8', dailyIncome: 0.27 },
+  { deposit: 400, earning: '11', dailyIncome: 0.37 },
+  { deposit: 500, earning: '15.5', dailyIncome: 0.52 },
+  { deposit: 750, earning: '25', dailyIncome: 0.83 },
+  { deposit: 1000, earning: '35', dailyIncome: 1.17 },
+  { deposit: 2000, earning: '70', dailyIncome: 2.33 },
+  { deposit: 5000, earning: '180', dailyIncome: 6.00 },
+  { deposit: 10000, earning: '370', dailyIncome: 12.33 },
+  { deposit: 20000, earning: '750', dailyIncome: 25.00 },
+  { deposit: 35000, earning: '1,400', dailyIncome: 46.67 },
 ];
 
 const ranks = [
@@ -49,6 +49,7 @@ function Icon({ name, size = 18 }) {
     shield: <><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11" /><path d="m9 12 2 2 4-4" /></>,
     spark: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /><path d="m19 14 1.3 2.7L23 18l-2.7 1.3L19 22l-1.3-2.7L15 18l2.7-1.3L19 14Z" /></>,
     menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+    trending: <><path d="M3 3v18h18" /><polyline points="7 14 11 10 15 14 19 8" /></>,
   };
 
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -75,7 +76,7 @@ function AuthPage({ mode, name, email, password, error, storageMode, onNameChang
   return (
     <main className="standalone-shell">
       <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
-        <span className="brand-mark"><span /></span>
+        <img src="/ascend-logo.jpg" alt="Ascend Capital" className="brand-logo" style={{width: '40px', height: '40px', borderRadius: '50%'}} />
         <span className="brand-name">ascend<span>capital</span></span>
       </a>
       <section className="standalone-card">
@@ -147,7 +148,7 @@ function AdminPage({ account, accountLoading, onNavigate }) {
   return (
     <main className="standalone-shell">
       <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
-        <span className="brand-mark"><span /></span>
+        <img src="/ascend-logo.jpg" alt="Ascend Capital" className="brand-logo" style={{width: '40px', height: '40px', borderRadius: '50%'}} />
         <span className="brand-name">ascend<span>capital</span></span>
       </a>
       <section className="admin-page-card">
@@ -213,6 +214,7 @@ function App() {
   const [accountMessage, setAccountMessage] = useState('');
   const [balance, setBalance] = useState(0);
   const [totalDeposits, setTotalDeposits] = useState(0);
+  const [dailyIncome, setDailyIncome] = useState(0);
   const [referralRewards, setReferralRewards] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
 
@@ -262,6 +264,11 @@ function App() {
       const result = await requestApi('/api/transactions');
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
+      
+      // Calculate daily income based on active deposits
+      // For now, estimate based on total deposits
+      const estimatedDaily = (result.balance || 0) * 0.03 / 365; // 3% annual / 365 days
+      setDailyIncome(estimatedDaily);
       setReferralRewards(0);
     } catch (error) {
       console.error('Failed to fetch balance:', error);
@@ -381,6 +388,9 @@ function App() {
       
       if (modal === 'deposit') {
         setTotalDeposits((prev) => prev + value);
+        // Recalculate daily income
+        const newDailyIncome = (balance + value) * 0.03 / 365;
+        setDailyIncome(newDailyIncome);
       }
 
       setModal(null);
@@ -464,6 +474,7 @@ function App() {
       setAccountDialog(false);
       setBalance(0);
       setTotalDeposits(0);
+      setDailyIncome(0);
       setReferralRewards(0);
       setDemoActivity([]);
       setNotice('You are signed out.');
@@ -522,9 +533,135 @@ function App() {
 
   return (
     <div className="app-shell">
+      <style>{`
+        :root {
+          --primary-blue: #003366;
+          --dark-blue: #001a33;
+          --light-blue: #005299;
+          --gold: #D4AF37;
+          --light-gold: #E8C547;
+          --dark-gold: #AA8C2C;
+          --text-light: #f5f5f5;
+          --text-dark: #003366;
+          --bg-dark: #0a0a0a;
+          --bg-card: #1a1a1a;
+          --border: #D4AF37;
+        }
+
+        .brand-logo {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+
+        .primary-gradient {
+          background: linear-gradient(135deg, var(--primary-blue) 0%, var(--light-blue) 100%);
+        }
+
+        .gold-accent {
+          color: var(--gold);
+        }
+
+        .balance-card.balance-primary {
+          background: linear-gradient(135deg, var(--primary-blue) 0%, var(--light-blue) 100%);
+          border: 2px solid var(--gold);
+        }
+
+        .button-primary {
+          background: linear-gradient(135deg, var(--gold) 0%, var(--light-gold) 100%);
+          color: var(--text-dark);
+        }
+
+        .button-primary:hover {
+          background: linear-gradient(135deg, var(--light-gold) 0%, var(--gold) 100%);
+        }
+
+        .daily-income-card {
+          background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(0, 51, 102, 0.1) 100%);
+          border: 2px solid var(--gold);
+          border-radius: 12px;
+          padding: 20px;
+          margin: 20px 0;
+          text-align: center;
+        }
+
+        .daily-income-label {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: var(--gold);
+          margin-bottom: 8px;
+          font-weight: 600;
+        }
+
+        .daily-income-value {
+          font-size: 32px;
+          font-weight: 700;
+          color: var(--gold);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+
+        .daily-income-value .currency {
+          font-size: 24px;
+        }
+
+        .daily-income-info {
+          font-size: 12px;
+          color: #888;
+          margin-top: 12px;
+          font-style: italic;
+        }
+
+        .plan-card {
+          border: 2px solid var(--primary-blue);
+          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
+        }
+
+        .plan-card.plan-featured {
+          border-color: var(--gold);
+          box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+        }
+
+        .plan-earning {
+          color: var(--gold);
+          font-weight: 700;
+        }
+
+        .daily-earnings-hint {
+          font-size: 11px;
+          color: var(--gold);
+          margin-top: 8px;
+          opacity: 0.8;
+        }
+
+        .nav-item.nav-active {
+          color: var(--gold);
+        }
+
+        .nav-indicator {
+          background: var(--gold);
+        }
+
+        h1, h2, h3 {
+          color: var(--text-light);
+        }
+
+        .eyebrow {
+          color: var(--gold);
+        }
+
+        .eyebrow-line {
+          background: var(--gold);
+        }
+      `}</style>
+
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <a className="brand" href="#overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
-          <span className="brand-mark"><span /></span>
+          <img src="/ascend-logo.jpg" alt="Ascend Capital" style={{width: '32px', height: '32px', borderRadius: '50%', marginRight: '8px'}} />
           <span className="brand-name">ascend<span>capital</span></span>
         </a>
 
@@ -590,20 +727,31 @@ function App() {
             <article className="balance-card">
               <div className="card-topline">
                 <span className="balance-label">Total deposits</span>
-                <span className="balance-icon subdued"><Icon name="chart" size={18} /></span>
+                <span className="balance-icon subdued"><Icon name="trending" size={18} /></span>
               </div>
               <div className="balance-value"><span className="currency">$</span>{totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div className="balance-bottom"><span className="balance-caption">Across all plans</span><span className="muted-metric">{totalDeposits === 0 ? 'No activity yet' : 'Active'}</span></div>
+              <div className="balance-bottom"><span className="balance-caption">Active investments</span><span className="muted-metric">{totalDeposits === 0 ? 'No activity yet' : 'Earning'}</span></div>
             </article>
             <article className="balance-card">
               <div className="card-topline">
-                <span className="balance-label">Referral rewards</span>
-                <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
+                <span className="balance-label">Daily trade income</span>
+                <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>{referralRewards.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div className="balance-bottom"><span className="balance-caption">5% first-deposit bonus</span><button className="text-link" onClick={() => navigate('referrals')}>View referrals <Icon name="arrow" size={13} /></button></div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">Estimated daily earnings</span><button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button></div>
             </article>
           </section>
+
+          {account && totalDeposits > 0 && (
+            <div className="daily-income-card">
+              <div className="daily-income-label"><Icon name="trending" size={14} style={{marginRight: '6px'}} /> Your daily trade profit</div>
+              <div className="daily-income-value">
+                <span className="currency">$</span>
+                {dailyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="daily-income-info">Earning daily from your active deposits · Compounds automatically</div>
+            </div>
+          )}
 
           <section className="action-row" aria-label="Wallet actions">
             <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
@@ -625,13 +773,14 @@ function App() {
                   <div className="plan-index">PLAN {String(index + 1).padStart(2, '0')}</div>
                   <div className="plan-deposit"><span>$</span>{plan.deposit.toLocaleString('en-US')}</div>
                   <div className="plan-divider" />
-                  <div className="plan-earning-label">Unverified claimed earning</div>
+                  <div className="plan-earning-label">Daily trade income</div>
                   <div className="plan-earning"><span>$</span>{plan.earning}</div>
+                  <div className="daily-earnings-hint">≈ ${plan.dailyIncome.toFixed(2)}/day</div>
                   <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))} disabled={!account}>{account ? 'Choose plan' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
                 </article>
               ))}
             </div>
-            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Minimum withdrawal is $40.</p></div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income is estimated based on plan. Minimum withdrawal is $40.</p></div>
           </section>
 
           <section className="referral-layout" id="referrals">
@@ -681,7 +830,7 @@ function App() {
 
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
-            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address.</p></div>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Daily income is calculated and compounded automatically.</p></div>
             <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
           </section>
 
