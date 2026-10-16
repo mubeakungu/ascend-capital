@@ -351,18 +351,33 @@ export function createApp({ databasePath }) {
 
   function seedInitialAdmin() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
-
     // The temporary seed password may be short; the admin must replace it with 12+ characters on first login.
     if (password.length > 128) throw new Error('INITIAL_ADMIN_PASSWORD must be at most 128 characters.');
 
+    // Reset switch: set RESET_ADMIN_PASSWORD=true, redeploy, sign in, then remove the variable.
+    const resetRequested = process.env.RESET_ADMIN_PASSWORD === 'true';
     const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(ADMIN_USERNAME);
-    if (existing) {
+    if (existing && !resetRequested) {
       db.prepare("UPDATE accounts SET role = 'admin' WHERE id = ?").run(existing.id);
       return;
     }
 
     const salt = randomBytes(16);
     const passwordHash = scryptSync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
+
+    if (existing) {
+      withTransaction(() => {
+        db.prepare(`
+          UPDATE accounts
+          SET role = 'admin', status = 'active', password_salt = ?, password_hash = ?, must_change_password = 1
+          WHERE id = ?
+        `).run(salt.toString('hex'), passwordHash.toString('hex'), existing.id);
+        db.prepare('DELETE FROM sessions WHERE account_id = ?').run(existing.id);
+        recordAudit({}, 'admin.password_reset_switch', existing.id, {});
+      });
+      return;
+    }
+
     const id = randomBytes(16).toString('hex');
     db.prepare(`
       INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role, must_change_password)
