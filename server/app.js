@@ -13,8 +13,25 @@ const TX_TYPES = ['deposit', 'withdrawal'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
-// Temporary password for the first admin login; the admin is forced to change it. INITIAL_ADMIN_PASSWORD overrides it.
 const DEFAULT_INITIAL_ADMIN_PASSWORD = 'Admin@123';
+
+// Referral tier commission rates
+const REFERRAL_COMMISSION_RATES = [
+  0.05,  // Star 1: 5%
+  0.06,  // Star 2: 6%
+  0.07,  // Star 3: 7%
+  0.08,  // Star 4: 8%
+  0.10,  // Star 5: 10%
+  0.12,  // Star 6: 12%
+  0.14,  // Star 7: 14%
+  0.16,  // Star 8: 16%
+  0.18,  // Crown Leader: 18%
+];
+
+const TIER_NAMES = [
+  'Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5',
+  'Star 6', 'Star 7', 'Star 8', 'Crown Leader',
+];
 
 function accountView(row) {
   return {
@@ -94,13 +111,11 @@ function validationMessage({ name, email, password }, requireName) {
   return passwordError(password);
 }
 
-// Login accepts an email address, or the built-in admin username.
 function loginMessage({ email, password }) {
   const identifier = typeof email === 'string' ? email.trim().toLowerCase() : '';
   if (identifier !== ADMIN_USERNAME && (identifier.length > 254 || !EMAIL_PATTERN.test(identifier))) {
     return 'Enter a valid email address or username.';
   }
-  // Login only checks that a password was sent; the 12-character minimum applies when one is set.
   return typeof password === 'string' && password.length > 0 && password.length <= 128 ? null : 'Enter your password.';
 }
 
@@ -152,6 +167,29 @@ function createRateLimiter({ limit, windowMs }) {
     }
     return next();
   };
+}
+
+// Referral helper functions
+function generateReferralCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+function getTierByDirectReferrals(directCount) {
+  if (directCount < 1) return -1;
+  if (directCount < 3) return 0;
+  if (directCount < 6) return 1;
+  if (directCount < 10) return 2;
+  if (directCount < 15) return 3;
+  if (directCount < 25) return 4;
+  if (directCount < 40) return 5;
+  if (directCount < 60) return 6;
+  if (directCount < 100) return 7;
+  return 8;
 }
 
 export function createApp({ databasePath }) {
@@ -220,13 +258,37 @@ export function createApp({ databasePath }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at);
+    CREATE TABLE IF NOT EXISTS referral_codes (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id);
+    CREATE TABLE IF NOT EXISTS referral_signups (
+      id TEXT PRIMARY KEY,
+      referrer_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      referral_code TEXT REFERENCES referral_codes(code) ON DELETE SET NULL,
+      referred_account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+      signed_up_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id);
+    CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id);
+    CREATE TABLE IF NOT EXISTS referral_commissions (
+      id TEXT PRIMARY KEY,
+      referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+      referred_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      commission_cents INTEGER NOT NULL CHECK(commission_cents > 0),
+      commission_rate REAL NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
+    CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
   `);
 
   const app = express();
   const secureCookie = process.env.NODE_ENV === 'production';
-  // Behind Render's proxy (production) trust one hop by default so request.protocol
-  // reflects X-Forwarded-Proto (https) and request.ip is the real client IP.
-  // TRUST_PROXY_HOPS still overrides this when set.
   const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? (secureCookie ? 1 : 0));
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
@@ -351,10 +413,8 @@ export function createApp({ databasePath }) {
 
   function seedInitialAdmin() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
-    // The temporary seed password may be short; the admin must replace it with 12+ characters on first login.
     if (password.length > 128) throw new Error('INITIAL_ADMIN_PASSWORD must be at most 128 characters.');
 
-    // Reset switch: set RESET_ADMIN_PASSWORD=true, redeploy, sign in, then remove the variable.
     const resetRequested = process.env.RESET_ADMIN_PASSWORD === 'true';
     const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(ADMIN_USERNAME);
     if (existing && !resetRequested) {
@@ -393,6 +453,71 @@ export function createApp({ databasePath }) {
     setSessionCookie(response, token, secureCookie);
   }
 
+  function trackReferralSignup(accountId, referralCode) {
+    if (!referralCode || typeof referralCode !== 'string') return;
+    const codeRecord = db.prepare('SELECT account_id FROM referral_codes WHERE code = ? COLLATE NOCASE')
+      .get(referralCode);
+
+    if (!codeRecord) return;
+
+    const id = randomBytes(16).toString('hex');
+    try {
+      db.prepare(`
+        INSERT INTO referral_signups (id, referrer_id, referral_code, referred_account_id, signed_up_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, codeRecord.account_id, referralCode.toUpperCase(), accountId, new Date().toISOString());
+    } catch (error) {
+      // Ignore duplicate referral signups
+    }
+  }
+
+  function applyReferralCommission(transactionId) {
+    const tx = db.prepare(`
+      SELECT t.*, a.id AS account_id
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id
+      WHERE t.id = ?
+    `).get(transactionId);
+
+    if (!tx || tx.type !== 'deposit' || tx.status !== 'approved') return null;
+
+    const referralSignup = db.prepare(`
+      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
+    `).get(tx.account_id);
+
+    if (!referralSignup) return null;
+
+    const referrerId = referralSignup.referrer_id;
+    const directCount = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
+    `).get(referrerId).cnt;
+
+    const tier = getTierByDirectReferrals(directCount);
+    if (tier < 0) return null;
+
+    const commissionRate = REFERRAL_COMMISSION_RATES[tier];
+    const commissionCents = Math.round(tx.amount_cents * commissionRate);
+
+    const commissionId = randomBytes(16).toString('hex');
+    try {
+      db.prepare(`
+        INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        commissionId,
+        referrerId,
+        transactionId,
+        tx.account_id,
+        commissionCents,
+        commissionRate,
+        new Date().toISOString(),
+      );
+      return { commissionId, amount: commissionCents / 100 };
+    } catch (error) {
+      return null;
+    }
+  }
+
   seedInitialAdmin();
 
   app.get('/api/health', (_request, response) => response.json({
@@ -422,6 +547,12 @@ export function createApp({ databasePath }) {
         INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, input.name.trim(), email, salt.toString('hex'), passwordHash.toString('hex'), createdAt);
+
+      // Track referral if provided
+      const referralCode = input.referralCode?.trim().toUpperCase();
+      if (referralCode) {
+        trackReferralSignup(id, referralCode);
+      }
 
       const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(id);
       await createAccountSession(id, response);
@@ -478,7 +609,6 @@ export function createApp({ databasePath }) {
     return response.json({ account: accountView(account) });
   });
 
-  // Self-service password change (members and admins). Requires the current password.
   app.post('/api/auth/password', passwordRateLimit, requireAccount, async (request, response, next) => {
     try {
       const { currentPassword, newPassword } = request.body ?? {};
@@ -528,8 +658,92 @@ export function createApp({ databasePath }) {
   });
 
   // ---------------------------------------------------------------------------
-  // Member deposit / withdrawal requests (created as "pending" for admin review)
+  // Referral Endpoints
   // ---------------------------------------------------------------------------
+
+  app.get('/api/referrals/code', requireAccount, (request, response) => {
+    const existing = db.prepare('SELECT code FROM referral_codes WHERE account_id = ? LIMIT 1')
+      .get(request.account.id);
+
+    if (existing) {
+      return response.json({ code: existing.code });
+    }
+
+    const code = generateReferralCode();
+    const id = randomBytes(16).toString('hex');
+    db.prepare(`
+      INSERT INTO referral_codes (id, account_id, code, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, request.account.id, code, new Date().toISOString());
+
+    return response.status(201).json({ code });
+  });
+
+  app.get('/api/referrals/stats', requireAccount, (request, response) => {
+    const directStats = db.prepare(`
+      SELECT COUNT(*) AS direct_count,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
+      FROM referral_signups rs
+      LEFT JOIN accounts a ON a.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = a.id
+      WHERE rs.referrer_id = ?
+    `).get(request.account.id);
+
+    const commissionStats = db.prepare(`
+      SELECT COUNT(*) AS commission_count,
+        COALESCE(SUM(commission_cents), 0) AS total_commission_cents
+      FROM referral_commissions
+      WHERE referrer_id = ?
+    `).get(request.account.id);
+
+    const tier = getTierByDirectReferrals(directStats.direct_count);
+    const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
+    const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
+
+    return response.json({
+      referralCode: db.prepare('SELECT code FROM referral_codes WHERE account_id = ?').get(request.account.id)?.code || null,
+      tier: tierName,
+      commissionRate: commissionRate,
+      directReferrals: directStats.direct_count,
+      directVolume: directStats.direct_volume / 100,
+      commissionsEarned: commissionStats.commission_count,
+      totalEarnings: commissionStats.total_commission_cents / 100,
+    });
+  });
+
+  app.get('/api/referrals/list', requireAccount, (request, response) => {
+    const referrals = db.prepare(`
+      SELECT
+        rs.id,
+        a.id AS account_id,
+        a.name,
+        a.email,
+        rs.signed_up_at,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits
+      FROM referral_signups rs
+      JOIN accounts a ON a.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = a.id
+      WHERE rs.referrer_id = ?
+      GROUP BY a.id
+      ORDER BY rs.signed_up_at DESC
+      LIMIT 100
+    `).all(request.account.id);
+
+    return response.json({
+      referrals: referrals.map(r => ({
+        id: r.account_id,
+        name: r.name,
+        email: r.email,
+        signedUpAt: r.signed_up_at,
+        totalDeposits: r.total_deposits / 100,
+      })),
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Transactions
+  // ---------------------------------------------------------------------------
+
   app.post('/api/transactions', updateRateLimit, requireAccount, (request, response, next) => {
     try {
       if (request.account.role === 'admin') {
@@ -598,6 +812,7 @@ export function createApp({ databasePath }) {
   // ---------------------------------------------------------------------------
   // Admin
   // ---------------------------------------------------------------------------
+
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
   app.get('/api/admin/accounts', adminLimiter, requireAccount, requireAdmin, (request, response) => {
@@ -637,7 +852,6 @@ export function createApp({ databasePath }) {
     return response.json({ account: accountView(account) });
   });
 
-  // Track a client's activity: balance, totals in/out, pending items and recent transactions.
   app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAccount, requireAdmin, (request, response) => {
     const account = db.prepare(`
       SELECT id, name, email, created_at, role, status, hold_reason, held_at
@@ -682,7 +896,6 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // Review queue: ?status=pending&type=withdrawal&accountId=...
   app.get('/api/admin/transactions', adminLimiter, requireAccount, requireAdmin, (request, response) => {
     const { status, type, accountId } = request.query;
     const where = [];
@@ -757,6 +970,17 @@ export function createApp({ databasePath }) {
             accountEmail: tx.account_email,
             note,
           });
+
+          // Apply referral commission if approved
+          if (decision === 'approved') {
+            const commission = applyReferralCommission(tx.id);
+            if (commission) {
+              recordAudit(request, 'referral.commission_earned', tx.account_id, {
+                amount: commission.amount,
+                commissionId: commission.commissionId,
+              });
+            }
+          }
         });
 
         return response.json({ transaction: transactionView(getTransaction(tx.id), { admin: true }) });
@@ -769,7 +993,6 @@ export function createApp({ databasePath }) {
   app.post('/api/admin/transactions/:id/approve', adminLimiter, requireAccount, requireAdmin, reviewTransaction('approved'));
   app.post('/api/admin/transactions/:id/reject', adminLimiter, requireAccount, requireAdmin, reviewTransaction('rejected'));
 
-  // Put an account on hold (suspected fraud): blocks login, ends sessions, blocks approvals.
   app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAccount, requireAdmin, (request, response, next) => {
     try {
       const reason = cleanText(request.body?.reason, { min: 3, max: 300 });
@@ -817,8 +1040,6 @@ export function createApp({ databasePath }) {
     }
   });
 
-  // Admin sets a new password for a member. The password is only ever stored as a salted hash;
-  // the member's sessions are ended and the action is recorded in the audit log.
   app.post('/api/admin/accounts/:id/password', adminLimiter, requireAccount, requireAdmin, async (request, response, next) => {
     try {
       const newError = passwordError(request.body?.newPassword);
@@ -843,7 +1064,53 @@ export function createApp({ databasePath }) {
     }
   });
 
-  // Audit trail of admin actions (who, what, when, from which IP).
+  // Admin: view all referral data for a member
+  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
+
+    const directStats = db.prepare(`
+      SELECT COUNT(*) AS direct_count
+      FROM referral_signups WHERE referrer_id = ?
+    `).get(account.id);
+
+    const commissions = db.prepare(`
+      SELECT
+        rc.id,
+        rc.commission_cents,
+        rc.commission_rate,
+        rc.created_at,
+        a.name AS referred_name,
+        a.email AS referred_email,
+        t.amount_cents,
+        t.type
+      FROM referral_commissions rc
+      JOIN accounts a ON a.id = rc.referred_account_id
+      JOIN transactions t ON t.id = rc.transaction_id
+      WHERE rc.referrer_id = ?
+      ORDER BY rc.created_at DESC
+      LIMIT 100
+    `).all(account.id);
+
+    const tier = getTierByDirectReferrals(directStats.direct_count);
+
+    return response.json({
+      account: { id: account.id, name: account.name, email: account.email },
+      tier: tier >= 0 ? TIER_NAMES[tier] : null,
+      directReferrals: directStats.direct_count,
+      commissions: commissions.map(c => ({
+        id: c.id,
+        referredName: c.referred_name,
+        referredEmail: c.referred_email,
+        transactionAmount: c.amount_cents / 100,
+        transactionType: c.type,
+        commissionRate: c.commission_rate,
+        commissionEarned: c.commission_cents / 100,
+        earnedAt: c.created_at,
+      })),
+    });
+  });
+
   app.get('/api/admin/audit', adminLimiter, requireAccount, requireAdmin, (request, response) => {
     const { action } = request.query;
     if (action !== undefined && (typeof action !== 'string' || action.length === 0 || action.length > 64)) {
