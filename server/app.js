@@ -13,6 +13,8 @@ const TX_TYPES = ['deposit', 'withdrawal'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
+// Temporary password for the first admin login; the admin is forced to change it. INITIAL_ADMIN_PASSWORD overrides it.
+const DEFAULT_INITIAL_ADMIN_PASSWORD = 'Admin@123';
 
 function accountView(row) {
   return {
@@ -98,7 +100,8 @@ function loginMessage({ email, password }) {
   if (identifier !== ADMIN_USERNAME && (identifier.length > 254 || !EMAIL_PATTERN.test(identifier))) {
     return 'Enter a valid email address or username.';
   }
-  return passwordError(password);
+  // Login only checks that a password was sent; the 12-character minimum applies when one is set.
+  return typeof password === 'string' && password.length > 0 && password.length <= 128 ? null : 'Enter your password.';
 }
 
 async function hashPassword(password) {
@@ -347,11 +350,10 @@ export function createApp({ databasePath }) {
   }
 
   function seedInitialAdmin() {
-    const password = process.env.INITIAL_ADMIN_PASSWORD;
-    if (!password) return;
+    const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
 
-    const validationError = passwordError(password);
-    if (validationError) throw new Error(`Invalid initial admin configuration: ${validationError}`);
+    // The temporary seed password may be short; the admin must replace it with 12+ characters on first login.
+    if (password.length > 128) throw new Error('INITIAL_ADMIN_PASSWORD must be at most 128 characters.');
 
     const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(ADMIN_USERNAME);
     if (existing) {
