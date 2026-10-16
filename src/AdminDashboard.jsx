@@ -374,7 +374,7 @@ function Audit() {
   );
 }
 
-function Security() {
+function Security({ forced, onChanged }) {
   const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -388,6 +388,7 @@ function Security() {
       await api('/auth/password', { method: 'POST', body: { currentPassword: form.currentPassword, newPassword: form.newPassword } });
       setForm({ currentPassword: '', newPassword: '', confirm: '' });
       setNotice({ text: 'Password changed. Your other sessions were signed out.' });
+      onChanged?.();
     } catch (err) {
       setNotice({ text: err.message, bad: true });
     }
@@ -397,6 +398,7 @@ function Security() {
   return (
     <section>
       <h2>Change your password</h2>
+      {forced && <p className="ad-notice">You are signed in with a temporary password. Choose a new one to continue.</p>}
       <form className="ad-form" onSubmit={submit}>
         <label>Current password</label>
         <input type="password" autoComplete="current-password" value={form.currentPassword} onChange={set('currentPassword')} required />
@@ -435,8 +437,8 @@ function Login({ onLogin }) {
       <form className="ad-card ad-form" onSubmit={submit}>
         <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
         <h2>Administrator sign in</h2>
-        <label>Email address</label>
-        <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <label>Username</label>
+        <input type="text" autoComplete="username" placeholder="admin" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <label>Password</label>
         <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {error && <p className="ad-error">{error}</p>}
@@ -460,6 +462,7 @@ export default function AdminDashboard() {
     setAccount(null);
   }
 
+  const refreshAccount = () => api('/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
   const openClient = (id) => { setTab('clients'); setOpenId(id); };
   const tabs = [['queue', 'Review queue'], ['clients', 'Clients'], ['audit', 'Audit log'], ['security', 'Security']];
 
@@ -475,6 +478,16 @@ export default function AdminDashboard() {
           <button className="ad-btn" onClick={signOut}>Sign out</button>
         </div>
       </div>
+    );
+  } else if (account.mustChangePassword) {
+    body = (
+      <>
+        <header className="ad-top">
+          <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
+          <div className="ad-who">{account.email}<button className="ad-btn ghost sm" onClick={signOut}>Sign out</button></div>
+        </header>
+        <main className="ad-main"><Security forced onChanged={refreshAccount} /></main>
+      </>
     );
   } else {
     body = (
