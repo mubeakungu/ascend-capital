@@ -119,7 +119,10 @@ export function createApp({ databasePath }) {
 
   const app = express();
   const secureCookie = process.env.NODE_ENV === 'production';
-  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  // Behind Render's proxy (production) trust one hop by default so request.protocol
+  // reflects X-Forwarded-Proto (https) and request.ip is the real client IP.
+  // TRUST_PROXY_HOPS still overrides this when set.
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? (secureCookie ? 1 : 0));
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
   }
