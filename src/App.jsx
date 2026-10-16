@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ReferralPage } from './referral-page';
 
 const plans = [
   { deposit: 300, earning: '8' },
@@ -91,27 +92,6 @@ function AuthPage({ mode, name, email, password, error, storageMode, onNameChang
         </form>
         <button className="account-switch" onClick={() => onNavigate(registering ? '/login' : '/register')}>{registering ? 'Already registered? Sign in' : 'New here? Create an account'}</button>
         <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transactions</p>
-      </section>
-    </main>
-  );
-}
-
-function ReferralPage({ account, onNavigate }) {
-  return (
-    <main className="standalone-shell">
-      <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
-        <span className="brand-mark"><span /></span>
-        <span className="brand-name">ascend<span>capital</span></span>
-      </a>
-      <section className="standalone-card referral-page-card">
-        <div className="eyebrow"><span className="eyebrow-line" /> MEMBER INFORMATION</div>
-        <h1>Referrals<span className="title-period">.</span></h1>
-        <p className="standalone-description">This page provides referral information only. No invite tracking, recruitment bonuses, or referral-based payouts are available.</p>
-        <div className="referral-status-panel"><Icon name="users" size={20} /><div><strong>Referral features unavailable</strong><p>This page does not register referrals or calculate commissions.</p></div></div>
-        <div className="referral-page-actions">
-          {account ? <button className="button button-secondary" onClick={() => onNavigate('/')}>Return to dashboard</button> : <button className="button button-secondary" onClick={() => onNavigate('/login')}>Sign in</button>}
-          {!account && <button className="button button-primary" onClick={() => onNavigate('/register')}>Create account <Icon name="arrow" size={14} /></button>}
-        </div>
       </section>
     </main>
   );
