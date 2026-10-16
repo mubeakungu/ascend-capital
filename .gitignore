@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+ascend-capital-project.zip
+.env
+.env.*
+!.env.example
