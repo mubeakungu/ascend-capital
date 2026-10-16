@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import AdminDashboard from './AdminDashboard.jsx';
 
 const plans = [
   { deposit: 300, earning: '8' },
@@ -113,6 +112,97 @@ function ReferralPage({ account, onNavigate }) {
           {account ? <button className="button button-secondary" onClick={() => onNavigate('/')}>Return to dashboard</button> : <button className="button button-secondary" onClick={() => onNavigate('/login')}>Sign in</button>}
           {!account && <button className="button button-primary" onClick={() => onNavigate('/register')}>Create account <Icon name="arrow" size={14} /></button>}
         </div>
+      </section>
+    </main>
+  );
+}
+
+function AdminPage({ account, accountLoading, onNavigate }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [editedName, setEditedName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (accountLoading) return undefined;
+    if (account?.role !== 'admin') {
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    requestApi('/api/admin/accounts')
+      .then(({ accounts: members }) => {
+        if (!cancelled) setAccounts(members);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [account, accountLoading]);
+
+  async function saveName(id) {
+    setError('');
+    setSaving(true);
+    try {
+      const result = await requestApi(`/api/admin/accounts/${encodeURIComponent(id)}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: editedName }),
+      });
+      setAccounts((current) => current.map((member) => member.id === id ? result.account : member));
+      setEditingId('');
+      setEditedName('');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <main className="standalone-shell">
+      <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
+        <span className="brand-mark"><span /></span>
+        <span className="brand-name">ascend<span>capital</span></span>
+      </a>
+      <section className="admin-page-card">
+        <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT ADMINISTRATION</div>
+        <h1>Manage member profiles<span className="title-period">.</span></h1>
+        <p className="standalone-description">Administrators can view member accounts and update member display names. This area has no deposit, withdrawal, wallet, payout, or fund-approval controls.</p>
+        <div className="admin-restriction"><Icon name="shield" size={16} /><span>Profile administration only · Financial operations are not supported.</span></div>
+        {accountLoading || loading ? <p className="admin-empty">Loading account directory…</p>
+          : account?.role !== 'admin' ? <div className="modal-message">Sign in with an administrator account to manage member profiles.</div>
+            : error && accounts.length === 0 ? <div className="modal-message" role="alert">{error}</div>
+              : (
+                <>
+                  {error && <div className="modal-message" role="alert">{error}</div>}
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead><tr><th>MEMBER</th><th>EMAIL</th><th>ROLE</th><th>CREATED</th><th>ACTION</th></tr></thead>
+                      <tbody>{accounts.map((member) => (
+                        <tr key={member.id}>
+                          <td>{editingId === member.id
+                            ? <input className="admin-name-input" aria-label={`Name for ${member.email}`} value={editedName} onChange={(event) => setEditedName(event.target.value)} maxLength={80} />
+                            : member.name}</td>
+                          <td>{member.email}</td>
+                          <td><span className={`admin-role ${member.role === 'admin' ? 'admin-role-active' : ''}`}>{member.role}</span></td>
+                          <td>{new Date(member.createdAt).toLocaleDateString()}</td>
+                          <td>{member.role === 'admin' ? <span className="admin-protected">Protected</span> : editingId === member.id
+                            ? <button className="admin-action" disabled={saving} onClick={() => saveName(member.id)}>{saving ? 'Saving…' : 'Save'}</button>
+                            : <button className="admin-action" onClick={() => { setEditingId(member.id); setEditedName(member.name); }}>Edit name</button>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  {accounts.length === 0 && <p className="admin-empty">No member accounts yet.</p>}
+                </>
+              )}
+        <button className="button button-secondary admin-back" onClick={() => onNavigate('/')}>Return to dashboard</button>
       </section>
     </main>
   );
@@ -307,11 +397,16 @@ function App() {
       };
 
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
+      setBalance((prev) => prev + (modal === 'withdraw' ? -value : value));
+      
+      if (modal === 'deposit') {
+        setTotalDeposits((prev) => prev + value);
+      }
 
       setModal(null);
       setAmount('');
       setDestination('');
-      setNotice(`${entry.type} request of $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} submitted. Your balance updates once an administrator approves it.`);
+      setNotice(`${entry.type} of $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} processed successfully.`);
 
       if (account) {
         await fetchAccountBalance(account.id);
@@ -442,7 +537,7 @@ function App() {
   }
 
   if (route === '/admin') {
-    return <AdminDashboard />;
+    return <AdminPage account={account} accountLoading={accountLoading} onNavigate={navigate} />;
   }
 
   return (
@@ -540,7 +635,7 @@ function App() {
 
           <section className="section-block" id="deposits">
             <div className="section-heading">
-              <div><div className="eyebrow"><span className="eyebrow-line" /> DEPOSIT PLANS</div><h2>Deposit plans</h2><p className="section-subtitle">Deposits are credited to your balance once an administrator confirms them.</p></div>
+              <div><div className="eyebrow"><span className="eyebrow-line" /> DEPOSIT PLANS</div><h2>Deposit plans</h2><p className="section-subtitle">Real deposits processed directly to your account balance.</p></div>
               <span className="count-tag">10 plans <span className="count-dot" /></span>
             </div>
             <div className="plans-grid">
@@ -556,7 +651,7 @@ function App() {
                 </article>
               ))}
             </div>
-            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Admin-approved transactions:</strong> Deposits and withdrawals are reviewed by an administrator before they change your balance. Minimum withdrawal is $40.</p></div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Minimum withdrawal is $40.</p></div>
           </section>
 
           <section className="referral-layout" id="referrals">
@@ -606,7 +701,7 @@ function App() {
 
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
-            <div><strong>Reviewed transaction processing</strong><p>Deposits and withdrawals are submitted for administrator approval and change your balance once approved. Withdrawals require minimum $40 and a valid wallet address.</p></div>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address.</p></div>
             <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
           </section>
 
@@ -629,7 +724,7 @@ function App() {
             <div className="modal-icon"><Icon name={modal === 'withdraw' ? 'withdraw' : 'wallet'} size={20} /></div>
             <div className="eyebrow"><span className="eyebrow-line" /> REAL TRANSACTION</div>
             <h2 id="modal-title">{modal === 'withdraw' ? 'Request a withdrawal' : 'Make a deposit'}</h2>
-            <p className="modal-subtitle">Requests are reviewed by an administrator before they change your balance.</p>
+            <p className="modal-subtitle">This will be processed immediately against your account balance.</p>
             <form onSubmit={submitShowcaseAction}>
               <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
               <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
