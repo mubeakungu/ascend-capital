@@ -45,7 +45,7 @@ const TIER_NAMES = [
 const DEPOSIT_PLANS = [
   { deposit: 300, dailyProfit: 8 },
   { deposit: 400, dailyProfit: 11 },
-  { deposit: 500, dailyProfit: 15.5 },
+  { deposit: 500, dailyProfit: 15 },
   { deposit: 750, dailyProfit: 25 },
   { deposit: 1000, dailyProfit: 35 },
   { deposit: 2000, dailyProfit: 70 },
