@@ -62,8 +62,9 @@ if (process.env.NODE_ENV === 'production') {
     });
   });
   
-  // SPA routing - handle all other requests
-  expressApp.get(/.*/, (_request, response) => response.sendFile(resolve(root, 'dist', 'index.html')));
+  // SPA routing - handle all other requests (exclude API routes)
+  // Use negative lookahead to prevent matching /api/* paths
+  expressApp.get(/^(?!\/api\/).*/, (_request, response) => response.sendFile(resolve(root, 'dist', 'index.html')));
 } else {
   // Development: support project download for local development
   app.get('/download/project', (_request, response, next) => {
