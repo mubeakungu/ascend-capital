@@ -1028,6 +1028,7 @@ function App() {
             <div className="action-buttons">
               <button className="button button-secondary" onClick={() => openModal('withdraw')} disabled={!account}><Icon name="withdraw" size={16} /> Withdraw</button>
               <button className="button button-primary" onClick={() => navigate('deposits')} disabled={!account}><Icon name="plus" size={17} /> Make a deposit</button>
+              <a href="/downloads/ascend-capital.apk" download className="button button-primary" style={{textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}><Icon name="plus" size={17} /> Download Android App</a>
             </div>
           </section>
 
