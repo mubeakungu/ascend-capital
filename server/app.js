@@ -2,6 +2,14 @@ import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'no
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import express from 'express';
+import {
+  initializeTierRewardsTable,
+  checkAndCreditTierReward,
+  getTierProgression,
+  getDirectReferralCount,
+  getTeamTotal,
+  TIER_REQUIREMENTS,
+} from './referral-rewards-enhancement-v2.js';
 
 const scryptAsync = promisify(scrypt);
 const SESSION_COOKIE = 'ascend_session';
@@ -9,7 +17,7 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const TX_TYPES = ['deposit', 'withdrawal'];
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
@@ -48,13 +56,14 @@ function accountView(row) {
 function transactionView(row, { admin = false } = {}) {
   const view = {
     id: row.id,
-    type: row.type,
+    type: row.type === 'tier_reward' ? 'Tier Reward' : row.type,
     amount: row.amount_cents / 100,
     reference: row.reference,
     status: row.status,
     createdAt: row.created_at,
     reviewedAt: row.reviewed_at ?? null,
     reviewNote: row.review_note ?? '',
+    isTierReward: row.type === 'tier_reward',
   };
   if (admin) {
     view.accountId = row.account_id;
@@ -233,7 +242,7 @@ export function createApp({ databasePath }) {
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -286,6 +295,9 @@ export function createApp({ databasePath }) {
     CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
   `);
+
+  // Initialize tier rewards table
+  initializeTierRewardsTable(db);
 
   const app = express();
   const secureCookie = process.env.NODE_ENV === 'production';
@@ -466,6 +478,36 @@ export function createApp({ databasePath }) {
         INSERT INTO referral_signups (id, referrer_id, referral_code, referred_account_id, signed_up_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(id, codeRecord.account_id, referralCode.toUpperCase(), accountId, new Date().toISOString());
+
+      // Check tier reward for the person who provided the code
+      const tierReward = checkAndCreditTierReward(db, codeRecord.account_id);
+      if (tierReward) {
+        recordAudit({}, 'referral.tier_reward_credited', codeRecord.account_id, {
+          tierIndex: tierReward.tierId,
+          tierName: tierReward.tierName,
+          amountUSD: tierReward.amountCents / 100,
+          directCount: tierReward.directCount,
+          teamTotal: tierReward.teamTotal,
+        });
+      }
+
+      // Also check tier rewards for the direct referrals of the person who referred this person
+      const directReferrerOf = db.prepare(`
+        SELECT referrer_id FROM referral_signups WHERE referred_account_id = ?
+      `).get(codeRecord.account_id);
+      
+      if (directReferrerOf?.referrer_id) {
+        const grandParentTierReward = checkAndCreditTierReward(db, directReferrerOf.referrer_id);
+        if (grandParentTierReward) {
+          recordAudit({}, 'referral.tier_reward_credited', directReferrerOf.referrer_id, {
+            tierIndex: grandParentTierReward.tierId,
+            tierName: grandParentTierReward.tierName,
+            amountUSD: grandParentTierReward.amountCents / 100,
+            directCount: grandParentTierReward.directCount,
+            teamTotal: grandParentTierReward.teamTotal,
+          });
+        }
+      }
     } catch (error) {
       // Ignore duplicate referral signups
     }
@@ -679,6 +721,39 @@ export function createApp({ databasePath }) {
     return response.status(201).json({ code });
   });
 
+  // Tier progression endpoint (v2)
+  app.get('/api/referrals/tier-progression', requireAccount, (request, response) => {
+    const progression = getTierProgression(db, request.account.id);
+    return response.json(progression);
+  });
+
+  // Earned rewards endpoint (v2)
+  app.get('/api/referrals/earned-rewards', requireAccount, (request, response) => {
+    const rewards = db.prepare(`
+      SELECT tier_index, tier_name, reward_cents, physical_reward,
+        physical_reward_value_cents, direct_referrals_at_award, 
+        team_total_at_award, credited_at
+      FROM referral_tier_rewards
+      WHERE referrer_id = ?
+      ORDER BY tier_index ASC
+    `).all(request.account.id);
+
+    return response.json({
+      directReferrals: getDirectReferralCount(db, request.account.id),
+      teamTotal: getTeamTotal(db, request.account.id),
+      totalRewardsUSD: rewards.reduce((sum, r) => sum + r.reward_cents / 100, 0),
+      rewards: rewards.map(r => ({
+        tierIndex: r.tier_index,
+        tierName: r.tier_name,
+        amountUSD: r.reward_cents / 100,
+        physicalReward: r.physical_reward,
+        directWhen: r.direct_referrals_at_award,
+        teamTotalWhen: r.team_total_at_award,
+        creditedAt: r.credited_at,
+      })),
+    });
+  });
+
   app.get('/api/referrals/stats', requireAccount, (request, response) => {
     const directStats = db.prepare(`
       SELECT COUNT(*) AS direct_count,
@@ -750,7 +825,7 @@ export function createApp({ databasePath }) {
         return response.status(403).json({ error: 'Administrator accounts cannot request transactions.' });
       }
       const input = request.body ?? {};
-      if (!TX_TYPES.includes(input.type)) {
+      if (!TX_TYPES.slice(0, 2).includes(input.type)) {
         return response.status(400).json({ error: 'Type must be deposit or withdrawal.' });
       }
       const amountCents = parseAmountCents(input.amount);
@@ -907,7 +982,7 @@ export function createApp({ databasePath }) {
       params.push(status);
     }
     if (type !== undefined) {
-      if (!TX_TYPES.includes(type)) return response.status(400).json({ error: 'Invalid type filter.' });
+      if (!TX_TYPES.slice(0, 2).includes(type)) return response.status(400).json({ error: 'Invalid type filter.' });
       where.push('t.type = ?');
       params.push(type);
     }
@@ -1062,6 +1137,39 @@ export function createApp({ databasePath }) {
     } catch (error) {
       return next(error);
     }
+  });
+
+  // Admin: view tier rewards for a member
+  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
+
+    const progression = getTierProgression(db, account.id);
+    const rewards = db.prepare(`
+      SELECT tier_index, tier_name, reward_cents, physical_reward,
+        physical_reward_value_cents, direct_referrals_at_award, 
+        team_total_at_award, credited_at, transaction_id
+      FROM referral_tier_rewards
+      WHERE referrer_id = ?
+      ORDER BY tier_index ASC
+    `).all(account.id);
+
+    return response.json({
+      account: { id: account.id, name: account.name, email: account.email },
+      directReferrals: progression.directReferrals,
+      teamTotal: progression.teamTotal,
+      currentTier: progression.currentTierName,
+      earnedRewards: rewards.map(r => ({
+        tierIndex: r.tier_index,
+        tierName: r.tier_name,
+        amountUSD: r.reward_cents / 100,
+        physicalReward: r.physical_reward,
+        directWhen: r.direct_referrals_at_award,
+        teamTotalWhen: r.team_total_at_award,
+        creditedAt: r.credited_at,
+        transactionId: r.transaction_id,
+      })),
+    });
   });
 
   // Admin: view all referral data for a member
