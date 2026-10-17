@@ -750,7 +750,7 @@ export function createApp({ databasePath }) {
     accountStorage: process.env.ACCOUNT_STORAGE_MODE ?? 'local',
   }));
 
-  app.get('/api/public-config', (_request, response) => response.json({
+  app.get('/api/public/config', (_request, response) => response.json({
     binanceWalletAddress: process.env.BINANCE_WALLET_ADDRESS?.trim() ?? '',
   }));
 
