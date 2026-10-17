@@ -41,6 +41,19 @@ const TIER_NAMES = [
   'Star 6', 'Star 7', 'Star 8', 'Crown Leader',
 ];
 
+// Tier requirements: qualify by EITHER direct referrals OR team total (whichever is met first)
+const TIER_REQUIREMENTS_DETAILED = [
+  { direct: 5, team: null },        // Star 1: 5 direct (no team req)
+  { direct: 7, team: 13 },          // Star 2: 7 direct OR 13 team
+  { direct: 8, team: 25 },          // Star 3: 8 direct OR 25 team
+  { direct: 9, team: 40 },          // Star 4: 9 direct OR 40 team
+  { direct: 10, team: 70 },         // Star 5: 10 direct OR 70 team
+  { direct: 11, team: 150 },        // Star 6: 11 direct OR 150 team
+  { direct: 12, team: 400 },        // Star 7: 12 direct OR 400 team
+  { direct: 13, team: 700 },        // Star 8: 13 direct OR 700 team
+  { direct: 14, team: 100 },        // Crown Leader: 14 direct OR 100 team
+];
+
 function accountView(row) {
   return {
     id: row.id,
@@ -199,6 +212,19 @@ function getTierByDirectReferrals(directCount) {
   if (directCount < 60) return 6;
   if (directCount < 100) return 7;
   return 8;
+}
+
+// Get tier based on EITHER direct referrals OR team total (automatic qualification)
+function getTierByProgress(directCount, teamTotal) {
+  for (let i = TIER_REQUIREMENTS_DETAILED.length - 1; i >= 0; i--) {
+    const req = TIER_REQUIREMENTS_DETAILED[i];
+    const directMet = directCount >= req.direct;
+    const teamMet = req.team === null || teamTotal >= req.team;
+    
+    // Qualify if direct count is met AND (no team req OR team total is met)
+    if (directMet && teamMet) return i;
+  }
+  return -1;
 }
 
 export function createApp({ databasePath }) {
@@ -479,33 +505,45 @@ export function createApp({ databasePath }) {
         VALUES (?, ?, ?, ?, ?)
       `).run(id, codeRecord.account_id, referralCode.toUpperCase(), accountId, new Date().toISOString());
 
-      // Check tier reward for the person who provided the code
-      const tierReward = checkAndCreditTierReward(db, codeRecord.account_id);
-      if (tierReward) {
-        recordAudit({}, 'referral.tier_reward_credited', codeRecord.account_id, {
-          tierIndex: tierReward.tierId,
-          tierName: tierReward.tierName,
-          amountUSD: tierReward.amountCents / 100,
-          directCount: tierReward.directCount,
-          teamTotal: tierReward.teamTotal,
-        });
+      // Check tier reward for the person who provided the code - now uses both direct + team totals
+      const directCount = getDirectReferralCount(db, codeRecord.account_id);
+      const teamTotal = getTeamTotal(db, codeRecord.account_id);
+      const tier = getTierByProgress(directCount, teamTotal);
+      
+      if (tier >= 0) {
+        const tierReward = checkAndCreditTierReward(db, codeRecord.account_id);
+        if (tierReward) {
+          recordAudit({}, 'referral.tier_reward_credited', codeRecord.account_id, {
+            tierIndex: tierReward.tierId,
+            tierName: tierReward.tierName,
+            amountUSD: tierReward.amountCents / 100,
+            directCount,
+            teamTotal,
+          });
+        }
       }
 
-      // Also check tier rewards for the direct referrals of the person who referred this person
+      // Also check tier rewards for the direct referrer of this person's referrer
       const directReferrerOf = db.prepare(`
         SELECT referrer_id FROM referral_signups WHERE referred_account_id = ?
       `).get(codeRecord.account_id);
       
       if (directReferrerOf?.referrer_id) {
-        const grandParentTierReward = checkAndCreditTierReward(db, directReferrerOf.referrer_id);
-        if (grandParentTierReward) {
-          recordAudit({}, 'referral.tier_reward_credited', directReferrerOf.referrer_id, {
-            tierIndex: grandParentTierReward.tierId,
-            tierName: grandParentTierReward.tierName,
-            amountUSD: grandParentTierReward.amountCents / 100,
-            directCount: grandParentTierReward.directCount,
-            teamTotal: grandParentTierReward.teamTotal,
-          });
+        const grandDirect = getDirectReferralCount(db, directReferrerOf.referrer_id);
+        const grandTeam = getTeamTotal(db, directReferrerOf.referrer_id);
+        const grandTier = getTierByProgress(grandDirect, grandTeam);
+        
+        if (grandTier >= 0) {
+          const grandParentTierReward = checkAndCreditTierReward(db, directReferrerOf.referrer_id);
+          if (grandParentTierReward) {
+            recordAudit({}, 'referral.tier_reward_credited', directReferrerOf.referrer_id, {
+              tierIndex: grandParentTierReward.tierId,
+              tierName: grandParentTierReward.tierName,
+              amountUSD: grandParentTierReward.amountCents / 100,
+              directCount: grandDirect,
+              teamTotal: grandTeam,
+            });
+          }
         }
       }
     } catch (error) {
@@ -771,7 +809,9 @@ export function createApp({ databasePath }) {
       WHERE referrer_id = ?
     `).get(request.account.id);
 
-    const tier = getTierByDirectReferrals(directStats.direct_count);
+    const directCount = directStats.direct_count;
+    const teamTotal = getTeamTotal(db, request.account.id);
+    const tier = getTierByProgress(directCount, teamTotal);
     const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
     const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
 
@@ -779,10 +819,11 @@ export function createApp({ databasePath }) {
       referralCode: db.prepare('SELECT code FROM referral_codes WHERE account_id = ?').get(request.account.id)?.code || null,
       tier: tierName,
       commissionRate: commissionRate,
-      directReferrals: directStats.direct_count,
+      directReferrals: directCount,
       directVolume: directStats.direct_volume / 100,
       commissionsEarned: commissionStats.commission_count,
       totalEarnings: commissionStats.total_commission_cents / 100,
+      teamTotal,
     });
   });
 
@@ -1200,12 +1241,15 @@ export function createApp({ databasePath }) {
       LIMIT 100
     `).all(account.id);
 
-    const tier = getTierByDirectReferrals(directStats.direct_count);
+    const directCount = directStats.direct_count;
+    const teamTotal = getTeamTotal(db, account.id);
+    const tier = getTierByProgress(directCount, teamTotal);
 
     return response.json({
       account: { id: account.id, name: account.name, email: account.email },
       tier: tier >= 0 ? TIER_NAMES[tier] : null,
-      directReferrals: directStats.direct_count,
+      directReferrals: directCount,
+      teamTotal,
       commissions: commissions.map(c => ({
         id: c.id,
         referredName: c.referred_name,
