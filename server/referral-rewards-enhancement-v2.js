@@ -72,14 +72,6 @@ function getTierByDirectReferrals(directCount) {
   return -1; // No tier yet
 }
 
-// Get direct referral count for a user
-function getDirectReferralCount(db, referrerId) {
-  const result = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
-  `).get(referrerId);
-  return result?.cnt || 0;
-}
-
 // Check and credit tier rewards when new referral is created
 function checkAndCreditTierReward(db, referrerId) {
   // Get current direct referral count
