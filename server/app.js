@@ -568,14 +568,17 @@ export function createApp({ databasePath }) {
     if (!referralSignup) return null;
 
     const referrerId = referralSignup.referrer_id;
-    const directCount = db.prepare(`
-      SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
-    `).get(referrerId).cnt;
 
-    const tier = getTierByDirectReferrals(directCount);
-    if (tier < 0) return null;
+    // Check if this is the first approved deposit from the referred member
+    const previousDeposits = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM transactions
+      WHERE account_id = ? AND type = 'deposit' AND status = 'approved' AND created_at < ?
+    `).get(tx.account_id, tx.created_at).cnt;
 
-    const commissionRate = REFERRAL_COMMISSION_RATES[tier];
+    const isFirstDeposit = previousDeposits === 0;
+    
+    // 5% for first deposit (referral bonus), 2.5% for subsequent (recharge bonus)
+    const commissionRate = isFirstDeposit ? 0.05 : 0.025;
     const commissionCents = Math.round(tx.amount_cents * commissionRate);
 
     const commissionId = randomBytes(16).toString('hex');
@@ -592,7 +595,7 @@ export function createApp({ databasePath }) {
         commissionRate,
         new Date().toISOString(),
       );
-      return { commissionId, amount: commissionCents / 100 };
+      return { commissionId, amount: commissionCents / 100, isFirstDeposit };
     } catch (error) {
       return null;
     }
@@ -1094,6 +1097,7 @@ export function createApp({ databasePath }) {
               recordAudit(request, 'referral.commission_earned', tx.account_id, {
                 amount: commission.amount,
                 commissionId: commission.commissionId,
+                type: commission.isFirstDeposit ? 'first_deposit_bonus_5%' : 'recharge_bonus_2.5%',
               });
             }
 
