@@ -1,4 +1,20 @@
-// Add this to your app.js after the database initialization
+import { randomBytes } from 'crypto';
+
+// Tier names
+const TIER_NAMES = [
+  'Star 1',
+  'Star 2',
+  'Star 3',
+  'Star 4',
+  'Star 5',
+  'Star 6',
+  'Star 7',
+  'Star 8',
+  'Crown Leader',
+];
+
+// Direct referrals required to reach each tier
+const TIER_REQUIREMENTS = [1, 3, 6, 10, 15, 25, 40, 60, 100];
 
 // Tier reward amounts (in cents)
 const TIER_REWARDS = {
@@ -36,6 +52,16 @@ function initializeTierRewardsTable(db) {
     CREATE INDEX IF NOT EXISTS tier_rewards_referrer_idx ON referral_tier_rewards(referrer_id);
     CREATE INDEX IF NOT EXISTS tier_rewards_tier_idx ON referral_tier_rewards(referrer_id, tier_index);
   `);
+}
+
+// Get tier by direct referral count
+function getTierByDirectReferrals(directCount) {
+  for (let i = TIER_REQUIREMENTS.length - 1; i >= 0; i--) {
+    if (directCount >= TIER_REQUIREMENTS[i]) {
+      return i;
+    }
+  }
+  return -1; // No tier yet
 }
 
 // Check and credit tier rewards when new referral is created
@@ -139,14 +165,13 @@ function getTierProgression(db, referrerId) {
   let progressToNext = 0;
 
   if (currentTier >= 0) {
-    const thresholds = [1, 3, 6, 10, 15, 25, 40, 60, 100];
-    currentTierThreshold = thresholds[currentTier];
+    currentTierThreshold = TIER_REQUIREMENTS[currentTier];
     if (currentTier < 8) {
-      nextTierThreshold = thresholds[currentTier + 1];
+      nextTierThreshold = TIER_REQUIREMENTS[currentTier + 1];
       progressToNext = Math.round((directCount / nextTierThreshold) * 100);
     }
   } else {
-    nextTierThreshold = 1;
+    nextTierThreshold = TIER_REQUIREMENTS[0];
     progressToNext = 0;
   }
 
@@ -175,6 +200,9 @@ export {
   initializeTierRewardsTable,
   checkAndCreditTierReward,
   getTierProgression,
+  getTierByDirectReferrals,
+  TIER_NAMES,
+  TIER_REQUIREMENTS,
   TIER_REWARDS,
   TIER_PHYSICAL_REWARDS,
 };
