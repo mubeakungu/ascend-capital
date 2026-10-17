@@ -692,6 +692,15 @@ function App() {
   return (
     <div className="app-shell">
       <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        html, body {
+          margin: 0;
+          padding: 0;
+        }
+
         :root {
           --primary-blue: #003366;
           --dark-blue: #001a33;
@@ -704,6 +713,7 @@ function App() {
           --bg-dark: #0a0a0a;
           --bg-card: #1a1a1a;
           --border: #D4AF37;
+          --mobile-breakpoint: 768px;
         }
 
         .brand-logo {
@@ -939,6 +949,386 @@ function App() {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+          .app-shell {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 80%;
+            max-width: 300px;
+            background: var(--bg-dark);
+            z-index: 1000;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+            padding: 16px;
+            overflow-y: auto;
+          }
+
+          .sidebar-open {
+            transform: translateX(0);
+          }
+
+          .mobile-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            border: none;
+            padding: 0;
+            margin: 0;
+          }
+
+          .main-content {
+            flex: 1;
+            width: 100%;
+            padding: 0;
+          }
+
+          .topbar {
+            padding: 12px;
+            gap: 12px;
+            flex-wrap: wrap;
+          }
+
+          .breadcrumbs {
+            font-size: 12px;
+            flex: 1;
+            min-width: 150px;
+          }
+
+          .topbar-right {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+          }
+
+          .secure-label {
+            display: none;
+          }
+
+          .page-content {
+            padding: 16px;
+          }
+
+          .balance-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .balance-card {
+            padding: 16px;
+          }
+
+          .balance-value {
+            font-size: 24px;
+          }
+
+          .action-buttons {
+            flex-direction: column;
+            gap: 10px;
+          }
+
+          .action-buttons .button,
+          .action-buttons a {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 14px;
+          }
+
+          .plans-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .plan-card {
+            padding: 16px;
+          }
+
+          .plan-deposit {
+            font-size: 28px;
+          }
+
+          .rank-table {
+            font-size: 12px;
+          }
+
+          .rank-table th,
+          .rank-table td {
+            padding: 8px 4px;
+          }
+
+          .section-heading {
+            flex-direction: column;
+            gap: 8px;
+          }
+
+          .graph-container {
+            padding: 12px;
+            margin-bottom: 16px;
+          }
+
+          .graph-stats {
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-top: 12px;
+          }
+
+          .stat-item {
+            padding: 12px;
+          }
+
+          .stat-label {
+            font-size: 10px;
+          }
+
+          .stat-value {
+            font-size: 16px;
+          }
+
+          .activity-item {
+            padding: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
+          .activity-item strong {
+            font-size: 14px;
+          }
+
+          .modal {
+            width: 90%;
+            margin: 20px auto;
+            max-height: 90vh;
+            border-radius: 12px;
+          }
+
+          .modal-backdrop {
+            padding: 16px;
+          }
+
+          .button {
+            padding: 10px 14px;
+            font-size: 13px;
+            min-height: 44px;
+            border-radius: 8px;
+          }
+
+          .button-primary,
+          .button-secondary {
+            width: 100%;
+          }
+
+          input[type="text"],
+          input[type="email"],
+          input[type="password"],
+          input[type="number"] {
+            padding: 12px;
+            font-size: 16px;
+            min-height: 44px;
+          }
+
+          .account-field {
+            margin-bottom: 12px;
+          }
+
+          .account-field label {
+            display: block;
+            margin-bottom: 8px;
+          }
+
+          .daily-income-card {
+            padding: 16px;
+            margin: 16px 0;
+          }
+
+          .daily-income-value {
+            font-size: 28px;
+          }
+
+          .header-wallet {
+            flex-direction: column;
+            gap: 8px;
+          }
+
+          .header-wallet code {
+            word-break: break-all;
+            font-size: 11px;
+            padding: 8px;
+          }
+
+          h1 {
+            font-size: 24px;
+            margin: 12px 0;
+          }
+
+          h2 {
+            font-size: 18px;
+          }
+
+          .welcome-subtitle {
+            font-size: 14px;
+          }
+
+          .eyebrow {
+            font-size: 11px;
+          }
+
+          .toast {
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 14px;
+          }
+
+          .standalone-card {
+            margin: 16px;
+            padding: 20px;
+          }
+
+          .standalone-brand {
+            padding: 16px;
+          }
+        }
+
+        /* Tablet and larger screens */
+        @media (min-width: 769px) {
+          .app-shell {
+            display: flex;
+            min-height: 100vh;
+          }
+
+          .sidebar {
+            width: 280px;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            border-right: 1px solid rgba(212, 175, 55, 0.1);
+            overflow-y: auto;
+          }
+
+          .mobile-overlay,
+          .mobile-menu-button {
+            display: none;
+          }
+
+          .main-content {
+            flex: 1;
+            overflow-y: auto;
+          }
+
+          .page-content {
+            padding: 32px 40px;
+          }
+
+          .balance-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+          }
+
+          .plans-grid {
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
+          }
+
+          .action-buttons {
+            flex-direction: row;
+            gap: 16px;
+          }
+
+          .action-buttons .button,
+          .action-buttons a {
+            flex: 1;
+          }
+
+          .rank-table {
+            font-size: 14px;
+          }
+
+          .modal {
+            width: 500px;
+          }
+        }
+
+        /* Large screens (desktop) */
+        @media (min-width: 1200px) {
+          .page-content {
+            padding: 40px 60px;
+            max-width: 1400px;
+            margin: 0 auto;
+          }
+
+          .plans-grid {
+            grid-template-columns: repeat(5, 1fr);
+          }
+
+          .balance-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+
+          .modal {
+            width: 600px;
+          }
+        }
+
+        /* Touch-friendly buttons and inputs */
+        @media (max-height: 600px) {
+          .topbar {
+            padding: 8px 12px;
+          }
+
+          .page-content {
+            padding: 12px;
+          }
+        }
+
+        /* Small phones */
+        @media (max-width: 480px) {
+          h1 {
+            font-size: 20px;
+          }
+
+          h2 {
+            font-size: 16px;
+          }
+
+          .balance-value {
+            font-size: 20px;
+          }
+
+          .plan-deposit {
+            font-size: 24px;
+          }
+
+          .daily-income-value {
+            font-size: 24px;
+          }
+
+          .page-content {
+            padding: 12px;
+          }
+
+          .modal {
+            width: 95%;
+          }
+
+          .button {
+            font-size: 12px;
+            padding: 8px 12px;
+          }
         }
       `}</style>
 
