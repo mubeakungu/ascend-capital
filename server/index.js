@@ -62,9 +62,18 @@ if (process.env.NODE_ENV === 'production') {
     });
   });
   
-  // SPA routing - handle all other requests (exclude API routes)
-  // Use negative lookahead to prevent matching /api/* paths
-  expressApp.get(/^(?!\/api\/).*/, (_request, response) => response.sendFile(resolve(root, 'dist', 'index.html')));
+  // SPA routing fallback - MUST come AFTER all other routes
+  // This middleware explicitly checks the path and only serves index.html for non-API routes
+  expressApp.use((_request, response, next) => {
+    // If the path starts with /api or /download, skip this middleware
+    if (_request.path.startsWith('/api') || _request.path.startsWith('/download')) {
+      return next();
+    }
+    
+    // For all other paths (SPA routes), serve index.html
+    // This allows React Router to handle client-side routing
+    response.sendFile(resolve(root, 'dist', 'index.html'));
+  });
 } else {
   // Development: support project download for local development
   app.get('/download/project', (_request, response, next) => {
