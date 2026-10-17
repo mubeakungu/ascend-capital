@@ -1087,14 +1087,64 @@ export function createApp({ databasePath }) {
             note,
           });
 
-          // Apply referral commission if approved
-          if (decision === 'approved') {
+          // Apply referral commission and tier rewards if deposit is approved
+          if (decision === 'approved' && tx.type === 'deposit') {
             const commission = applyReferralCommission(tx.id);
             if (commission) {
               recordAudit(request, 'referral.commission_earned', tx.account_id, {
                 amount: commission.amount,
                 commissionId: commission.commissionId,
               });
+            }
+
+            // Check and credit tier rewards for the referrer
+            const referralSignup = db.prepare(`
+              SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
+            `).get(tx.account_id);
+
+            if (referralSignup?.referrer_id) {
+              const directCount = getDirectReferralCount(db, referralSignup.referrer_id);
+              const teamTotal = getTeamTotal(db, referralSignup.referrer_id);
+              const tier = getTierByProgress(directCount, teamTotal);
+              
+              if (tier >= 0) {
+                const tierReward = checkAndCreditTierReward(db, referralSignup.referrer_id);
+                if (tierReward) {
+                  recordAudit(request, 'referral.tier_reward_credited', referralSignup.referrer_id, {
+                    tierIndex: tierReward.tierId,
+                    tierName: tierReward.tierName,
+                    amountUSD: tierReward.amountCents / 100,
+                    directCount,
+                    teamTotal,
+                    triggeredBy: tx.account_id,
+                  });
+                }
+              }
+
+              // Also check tier rewards for the grandparent (referrer's referrer)
+              const grandParentSignup = db.prepare(`
+                SELECT referrer_id FROM referral_signups WHERE referred_account_id = ?
+              `).get(referralSignup.referrer_id);
+              
+              if (grandParentSignup?.referrer_id) {
+                const grandDirect = getDirectReferralCount(db, grandParentSignup.referrer_id);
+                const grandTeam = getTeamTotal(db, grandParentSignup.referrer_id);
+                const grandTier = getTierByProgress(grandDirect, grandTeam);
+                
+                if (grandTier >= 0) {
+                  const grandParentTierReward = checkAndCreditTierReward(db, grandParentSignup.referrer_id);
+                  if (grandParentTierReward) {
+                    recordAudit(request, 'referral.tier_reward_credited', grandParentSignup.referrer_id, {
+                      tierIndex: grandParentTierReward.tierId,
+                      tierName: grandParentTierReward.tierName,
+                      amountUSD: grandParentTierReward.amountCents / 100,
+                      directCount: grandDirect,
+                      teamTotal: grandTeam,
+                      triggeredBy: tx.account_id,
+                    });
+                  }
+                }
+              }
             }
           }
         });
