@@ -54,6 +54,14 @@ function initializeTierRewardsTable(db) {
   `);
 }
 
+// Get direct referral count for a user
+function getDirectReferralCount(db, referrerId) {
+  const result = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
+  `).get(referrerId);
+  return result?.cnt || 0;
+}
+
 // Get tier by direct referral count
 function getTierByDirectReferrals(directCount) {
   for (let i = TIER_REQUIREMENTS.length - 1; i >= 0; i--) {
@@ -62,6 +70,14 @@ function getTierByDirectReferrals(directCount) {
     }
   }
   return -1; // No tier yet
+}
+
+// Get direct referral count for a user
+function getDirectReferralCount(db, referrerId) {
+  const result = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
+  `).get(referrerId);
+  return result?.cnt || 0;
 }
 
 // Check and credit tier rewards when new referral is created
@@ -201,6 +217,7 @@ export {
   checkAndCreditTierReward,
   getTierProgression,
   getTierByDirectReferrals,
+  getDirectReferralCount,
   TIER_NAMES,
   TIER_REQUIREMENTS,
   TIER_REWARDS,
