@@ -17,7 +17,7 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward'];
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
@@ -39,6 +39,20 @@ const REFERRAL_COMMISSION_RATES = [
 const TIER_NAMES = [
   'Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5',
   'Star 6', 'Star 7', 'Star 8', 'Crown Leader',
+];
+
+// Deposit plans: amount → daily profit
+const DEPOSIT_PLANS = [
+  { deposit: 300, dailyProfit: 8 },
+  { deposit: 400, dailyProfit: 11 },
+  { deposit: 500, dailyProfit: 15.5 },
+  { deposit: 750, dailyProfit: 25 },
+  { deposit: 1000, dailyProfit: 35 },
+  { deposit: 2000, dailyProfit: 70 },
+  { deposit: 5000, dailyProfit: 180 },
+  { deposit: 10000, dailyProfit: 370 },
+  { deposit: 20000, dailyProfit: 750 },
+  { deposit: 35000, dailyProfit: 1400 },
 ];
 
 // Tier requirements: qualify by EITHER direct referrals OR team total (whichever is met first)
@@ -67,9 +81,14 @@ function accountView(row) {
 }
 
 function transactionView(row, { admin = false } = {}) {
+  const typeMap = {
+    'tier_reward': 'Tier Reward',
+    'trading_profit': 'Trading Profit',
+  };
+  
   const view = {
     id: row.id,
-    type: row.type === 'tier_reward' ? 'Tier Reward' : row.type,
+    type: typeMap[row.type] || row.type,
     amount: row.amount_cents / 100,
     reference: row.reference,
     status: row.status,
@@ -77,6 +96,7 @@ function transactionView(row, { admin = false } = {}) {
     reviewedAt: row.reviewed_at ?? null,
     reviewNote: row.review_note ?? '',
     isTierReward: row.type === 'tier_reward',
+    isTradingProfit: row.type === 'trading_profit',
   };
   if (admin) {
     view.accountId = row.account_id;
@@ -227,6 +247,17 @@ function getTierByProgress(directCount, teamTotal) {
   return -1;
 }
 
+// Get daily profit amount for a deposit
+function getDailyProfitForDeposit(depositCents) {
+  const depositAmount = depositCents / 100;
+  for (let i = DEPOSIT_PLANS.length - 1; i >= 0; i--) {
+    if (depositAmount >= DEPOSIT_PLANS[i].deposit) {
+      return DEPOSIT_PLANS[i].dailyProfit;
+    }
+  }
+  return 0;
+}
+
 export function createApp({ databasePath }) {
   const db = new DatabaseSync(databasePath);
   db.exec(`
@@ -320,6 +351,17 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
+    CREATE TABLE IF NOT EXISTS trading_ledger (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      deposit_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+      profit_cents INTEGER NOT NULL CHECK(profit_cents > 0),
+      profit_date TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id);
+    CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id);
+    CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date);
   `);
 
   // Initialize tier rewards table
@@ -634,7 +676,74 @@ export function createApp({ databasePath }) {
     }
   }
 
+  // Apply daily trading profits to all active deposits
+  function applyDailyTradingProfits() {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    const activeDeposits = db.prepare(`
+      SELECT t.id, t.account_id, t.amount_cents, t.created_at
+      FROM transactions t
+      WHERE t.type = 'deposit' AND t.status = 'approved'
+      ORDER BY t.account_id
+    `).all();
+
+    for (const deposit of activeDeposits) {
+      // Check if profit already credited today
+      const alreadyCredited = db.prepare(`
+        SELECT id FROM trading_ledger
+        WHERE deposit_transaction_id = ? AND profit_date = ?
+      `).get(deposit.id, today);
+
+      if (alreadyCredited) continue;
+
+      // Calculate daily profit based on plan
+      const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
+      if (dailyProfit <= 0) continue;
+
+      const profitCents = Math.round(dailyProfit * 100);
+      const ledgerId = randomBytes(16).toString('hex');
+
+      try {
+        withTransaction(() => {
+          // Record in trading ledger
+          db.prepare(`
+            INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).run(ledgerId, deposit.account_id, deposit.id, profitCents, today, new Date().toISOString());
+
+          // Credit profit as approved transaction (no admin review needed)
+          const txId = randomBytes(16).toString('hex');
+          db.prepare(`
+            INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+            VALUES (?, ?, 'trading_profit', ?, ?, 'approved', ?)
+          `).run(txId, deposit.account_id, profitCents, `Trading profit from ${today}`, new Date().toISOString());
+        });
+      } catch (error) {
+        console.error(`Failed to credit profit for deposit ${deposit.id}:`, error);
+      }
+    }
+  }
+
+  // Run daily trading profit calculations every day at midnight UTC
+  function scheduleDailyTradingProfits() {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    
+    const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+    
+    setTimeout(() => {
+      applyDailyTradingProfits();
+      // Run daily after first execution
+      setInterval(() => {
+        applyDailyTradingProfits();
+      }, 24 * 60 * 60 * 1000); // 24 hours
+    }, timeUntilMidnight);
+  }
+
   seedInitialAdmin();
+  scheduleDailyTradingProfits();
 
   app.get('/api/health', (_request, response) => response.json({
     status: 'ok',
@@ -888,6 +997,38 @@ export function createApp({ databasePath }) {
         email: r.email,
         signedUpAt: r.signed_up_at,
         totalDeposits: r.total_deposits / 100,
+      })),
+    });
+  });
+
+  app.get('/api/trading/history', requireAccount, (request, response) => {
+    const profits = db.prepare(`
+      SELECT
+        tl.id,
+        tl.profit_cents,
+        tl.profit_date,
+        tl.created_at,
+        t.amount_cents AS deposit_amount,
+        t.created_at AS deposit_date
+      FROM trading_ledger tl
+      JOIN transactions t ON t.id = tl.deposit_transaction_id
+      WHERE tl.account_id = ?
+      ORDER BY tl.profit_date DESC
+      LIMIT 365
+    `).all(request.account.id);
+
+    const totalProfit = profits.reduce((sum, p) => sum + (p.profit_cents / 100), 0);
+    const totalProfitDays = new Set(profits.map(p => p.profit_date)).size;
+
+    return response.json({
+      totalProfit,
+      totalProfitDays,
+      profits: profits.map(p => ({
+        id: p.id,
+        profitAmount: p.profit_cents / 100,
+        profitDate: p.profit_date,
+        depositAmount: p.deposit_amount / 100,
+        creditedAt: p.created_at,
       })),
     });
   });
@@ -1375,6 +1516,60 @@ export function createApp({ databasePath }) {
         createdAt: row.created_at,
       })),
     });
+  });
+
+  app.get('/api/admin/trading/ledger', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+    const { accountId } = request.query;
+    let sql = `
+      SELECT
+        tl.id,
+        tl.account_id,
+        tl.profit_cents,
+        tl.profit_date,
+        tl.created_at,
+        a.name AS account_name,
+        a.email AS account_email,
+        t.amount_cents AS deposit_amount
+      FROM trading_ledger tl
+      JOIN accounts a ON a.id = tl.account_id
+      JOIN transactions t ON t.id = tl.deposit_transaction_id
+    `;
+    const params = [];
+
+    if (accountId) {
+      sql += ' WHERE tl.account_id = ?';
+      params.push(accountId);
+    }
+
+    sql += ' ORDER BY tl.profit_date DESC LIMIT 500';
+
+    const rows = db.prepare(sql).all(...params);
+    const totalProfit = rows.reduce((sum, r) => sum + (r.profit_cents / 100), 0);
+
+    return response.json({
+      totalProfit,
+      count: rows.length,
+      ledger: rows.map(r => ({
+        id: r.id,
+        accountId: r.account_id,
+        accountName: r.account_name,
+        accountEmail: r.account_email,
+        profitAmount: r.profit_cents / 100,
+        depositAmount: r.deposit_amount / 100,
+        profitDate: r.profit_date,
+        creditedAt: r.created_at,
+      })),
+    });
+  });
+
+  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAccount, requireAdmin, (request, response, next) => {
+    try {
+      applyDailyTradingProfits();
+      recordAudit(request, 'admin.trading_profits_applied', null, {});
+      return response.json({ ok: true, message: 'Daily trading profits applied.' });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
