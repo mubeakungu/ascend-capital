@@ -561,25 +561,58 @@ export function createApp({ databasePath }) {
 
     if (!tx || tx.type !== 'deposit' || tx.status !== 'approved') return null;
 
-    const referralSignup = db.prepare(`
-      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
-    `).get(tx.account_id);
-
-    if (!referralSignup) return null;
-
-    const referrerId = referralSignup.referrer_id;
-
-    // Check if this is the first approved deposit from the referred member
+    // Check if this is the first approved deposit from the member
     const previousDeposits = db.prepare(`
       SELECT COUNT(*) AS cnt FROM transactions
       WHERE account_id = ? AND type = 'deposit' AND status = 'approved' AND created_at < ?
     `).get(tx.account_id, tx.created_at).cnt;
 
     const isFirstDeposit = previousDeposits === 0;
+
+    const referralSignup = db.prepare(`
+      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
+    `).get(tx.account_id);
+
+    const referrerId = referralSignup?.referrer_id;
     
-    // 5% for first deposit (referral bonus), 2.5% for subsequent (recharge bonus)
-    const commissionRate = isFirstDeposit ? 0.05 : 0.025;
-    const commissionCents = Math.round(tx.amount_cents * commissionRate);
+    let commissionCents;
+    let commissionRate;
+    let beneficiaryId = referrerId;
+    let bonusType;
+    
+    if (isFirstDeposit) {
+      if (referrerId) {
+        // 5% of first deposit amount goes to referrer (referral bonus)
+        commissionRate = 0.05;
+        commissionCents = Math.round(tx.amount_cents * commissionRate);
+        bonusType = 'referral_bonus_5%';
+      } else {
+        // Non-referred member: 2.5% of first deposit to themselves
+        commissionRate = 0.025;
+        commissionCents = Math.round(tx.amount_cents * commissionRate);
+        beneficiaryId = tx.account_id;
+        bonusType = 'first_deposit_bonus_2.5%';
+      }
+    } else {
+      // Recharge deposit - subsequent deposits
+      const firstDeposit = db.prepare(`
+        SELECT amount_cents FROM transactions
+        WHERE account_id = ? AND type = 'deposit' AND status = 'approved'
+        ORDER BY created_at ASC
+        LIMIT 1
+      `).get(tx.account_id);
+      
+      if (!firstDeposit) return null;
+      
+      commissionRate = 0.025;
+      commissionCents = Math.round(firstDeposit.amount_cents * commissionRate);
+      bonusType = 'recharge_bonus_2.5%';
+      
+      // If no referrer, the member gets the 2.5% recharge bonus themselves
+      if (!referrerId) {
+        beneficiaryId = tx.account_id;
+      }
+    }
 
     const commissionId = randomBytes(16).toString('hex');
     try {
@@ -588,14 +621,14 @@ export function createApp({ databasePath }) {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         commissionId,
-        referrerId,
+        beneficiaryId,
         transactionId,
         tx.account_id,
         commissionCents,
         commissionRate,
         new Date().toISOString(),
       );
-      return { commissionId, amount: commissionCents / 100, isFirstDeposit };
+      return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId };
     } catch (error) {
       return null;
     }
@@ -1097,7 +1130,8 @@ export function createApp({ databasePath }) {
               recordAudit(request, 'referral.commission_earned', tx.account_id, {
                 amount: commission.amount,
                 commissionId: commission.commissionId,
-                type: commission.isFirstDeposit ? 'first_deposit_bonus_5%' : 'recharge_bonus_2.5%',
+                type: commission.bonusType,
+                beneficiary: commission.beneficiaryId === tx.account_id ? 'member_self' : 'referrer',
               });
             }
 
