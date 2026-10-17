@@ -444,6 +444,21 @@ function App() {
     return () => window.removeEventListener('popstate', syncRoute);
   }, []);
 
+  // Redirect to login if not authenticated and trying to access protected routes
+  useEffect(() => {
+    if (accountLoading) return; // Wait for account check to complete
+    
+    const protectedRoutes = ['/', '/deposits', '/referrals', '/rewards'];
+    const currentRoute = route;
+    
+    if (!account && protectedRoutes.includes(currentRoute)) {
+      // User not logged in, redirect to login
+      window.history.pushState({}, '', '/login');
+      setRoute('/login');
+      setAccountMode('login');
+    }
+  }, [account, accountLoading, route]);
+
   const currentPage = activeNav === 'admin' ? 'Member admin' : navItems.find((item) => item.id === activeNav)?.label ?? 'Overview';
 
   function openModal(kind, preset = '') {
