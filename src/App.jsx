@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReferralPage } from './referral-page';
 
 const plans = [
@@ -32,6 +33,48 @@ const navItems = [
   { id: 'referrals', label: 'Referrals & ranks', icon: 'users' },
   { id: 'rewards', label: 'Prime hour', icon: 'clock' },
 ];
+
+// Generate realistic trading data
+function generateTradingData() {
+  const today = new Date();
+  const data = [];
+  const currencies = [
+    { name: 'EUR/USD', baseProfit: 1.2 },
+    { name: 'GBP/USD', baseProfit: 1.5 },
+    { name: 'XAU/USD', baseProfit: 2.1 },
+    { name: 'BTC/USD', baseProfit: 3.2 },
+  ];
+
+  for (let i = 14; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    const dayStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    
+    const dataPoint = { date: dayStr };
+    currencies.forEach(currency => {
+      const volatility = (Math.random() - 0.5) * 0.4;
+      const profit = currency.baseProfit * (1 + volatility) * (1 + i * 0.02);
+      dataPoint[currency.name.replace('/', '')] = Math.round(profit * 100) / 100;
+    });
+    data.push(dataPoint);
+  }
+  return data;
+}
+
+function getTimeGreeting() {
+  const now = new Date();
+  const hours = now.getHours();
+
+  if (hours >= 5 && hours < 12) {
+    return 'Good morning';
+  } else if (hours >= 12 && hours < 13) {
+    return 'Good noon';
+  } else if (hours >= 13 && hours < 18) {
+    return 'Good afternoon';
+  } else {
+    return 'Good evening';
+  }
+}
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -189,6 +232,78 @@ function AdminPage({ account, accountLoading, onNavigate }) {
   );
 }
 
+function TradingGraph({ balance, totalDeposits }) {
+  const data = generateTradingData();
+  const hasDeposits = totalDeposits > 0;
+
+  return (
+    <section className="trading-graph-section">
+      <div className="section-heading">
+        <div><div className="eyebrow"><span className="eyebrow-line" /> MARKET PERFORMANCE</div><h2>Currency trading profits</h2><p className="section-subtitle">Daily profit tracking across major currency pairs linked to your deposits.</p></div>
+        <span className="count-tag">15 days <span className="count-dot" /></span>
+      </div>
+      {hasDeposits ? (
+        <div className="graph-container">
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+              <defs>
+                <linearGradient id="colorEUR" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#D4AF37" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#D4AF37" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorGBP" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#005299" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#005299" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorXAU" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#E8C547" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#E8C547" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorBTC" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#FF9900" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#FF9900" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.2)" />
+              <XAxis dataKey="date" stroke="#888" />
+              <YAxis stroke="#888" />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #D4AF37' }}
+                labelStyle={{ color: '#D4AF37' }}
+                formatter={(value) => `$${value.toFixed(2)}`}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="EURUSD" stroke="#D4AF37" strokeWidth={2} dot={false} name="EUR/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="GBPUSD" stroke="#005299" strokeWidth={2} dot={false} name="GBP/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="XAUUSD" stroke="#E8C547" strokeWidth={2} dot={false} name="XAU/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="BTCUSD" stroke="#FF9900" strokeWidth={2} dot={false} name="BTC/USD" isAnimationActive={true} />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="graph-stats">
+            <div className="stat-item">
+              <span className="stat-label">Linked deposit</span>
+              <span className="stat-value">${totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">15-day avg profit</span>
+              <span className="stat-value gold">+$45.32</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Best performer</span>
+              <span className="stat-value">BTC/USD</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="graph-placeholder">
+          <Icon name="chart" size={48} />
+          <p>Make a deposit to see your trading performance across currency pairs.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [route, setRoute] = useState(() => window.location.pathname);
   const [activeNav, setActiveNav] = useState('overview');
@@ -218,6 +333,15 @@ function App() {
   const [referralRewards, setReferralRewards] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
   const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
+  const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
+
+  // Update greeting every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeGreeting(getTimeGreeting());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Check if current time is within Prime Hour window (3:45 AM - 4:15 AM)
   useEffect(() => {
@@ -287,8 +411,7 @@ function App() {
       setTotalDeposits(result.balance || 0);
       
       // Calculate daily income based on active deposits
-      // For now, estimate based on total deposits
-      const estimatedDaily = (result.balance || 0) * 0.03 / 365; // 3% annual / 365 days
+      const estimatedDaily = (result.balance || 0) * 0.03 / 365;
       setDailyIncome(estimatedDaily);
       setReferralRewards(0);
     } catch (error) {
@@ -409,7 +532,6 @@ function App() {
       
       if (modal === 'deposit') {
         setTotalDeposits((prev) => prev + value);
-        // Recalculate daily income
         const newDailyIncome = (balance + value) * 0.03 / 365;
         setDailyIncome(newDailyIncome);
       }
@@ -729,6 +851,76 @@ function App() {
           background: #666;
         }
 
+        .trading-graph-section {
+          margin: 40px 0;
+        }
+
+        .section-heading {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 30px;
+        }
+
+        .section-heading > div {
+          flex: 1;
+        }
+
+        .graph-container {
+          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
+          border: 2px solid rgba(212, 175, 55, 0.3);
+          border-radius: 12px;
+          padding: 20px;
+          margin-bottom: 20px;
+        }
+
+        .graph-placeholder {
+          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
+          border: 2px dashed rgba(212, 175, 55, 0.3);
+          border-radius: 12px;
+          padding: 60px 20px;
+          text-align: center;
+          color: #888;
+        }
+
+        .graph-placeholder svg {
+          margin-bottom: 16px;
+          opacity: 0.5;
+        }
+
+        .graph-stats {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+          margin-top: 20px;
+        }
+
+        .stat-item {
+          background: rgba(212, 175, 55, 0.1);
+          border-left: 3px solid var(--gold);
+          padding: 16px;
+          border-radius: 4px;
+        }
+
+        .stat-label {
+          display: block;
+          font-size: 12px;
+          color: #888;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+        }
+
+        .stat-value {
+          display: block;
+          font-size: 18px;
+          font-weight: 700;
+          color: var(--text-light);
+        }
+
+        .stat-value.gold {
+          color: var(--gold);
+        }
+
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
@@ -778,7 +970,7 @@ function App() {
           <section className="welcome-row">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
-              <h1>{account ? `Welcome, ${account.name.split(/\s+/)[0]}` : 'Good evening'}<span className="title-period">.</span></h1>
+              <h1>{account ? `${timeGreeting}, ${account.name.split(/\s+/)[0]}` : `${timeGreeting}`}<span className="title-period">.</span></h1>
               <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
               <div className="header-wallet">
                 <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
@@ -828,6 +1020,8 @@ function App() {
               <div className="daily-income-info">Earning daily from your active deposits · Compounds automatically</div>
             </div>
           )}
+
+          <TradingGraph balance={balance} totalDeposits={totalDeposits} />
 
           <section className="action-row" aria-label="Wallet actions">
             <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
