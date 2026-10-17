@@ -5,13 +5,13 @@
   "main": "dist-electron/main.js",
   "homepage": "./",
   "scripts": {
-    "dev": "concurrently \"vite\" \"node server.js\"",
-    "dev-electron": "concurrently \"vite\" \"node server.js\" \"electron .\"",
+    "dev": "concurrently \"vite\" \"node src/server.js\"",
+    "dev-electron": "concurrently \"vite\" \"node src/server.js\" \"electron .\"",
     "build": "vite build",
     "build-web": "vite build",
     "build-electron": "vite build && electron-builder",
     "preview": "vite preview",
-    "start": "node server.js",
+    "start": "node src/server.js",
     "electron": "electron .",
     "electron-dev": "electron-builder --publish never",
     "pack": "electron-builder --dir",
@@ -36,8 +36,8 @@
     "productName": "Ascend Capital",
     "files": [
       "dist/**/*",
-      "server.js",
-      "app.js",
+      "src/server.js",
+      "src/app.js",
       "dist-electron/**/*",
       "public/**/*"
     ],
