@@ -1,37 +1,69 @@
 {
-  "name": "ascend-capital-mobile",
+  "name": "ascend-capital",
   "version": "1.0.0",
-  "main": "node_modules/expo/AppEntry.js",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "homepage": "./",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web",
-    "eject": "expo eject",
-    "build-android": "eas build --platform android",
-    "build-android-apk": "eas build --platform android --local",
-    "submit": "eas submit --platform android"
+    "dev": "concurrently \"vite\" \"node server.js\"",
+    "dev-electron": "concurrently \"vite\" \"node server.js\" \"electron .\"",
+    "build": "vite build",
+    "build-web": "vite build",
+    "build-electron": "vite build && electron-builder",
+    "preview": "vite preview",
+    "start": "node server.js",
+    "electron": "electron .",
+    "electron-dev": "electron-builder --publish never",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "dependencies": {
-    "expo": "^51.0.0",
-    "expo-build-properties": "^0.12.0",
-    "expo-secure-store": "^12.0.0",
+    "express": "^4.18.2",
     "react": "^18.2.0",
-    "react-native": "0.74.1",
-    "react-native-gesture-handler": "^2.14.1",
-    "react-native-reanimated": "^3.8.1",
-    "react-native-safe-area-context": "^4.8.2",
-    "react-native-screens": "^3.29.0",
-    "@react-navigation/native": "^6.1.13",
-    "@react-navigation/bottom-tabs": "^6.5.12",
-    "recharts-native": "^0.0.1",
-    "axios": "^1.7.2"
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.0",
-    "@types/react": "^18.2.0",
-    "@types/react-native": "^0.74.0",
-    "typescript": "^5.3.3"
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.4",
+    "electron-is-dev": "^3.0.1",
+    "vite": "^5.0.8"
   },
-  "private": true
+  "build": {
+    "appId": "com.ascendcapital.app",
+    "productName": "Ascend Capital",
+    "files": [
+      "dist/**/*",
+      "server.js",
+      "app.js",
+      "dist-electron/**/*",
+      "public/**/*"
+    ],
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
 }
