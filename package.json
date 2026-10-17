@@ -2,11 +2,20 @@
   "name": "ascend-capital",
   "version": "1.0.0",
   "type": "module",
+  "main": "dist-electron/main.js",
+  "homepage": "./",
   "scripts": {
     "dev": "concurrently \"vite\" \"node server.js\"",
-    "build": "vite build",
+    "dev-electron": "concurrently \"vite\" \"node server.js\" \"electron .\"",
+    "build": "vite build && electron-builder",
+    "build-web": "vite build",
+    "build-electron": "vite build && electron-builder",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "node server.js",
+    "electron": "electron .",
+    "electron-dev": "electron-builder --publish never",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -15,7 +24,51 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.4",
+    "electron-is-dev": "^3.0.1",
     "vite": "^5.0.8"
+  },
+  "build": {
+    "appId": "com.ascendcapital.app",
+    "productName": "Ascend Capital",
+    "files": [
+      "dist/**/*",
+      "server.js",
+      "app.js",
+      "dist-electron/**/*",
+      "public/**/*"
+    ],
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/ascend-logo.jpg"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "engines": {
     "node": ">=20.0.0"
