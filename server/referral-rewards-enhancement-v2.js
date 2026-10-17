@@ -46,6 +46,8 @@ function initializeTierRewardsTable(db) {
       reward_cents INTEGER NOT NULL CHECK(reward_cents > 0),
       physical_reward TEXT,
       physical_reward_value_cents INTEGER,
+      direct_referrals_at_award INTEGER,
+      team_total_at_award INTEGER,
       credited_at TEXT NOT NULL,
       transaction_id TEXT REFERENCES transactions(id)
     );
@@ -58,6 +60,23 @@ function initializeTierRewardsTable(db) {
 function getDirectReferralCount(db, referrerId) {
   const result = db.prepare(`
     SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
+  `).get(referrerId);
+  return result?.cnt || 0;
+}
+
+// Get total team count (direct + all indirect referrals)
+function getTeamTotal(db, referrerId) {
+  const result = db.prepare(`
+    WITH RECURSIVE team_tree AS (
+      -- Base case: direct referrals
+      SELECT referred_account_id FROM referral_signups WHERE referrer_id = ?
+      UNION ALL
+      -- Recursive case: referrals of referrals
+      SELECT rs.referred_account_id 
+      FROM referral_signups rs
+      JOIN team_tree tt ON rs.referrer_id = tt.referred_account_id
+    )
+    SELECT COUNT(*) AS cnt FROM team_tree
   `).get(referrerId);
   return result?.cnt || 0;
 }
@@ -75,9 +94,8 @@ function getTierByDirectReferrals(directCount) {
 // Check and credit tier rewards when new referral is created
 function checkAndCreditTierReward(db, referrerId) {
   // Get current direct referral count
-  const directCount = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
-  `).get(referrerId).cnt;
+  const directCount = getDirectReferralCount(db, referrerId);
+  const teamTotal = getTeamTotal(db, referrerId);
 
   // Calculate current tier
   const currentTier = getTierByDirectReferrals(directCount);
@@ -122,9 +140,11 @@ function checkAndCreditTierReward(db, referrerId) {
     db.prepare(`
       INSERT INTO referral_tier_rewards (
         id, referrer_id, tier_index, tier_name, reward_cents,
-        physical_reward, physical_reward_value_cents, credited_at, transaction_id
+        physical_reward, physical_reward_value_cents, 
+        direct_referrals_at_award, team_total_at_award,
+        credited_at, transaction_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       rewardId,
       referrerId,
@@ -133,6 +153,8 @@ function checkAndCreditTierReward(db, referrerId) {
       rewardCents,
       physicalReward ? physicalReward.item : null,
       physicalReward ? physicalReward.estimatedValue * 100 : null,
+      directCount,
+      teamTotal,
       now,
       transactionId
     );
@@ -152,9 +174,8 @@ function checkAndCreditTierReward(db, referrerId) {
 
 // Get tier progression for a referrer
 function getTierProgression(db, referrerId) {
-  const directCount = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
-  `).get(referrerId).cnt;
+  const directCount = getDirectReferralCount(db, referrerId);
+  const teamTotal = getTeamTotal(db, referrerId);
 
   const currentTier = getTierByDirectReferrals(directCount);
 
@@ -185,6 +206,7 @@ function getTierProgression(db, referrerId) {
 
   return {
     directReferrals: directCount,
+    teamTotal: teamTotal,
     currentTierIndex: currentTier,
     currentTierName: currentTier >= 0 ? TIER_NAMES[currentTier] : null,
     earnedRewards: earnedRewards.map(r => ({
@@ -210,6 +232,7 @@ export {
   getTierProgression,
   getTierByDirectReferrals,
   getDirectReferralCount,
+  getTeamTotal,
   TIER_NAMES,
   TIER_REQUIREMENTS,
   TIER_REWARDS,
