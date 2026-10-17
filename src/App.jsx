@@ -30,7 +30,7 @@ const navItems = [
   { id: 'overview', label: 'Overview', icon: 'grid' },
   { id: 'deposits', label: 'Deposit plans', icon: 'chart' },
   { id: 'referrals', label: 'Referrals & ranks', icon: 'users' },
-  { id: 'rewards', label: 'Elite hour', icon: 'clock' },
+  { id: 'rewards', label: 'Prime hour', icon: 'clock' },
 ];
 
 function Icon({ name, size = 18 }) {
@@ -217,6 +217,27 @@ function App() {
   const [dailyIncome, setDailyIncome] = useState(0);
   const [referralRewards, setReferralRewards] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
+  const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
+
+  // Check if current time is within Prime Hour window (3:45 AM - 4:15 AM)
+  useEffect(() => {
+    function checkPrimeHour() {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+      
+      // Convert to minutes since midnight
+      const currentMinutes = hours * 60 + minutes;
+      const primeStart = 3 * 60 + 45; // 3:45 AM = 225 minutes
+      const primeEnd = 4 * 60 + 15;   // 4:15 AM = 255 minutes
+      
+      setIsPrimeHourActive(currentMinutes >= primeStart && currentMinutes < primeEnd);
+    }
+    
+    checkPrimeHour();
+    const interval = setInterval(checkPrimeHour, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -657,6 +678,61 @@ function App() {
         .eyebrow-line {
           background: var(--gold);
         }
+
+        .prime-hour-card {
+          background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(0, 51, 102, 0.15) 100%);
+          border: 2px solid var(--gold);
+          padding: 20px;
+          border-radius: 8px;
+          margin: 20px 0;
+        }
+
+        .prime-hour-card.inactive {
+          opacity: 0.6;
+          border-color: #555;
+        }
+
+        .prime-hour-status {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          padding: 6px 12px;
+          border-radius: 20px;
+          margin-bottom: 12px;
+        }
+
+        .prime-hour-status.active {
+          background: rgba(212, 175, 55, 0.2);
+          color: var(--gold);
+        }
+
+        .prime-hour-status.inactive {
+          background: rgba(85, 85, 85, 0.2);
+          color: #aaa;
+        }
+
+        .prime-hour-status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          display: inline-block;
+        }
+
+        .prime-hour-status.active .prime-hour-status-dot {
+          background: var(--gold);
+          animation: pulse 2s infinite;
+        }
+
+        .prime-hour-status.inactive .prime-hour-status-dot {
+          background: #666;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
       `}</style>
 
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
@@ -705,9 +781,9 @@ function App() {
               <h1>{account ? `Welcome, ${account.name.split(/\s+/)[0]}` : 'Good evening'}<span className="title-period">.</span></h1>
               <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
               <div className="header-wallet">
-                <span className="header-wallet-label"><Icon name="wallet" size={14} /> BINANCE DEPOSIT ADDRESS</span>
+                <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
                 <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress || 'Not configured in Render'}</code>
-                <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy Binance deposit address">
+                <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy prime wallet address">
                   <Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy'}
                 </button>
               </div>
@@ -812,19 +888,23 @@ function App() {
               <p className="team-note">Team total means the people referred by your direct referrals. Star 1 has no team-total requirement specified.</p>
             </div>
 
-            <aside className="bonus-card" id="rewards">
-              <div className="bonus-top"><span className="bonus-icon"><Icon name="clock" size={19} /></span><span className="bonus-badge"><span /> DAILY WINDOW</span></div>
-              <div className="bonus-eyebrow">USER-DESCRIBED OFFER</div>
-              <h3>Elite hour<span>.</span></h3>
+            <aside className={`bonus-card ${!isPrimeHourActive ? 'prime-hour-card inactive' : 'prime-hour-card'}`} id="rewards">
+              <div className="bonus-top"><span className="bonus-icon"><Icon name="clock" size={19} /></span><span className={`prime-hour-status ${isPrimeHourActive ? 'active' : 'inactive'}`}><span className="prime-hour-status-dot" /> {isPrimeHourActive ? 'ACTIVE NOW' : 'INACTIVE'}</span></div>
+              <div className="bonus-eyebrow">TIME-LIMITED WINDOW</div>
+              <h3>Prime hour<span>.</span></h3>
               <div className="bonus-time">3:45 <span>—</span> 4:15 <small>AM</small></div>
-              <p className="bonus-description">This user-described promotion is unverified and is not available through this member portal.</p>
-              <div className="bonus-details">
-                <div><span>Minimum deposit</span><strong>$50</strong></div>
-                <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
-                <div><span>Withdrawal minimum</span><strong>$50</strong></div>
-              </div>
-              <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires one referral who has deposited and traded on Ascend for three days.</span></div>
-              <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Try Elite hour flow' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
+              <p className="bonus-description">{isPrimeHourActive ? 'Prime hour is currently active. Deposits made now are eligible for this bonus.' : 'Prime hour is only active from 3:45 AM to 4:15 AM. Please return during this window to deposit.'}</p>
+              {isPrimeHourActive && (
+                <>
+                  <div className="bonus-details">
+                    <div><span>Minimum deposit</span><strong>$50</strong></div>
+                    <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
+                    <div><span>Withdrawal minimum</span><strong>$50</strong></div>
+                  </div>
+                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires one referral who has deposited and traded on Ascend for three days.</span></div>
+                  <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Make a Prime hour deposit' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
+                </>
+              )}
             </aside>
           </section>
 
@@ -864,7 +944,7 @@ function App() {
                 </>
               ) : (
                 <div className="deposit-wallet-card">
-                  <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> BINANCE WALLET ADDRESS</span>
+                  <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
                   <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress || 'Not configured in Render'}</code>
                   {binanceWalletAddress
                     ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
