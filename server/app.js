@@ -66,7 +66,7 @@ const TIER_REQUIREMENTS_DETAILED = [
   { direct: 11, team: 150 },        // Star 6: 11 direct OR 150 team
   { direct: 12, team: 400 },        // Star 7: 12 direct OR 400 team
   { direct: 13, team: 700 },        // Star 8: 13 direct OR 700 team
-  { direct: 14, team: 100 },        // Crown Leader: 14 direct OR 100 team
+  { direct: 14, team: 1000 },       // Crown Leader: 14 direct OR 1,000 team
 ];
 
 function accountView(row) {
