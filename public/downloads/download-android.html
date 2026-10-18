@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Ascend Capital Android App</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: #0f3460;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 215, 0, 0.1);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #ffd700, #ffed4e);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 40px;
+      font-weight: bold;
+      color: #0f3460;
+    }
+
+    h1 {
+      color: #ffd700;
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      color: #aaa;
+      font-size: 14px;
+    }
+
+    .features {
+      background: rgba(255, 215, 0, 0.05);
+      border-left: 3px solid #ffd700;
+      padding: 15px;
+      margin: 25px 0;
+      border-radius: 4px;
+    }
+
+    .features h3 {
+      color: #ffd700;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .features ul {
+      list-style: none;
+      color: #ccc;
+      font-size: 13px;
+    }
+
+    .features li {
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+    }
+
+    .features li:before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: #ffd700;
+      font-weight: bold;
+    }
+
+    .system-check {
+      background: rgba(100, 200, 255, 0.05);
+      border: 1px solid rgba(100, 200, 255, 0.2);
+      padding: 12px;
+      border-radius: 6px;
+      margin: 20px 0;
+      font-size: 13px;
+      color: #64c8ff;
+    }
+
+    .system-check span {
+      color: #4ade80;
+      font-weight: 500;
+    }
+
+    .download-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #ffd700, #ffed4e);
+      color: #0f3460;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-top: 20px;
+    }
+
+    .download-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 215, 0, 0.3);
+    }
+
+    .download-btn:active {
+      transform: translateY(0);
+    }
+
+    .info-box {
+      background: rgba(255, 100, 100, 0.05);
+      border-left: 3px solid #ff6464;
+      padding: 12px;
+      border-radius: 4px;
+      margin-top: 20px;
+      font-size: 12px;
+      color: #ff9494;
+    }
+
+    .info-box strong {
+      color: #ffb3b3;
+    }
+
+    .version-info {
+      text-align: center;
+      margin-top: 25px;
+      color: #666;
+      font-size: 12px;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      color: #ffd700;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 215, 0, 0.2);
+      border-top: 3px solid #ffd700;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error {
+      background: rgba(255, 100, 100, 0.1);
+      border: 1px solid #ff6464;
+      color: #ff9494;
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 15px;
+      display: none;
+    }
+
+    @media (max-width: 600px) {
+      .container {
+        padding: 25px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .logo {
+        width: 60px;
+        height: 60px;
+        font-size: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">📱</div>
+      <h1>Ascend Capital</h1>
+      <p class="subtitle">Android App</p>
+    </div>
+
+    <div class="features">
+      <h3>App Features</h3>
+      <ul>
+        <li>Real-time trading performance</li>
+        <li>Deposit & withdrawal management</li>
+        <li>Referral tracking & rewards</li>
+        <li>Daily profit tracking</li>
+        <li>Tier progression monitoring</li>
+        <li>Account management</li>
+      </ul>
+    </div>
+
+    <div class="system-check">
+      <span>✓</span> Android 6.0 or higher required
+    </div>
+
+    <button class="download-btn" id="downloadBtn">
+      <span id="btnText">📥 Download App</span>
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <span>Downloading...</span>
+      </div>
+    </button>
+
+    <div id="error" class="error"></div>
+
+    <div class="info-box">
+      <strong>Installation Tip:</strong> After download, go to Settings > Apps > Install from unknown sources > enable, then open the downloaded file to install.
+    </div>
+
+    <div class="version-info">
+      <p>Version 1.0.0</p>
+      <p>© 2026 Ascend Capital. All rights reserved.</p>
+    </div>
+  </div>
+
+  <script>
+    const downloadBtn = document.getElementById('downloadBtn');
+    const btnText = document.getElementById('btnText');
+    const loading = document.getElementById('loading');
+    const errorDiv = document.getElementById('error');
+
+    downloadBtn.addEventListener('click', async () => {
+      downloadBtn.disabled = true;
+      btnText.style.display = 'none';
+      loading.style.display = 'block';
+      errorDiv.style.display = 'none';
+
+      try {
+        const response = await fetch('/api/public/download/android-app');
+        
+        if (!response.ok) {
+          throw new Error('Failed to download app');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ascend-capital.apk';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (error) {
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = '❌ ' + error.message + '. Please try again later.';
+      } finally {
+        downloadBtn.disabled = false;
+        btnText.style.display = 'inline';
+        loading.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>

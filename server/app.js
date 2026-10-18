@@ -792,6 +792,25 @@ export function createApp({ databasePath }) {
     }
   });
 
+  app.get('/api/public/download/android-app', (_request, response) => {
+    const apkPath = process.env.APK_PATH?.trim();
+    if (!apkPath) {
+      return response.status(404).json({ error: 'Android app not available for download.' });
+    }
+    try {
+      const fs = require('fs');
+      const apkBuffer = fs.readFileSync(apkPath);
+      response.set({
+        'Content-Type': 'application/vnd.android.package-archive',
+        'Content-Disposition': 'attachment; filename="ascend-capital.apk"',
+        'Content-Length': apkBuffer.length,
+      });
+      return response.send(apkBuffer);
+    } catch (error) {
+      return response.status(404).json({ error: 'Android app file not found.' });
+    }
+  });
+
   // =========================================================================
   // AUTHENTICATION ENDPOINTS
   // =========================================================================
