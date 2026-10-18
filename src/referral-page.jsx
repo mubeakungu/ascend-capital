@@ -55,7 +55,7 @@ async function requestApi(path, options = {}) {
   }
 }
 
-export function ReferralPageEnhanced({ account, onNavigate }) {
+export function ReferralPage({ account, onNavigate }) {
   const [referralCode, setReferralCode] = useState('');
   const [referralLink, setReferralLink] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
