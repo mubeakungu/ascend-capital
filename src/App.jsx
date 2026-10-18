@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReferralPage } from './referral-page';
+import DownloadAndroidButton from './components/DownloadAndroidButton';
 
 const plans = [
   { deposit: 300, earning: '8', dailyIncome: 0.27 },
