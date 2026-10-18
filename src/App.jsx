@@ -4,16 +4,16 @@ import { ReferralPage } from './referral-page';
 import DownloadAndroidButton from './components/DownloadAndroidButton';
 
 const plans = [
-  { deposit: 300, earning: '8', dailyIncome: 0.27 },
-  { deposit: 400, earning: '11', dailyIncome: 0.37 },
-  { deposit: 500, earning: '15.5', dailyIncome: 0.52 },
-  { deposit: 750, earning: '25', dailyIncome: 0.83 },
-  { deposit: 1000, earning: '35', dailyIncome: 1.17 },
-  { deposit: 2000, earning: '70', dailyIncome: 2.33 },
-  { deposit: 5000, earning: '180', dailyIncome: 6.00 },
-  { deposit: 10000, earning: '370', dailyIncome: 12.33 },
-  { deposit: 20000, earning: '750', dailyIncome: 25.00 },
-  { deposit: 35000, earning: '1,400', dailyIncome: 46.67 },
+  { deposit: 300, earning: '8', dailyIncome:  },
+  { deposit: 400, earning: '11', dailyIncome:  },
+  { deposit: 500, earning: '15.5', dailyIncome: },
+  { deposit: 750, earning: '25', dailyIncome:  },
+  { deposit: 1000, earning: '35', dailyIncome:  },
+  { deposit: 2000, earning: '70', dailyIncome:  },
+  { deposit: 5000, earning: '180', dailyIncome: },
+  { deposit: 10000, earning: '370', dailyIncome: },
+  { deposit: 20000, earning: '750', dailyIncome:  },
+  { deposit: 35000, earning: '1,400', dailyIncome: },
 ];
 
 const ranks = [
