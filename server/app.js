@@ -13,6 +13,7 @@ import {
 
 const scryptAsync = promisify(scrypt);
 const SESSION_COOKIE = 'ascend_session';
+const ADMIN_SESSION_COOKIE = 'ascend_admin_session';
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
@@ -118,17 +119,17 @@ function readCookie(request, name) {
   return value ? decodeURIComponent(value) : null;
 }
 
-function setSessionCookie(response, token, secure) {
+function setSessionCookie(response, token, secure, cookieName = SESSION_COOKIE) {
   response.append(
     'Set-Cookie',
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DURATION_SECONDS}${secure ? '; Secure' : ''}`,
+    `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DURATION_SECONDS}${secure ? '; Secure' : ''}`,
   );
 }
 
-function clearSessionCookie(response, secure) {
+function clearSessionCookie(response, secure, cookieName = SESSION_COOKIE) {
   response.append(
     'Set-Cookie',
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`,
+    `${cookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`,
   );
 }
 
@@ -270,11 +271,7 @@ export function createApp({ databasePath }) {
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
-      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
-      hold_reason TEXT,
-      held_at TEXT,
-      must_change_password INTEGER NOT NULL DEFAULT 0
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
@@ -283,7 +280,6 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
   `);
-  
   const accountColumns = db.prepare('PRAGMA table_info(accounts)').all();
   if (!accountColumns.some((column) => column.name === 'role')) {
     db.exec("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))");
@@ -300,12 +296,11 @@ export function createApp({ databasePath }) {
   if (!accountColumns.some((column) => column.name === 'must_change_password')) {
     db.exec('ALTER TABLE accounts ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   }
-
   db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -319,7 +314,6 @@ export function createApp({ databasePath }) {
     CREATE UNIQUE INDEX IF NOT EXISTS transactions_deposit_reference_idx
       ON transactions(reference COLLATE NOCASE)
       WHERE type = 'deposit' AND status IN ('pending', 'approved');
-    
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor_id TEXT,
@@ -331,7 +325,6 @@ export function createApp({ databasePath }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at);
-    
     CREATE TABLE IF NOT EXISTS referral_codes (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -339,7 +332,6 @@ export function createApp({ databasePath }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id);
-    
     CREATE TABLE IF NOT EXISTS referral_signups (
       id TEXT PRIMARY KEY,
       referrer_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
@@ -349,7 +341,6 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id);
-    
     CREATE TABLE IF NOT EXISTS referral_commissions (
       id TEXT PRIMARY KEY,
       referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -361,7 +352,6 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
-    
     CREATE TABLE IF NOT EXISTS trading_ledger (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -465,8 +455,8 @@ export function createApp({ databasePath }) {
     `).get(id);
   }
 
-  function currentAccount(request) {
-    const token = readCookie(request, SESSION_COOKIE);
+  function currentAccount(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
+    const token = readCookie(request, cookieName);
     if (!token) return null;
 
     const tokenHash = hashToken(token);
@@ -479,7 +469,10 @@ export function createApp({ databasePath }) {
       JOIN accounts ON accounts.id = sessions.account_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND accounts.status = 'active'
     `).get(tokenHash, now);
-    return row ?? null;
+    
+    if (!row) return null;
+    if (requireAdminRole && row.role !== 'admin') return null;
+    return row;
   }
 
   function requireAccount(request, response, next) {
@@ -493,7 +486,20 @@ export function createApp({ databasePath }) {
     if (request.account.role !== 'admin') {
       return response.status(403).json({ error: 'Administrator access is required.' });
     }
-    if (request.account.mustChangePassword) {
+    if (request.account.must_change_password) {
+      return response.status(403).json({
+        error: 'Change your temporary password to continue.',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
+    }
+    return next();
+  }
+
+  function requireAdminSession(request, response, next) {
+    const account = currentAccount(request, ADMIN_SESSION_COOKIE, true);
+    if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
+    request.account = account;
+    if (account.mustChangePassword) {
       return response.status(403).json({
         error: 'Change your temporary password to continue.',
         code: 'PASSWORD_CHANGE_REQUIRED',
@@ -756,22 +762,31 @@ export function createApp({ databasePath }) {
   seedInitialAdmin();
   scheduleDailyTradingProfits();
 
-  // =========================================================================
-  // PUBLIC ENDPOINTS
-  // =========================================================================
-
   app.get('/api/health', (_request, response) => response.json({
     status: 'ok',
     accountStorage: process.env.ACCOUNT_STORAGE_MODE ?? 'local',
   }));
 
-  app.get('/api/public/config', (_request, response) => response.json({
+  app.get('/api/public-config', (_request, response) => response.json({
     binanceWalletAddress: process.env.BINANCE_WALLET_ADDRESS?.trim() ?? '',
   }));
 
-  // =========================================================================
-  // AUTHENTICATION ENDPOINTS
-  // =========================================================================
+  app.get('/api/public/logo', (_request, response) => {
+    const logoPath = process.env.LOGO_PATH?.trim();
+    if (!logoPath) {
+      return response.status(404).json({ error: 'Logo not configured.' });
+    }
+    try {
+      const fs = require('fs');
+      const logoBuffer = fs.readFileSync(logoPath);
+      const ext = logoPath.split('.').pop().toLowerCase();
+      const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
+      response.set('Content-Type', mimeTypes[ext] || 'image/png');
+      return response.send(logoBuffer);
+    } catch (error) {
+      return response.status(404).json({ error: 'Logo file not found.' });
+    }
+  });
 
   app.post('/api/auth/register', authRateLimit, async (request, response, next) => {
     try {
@@ -838,7 +853,7 @@ export function createApp({ databasePath }) {
   });
 
   app.get('/api/auth/me', (request, response) => {
-    const account = currentAccount(request);
+    const account = currentAccount(request, SESSION_COOKIE);
     return response.json({ account: account ? accountView(account) : null });
   });
 
@@ -902,6 +917,66 @@ export function createApp({ databasePath }) {
   });
 
   // =========================================================================
+  // ADMIN AUTHENTICATION ENDPOINTS (separate from client auth)
+  // Uses ADMIN_SESSION_COOKIE to allow simultaneous client + admin sessions
+  // =========================================================================
+
+  app.post('/api/admin/auth/login', authRateLimit, async (request, response, next) => {
+    try {
+      const input = request.body ?? {};
+      const error = loginMessage(input);
+      if (error) return response.status(400).json({ error });
+
+      const email = input.email.trim().toLowerCase();
+      const row = db.prepare(`
+        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
+        FROM accounts WHERE email = ? AND role = 'admin'
+      `).get(email);
+
+      const salt = row ? Buffer.from(row.password_salt, 'hex') : Buffer.alloc(16);
+      const storedHash = row ? Buffer.from(row.password_hash, 'hex') : Buffer.alloc(PASSWORD_BYTES);
+      const candidate = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
+      if (!row || !timingSafeEqual(candidate, storedHash)) {
+        return response.status(401).json({ error: 'Admin credentials are incorrect.' });
+      }
+
+      if (row.status === 'held') {
+        return response.status(403).json({ error: 'This admin account is on hold.' });
+      }
+
+      db.prepare('DELETE FROM sessions WHERE account_id = ? AND token_hash IN (SELECT token_hash FROM sessions WHERE account_id = ?)')
+        .run(row.id, row.id);
+      
+      const token = randomBytes(32).toString('base64url');
+      const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
+      db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)')
+        .run(hashToken(token), row.id, expiresAt);
+      setSessionCookie(response, token, secureCookie, ADMIN_SESSION_COOKIE);
+      
+      recordAudit({ ip: request.ip }, 'admin.login', row.id, { email });
+      return response.json({ account: accountView(row) });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/admin/auth/me', (request, response) => {
+    const account = currentAccount(request, ADMIN_SESSION_COOKIE, true);
+    return response.json({ account: account ? accountView(account) : null });
+  });
+
+  app.post('/api/admin/auth/logout', (request, response, next) => {
+    try {
+      const token = readCookie(request, ADMIN_SESSION_COOKIE);
+      if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+      clearSessionCookie(response, secureCookie, ADMIN_SESSION_COOKIE);
+      return response.status(204).end();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  // =========================================================================
   // REFERRAL ENDPOINTS
   // =========================================================================
 
@@ -923,11 +998,13 @@ export function createApp({ databasePath }) {
     return response.status(201).json({ code });
   });
 
+  // Tier progression endpoint (v2)
   app.get('/api/referrals/tier-progression', requireAccount, (request, response) => {
     const progression = getTierProgression(db, request.account.id);
     return response.json(progression);
   });
 
+  // Earned rewards endpoint (v2)
   app.get('/api/referrals/earned-rewards', requireAccount, (request, response) => {
     const rewards = db.prepare(`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
@@ -1018,10 +1095,6 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // =========================================================================
-  // TRADING ENDPOINTS
-  // =========================================================================
-
   app.get('/api/trading/history', requireAccount, (request, response) => {
     const profits = db.prepare(`
       SELECT
@@ -1054,9 +1127,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // =========================================================================
-  // TRANSACTION ENDPOINTS
-  // =========================================================================
+  // ---------------------------------------------------------------------------
+  // Transactions
+  // ---------------------------------------------------------------------------
 
   app.post('/api/transactions', updateRateLimit, requireAccount, (request, response, next) => {
     try {
@@ -1123,13 +1196,13 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // =========================================================================
-  // ADMIN ENDPOINTS
-  // =========================================================================
+  // ---------------------------------------------------------------------------
+  // Admin
+  // ---------------------------------------------------------------------------
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
-  app.get('/api/admin/accounts', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  app.get('/api/admin/accounts', adminLimiter, requireAdminSession, (request, response) => {
     const accounts = db.prepare(`
       SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
         COALESCE((
@@ -1151,7 +1224,22 @@ export function createApp({ databasePath }) {
     return response.json({ accounts });
   });
 
-  app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  app.patch('/api/admin/accounts/:id/profile', adminLimiter, requireAdminSession, (request, response) => {
+    const name = request.body?.name;
+    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
+      return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
+    }
+
+    const target = db.prepare('SELECT id, role FROM accounts WHERE id = ?').get(request.params.id);
+    if (!target) return response.status(404).json({ error: 'Member account not found.' });
+    if (target.role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
+
+    db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), target.id);
+    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
+    return response.json({ account: accountView(account) });
+  });
+
+  app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAdminSession, (request, response) => {
     const account = db.prepare(`
       SELECT id, name, email, created_at, role, status, hold_reason, held_at
       FROM accounts WHERE id = ?
@@ -1195,7 +1283,72 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/transactions', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  app.patch('/api/admin/accounts/:id', adminLimiter, requireAdminSession, (request, response, next) => {
+    try {
+      const target = db.prepare('SELECT id, name, email, role, status FROM accounts WHERE id = ?').get(request.params.id);
+      if (!target) return response.status(404).json({ error: 'Account not found.' });
+      if (target.role === 'admin') return response.status(403).json({ error: 'Cannot edit administrator accounts.' });
+
+      const name = request.body?.name;
+      const email = request.body?.email;
+
+      if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
+        return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
+      }
+
+      const cleanEmail = email?.trim().toLowerCase();
+      if (typeof cleanEmail !== 'string' || !EMAIL_PATTERN.test(cleanEmail)) {
+        return response.status(400).json({ error: 'Enter a valid email address.' });
+      }
+
+      // Check if new email is already in use
+      if (cleanEmail !== target.email) {
+        const existing = db.prepare('SELECT id FROM accounts WHERE email = ? AND id != ?').get(cleanEmail, target.id);
+        if (existing) return response.status(409).json({ error: 'This email is already in use.' });
+      }
+
+      withTransaction(() => {
+        db.prepare('UPDATE accounts SET name = ?, email = ? WHERE id = ?')
+          .run(name.trim(), cleanEmail, target.id);
+        recordAudit(request, 'account.edit', target.id, {
+          email: target.email,
+          newName: name.trim(),
+          newEmail: cleanEmail,
+        });
+      });
+
+      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
+        .get(target.id);
+      return response.json({ account: accountView(account) });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.delete('/api/admin/accounts/:id', adminLimiter, requireAdminSession, (request, response, next) => {
+    try {
+      const confirm = request.body?.confirm;
+      if (confirm !== 'DELETE') {
+        return response.status(400).json({ error: 'Confirmation required to delete account.' });
+      }
+
+      const target = db.prepare('SELECT id, email, role FROM accounts WHERE id = ?').get(request.params.id);
+      if (!target) return response.status(404).json({ error: 'Account not found.' });
+      if (target.role === 'admin') return response.status(403).json({ error: 'Cannot delete administrator accounts.' });
+
+      withTransaction(() => {
+        // Cascade deletes are handled by foreign keys
+        db.prepare('DELETE FROM accounts WHERE id = ?').run(target.id);
+        recordAudit(request, 'account.delete', target.id, { email: target.email });
+      });
+
+      return response.status(204).end();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/admin/transactions', adminLimiter, requireAdminSession, (request, response) => {
     const { status, type, accountId } = request.query;
     const where = [];
     const params = [];
@@ -1341,10 +1494,10 @@ export function createApp({ databasePath }) {
     };
   }
 
-  app.post('/api/admin/transactions/:id/approve', adminLimiter, requireAccount, requireAdmin, reviewTransaction('approved'));
-  app.post('/api/admin/transactions/:id/reject', adminLimiter, requireAccount, requireAdmin, reviewTransaction('rejected'));
+  app.post('/api/admin/transactions/:id/approve', adminLimiter, requireAdminSession, reviewTransaction('approved'));
+  app.post('/api/admin/transactions/:id/reject', adminLimiter, requireAdminSession, reviewTransaction('rejected'));
 
-  app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAccount, requireAdmin, (request, response, next) => {
+  app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAdminSession, (request, response, next) => {
     try {
       const reason = cleanText(request.body?.reason, { min: 3, max: 300 });
       if (reason === null) {
@@ -1369,7 +1522,7 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.post('/api/admin/accounts/:id/release', adminLimiter, requireAccount, requireAdmin, (request, response, next) => {
+  app.post('/api/admin/accounts/:id/release', adminLimiter, requireAdminSession, (request, response, next) => {
     try {
       const note = request.body?.note == null ? '' : cleanText(request.body.note, { min: 0, max: 300 });
       if (note === null) return response.status(400).json({ error: 'Note must be at most 300 characters.' });
@@ -1391,7 +1544,7 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.post('/api/admin/accounts/:id/password', adminLimiter, requireAccount, requireAdmin, async (request, response, next) => {
+  app.post('/api/admin/accounts/:id/password', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const newError = passwordError(request.body?.newPassword);
       if (newError) return response.status(400).json({ error: newError });
@@ -1415,7 +1568,41 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  // Admin: view tier rewards for a member
+  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAdminSession, (request, response) => {
+    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
+
+    const progression = getTierProgression(db, account.id);
+    const rewards = db.prepare(`
+      SELECT tier_index, tier_name, reward_cents, physical_reward,
+        physical_reward_value_cents, direct_referrals_at_award, 
+        team_total_at_award, credited_at, transaction_id
+      FROM referral_tier_rewards
+      WHERE referrer_id = ?
+      ORDER BY tier_index ASC
+    `).all(account.id);
+
+    return response.json({
+      account: { id: account.id, name: account.name, email: account.email },
+      directReferrals: progression.directReferrals,
+      teamTotal: progression.teamTotal,
+      currentTier: progression.currentTierName,
+      earnedRewards: rewards.map(r => ({
+        tierIndex: r.tier_index,
+        tierName: r.tier_name,
+        amountUSD: r.reward_cents / 100,
+        physicalReward: r.physical_reward,
+        directWhen: r.direct_referrals_at_award,
+        teamTotalWhen: r.team_total_at_award,
+        creditedAt: r.credited_at,
+        transactionId: r.transaction_id,
+      })),
+    });
+  });
+
+  // Admin: view all referral data for a member
+  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAdminSession, (request, response) => {
     const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
 
@@ -1464,7 +1651,7 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/audit', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  app.get('/api/admin/audit', adminLimiter, requireAdminSession, (request, response) => {
     const { action } = request.query;
     if (action !== undefined && (typeof action !== 'string' || action.length === 0 || action.length > 64)) {
       return response.status(400).json({ error: 'Invalid action filter.' });
@@ -1490,7 +1677,7 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/trading/ledger', adminLimiter, requireAccount, requireAdmin, (request, response) => {
+  app.get('/api/admin/trading/ledger', adminLimiter, requireAdminSession, (request, response) => {
     const { accountId } = request.query;
     let sql = `
       SELECT
@@ -1534,7 +1721,7 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAccount, requireAdmin, (request, response, next) => {
+  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAdminSession, (request, response, next) => {
     try {
       applyDailyTradingProfits();
       recordAudit(request, 'admin.trading_profits_applied', null, {});
@@ -1543,10 +1730,6 @@ export function createApp({ databasePath }) {
       return next(error);
     }
   });
-
-  // =========================================================================
-  // ERROR HANDLING
-  // =========================================================================
 
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
 
