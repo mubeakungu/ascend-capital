@@ -1075,7 +1075,7 @@ function App() {
                     <tr key={rank.name}>
                       <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
                       <td>{rank.direct} <span className="table-muted">direct</span></td>
-                      <td>{rank.team === null ? <span className="table-dash">—</span> : rank.team}</td>
+                      <td>{rank.team === null ? <span className="table-dash">—</span> : rank.team.toLocaleString()}</td>
                       <td className="reward-cell">{rank.reward}{rank.name === 'Star 8' && <span className="reward-value"> · $27,000 value</span>}{rank.name === 'Crown Leader' && <span className="reward-value"> · $46,000 value</span>}{rank.name === 'Star 7' && <span className="reward-value"> · $80,000 house</span>}</td>
                     </tr>
                   ))}</tbody>
@@ -1097,7 +1097,7 @@ function App() {
                     <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
                     <div><span>Withdrawal minimum</span><strong>$50</strong></div>
                   </div>
-                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires one referral who has deposited and traded on Ascend for three days.</span></div>
+                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires: must have traded on Ascend for at least 3 days AND invited at least 1 person who has deposited and is actively trading.</span></div>
                   <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Make a Prime hour deposit' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
                 </>
               )}
