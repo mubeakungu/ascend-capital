@@ -5,14 +5,27 @@ const TIER_NAMES = [
   'Star 6', 'Star 7', 'Star 8', 'Crown Leader',
 ];
 
+const TIER_COLORS = {
+  0: '#c0a060', // bronze
+  1: '#b8860b', // goldenrod
+  2: '#d4af37', // gold
+  3: '#ffd700', // light gold
+  4: '#ffed4e', // bright gold
+  5: '#ff6b35', // copper
+  6: '#c9302c', // ruby
+  7: '#8b008b', // dark magenta
+  8: '#ffd700', // crown gold
+};
+
 function Icon({ name, size = 18 }) {
   const paths = {
     arrow: <><path d="M7 17 17 7M7 7h10v10" /></>,
     copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
     check: <path d="m5 12 4 4L19 6" />,
-    close: <><path d="m18 6-12 12M6 6l12 12" /></>,
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
     star: <><polygon points="12 2 15.09 10.26 23.77 10.5 17.88 16.46 20.49 25.13 12 20.35 3.51 25.13 6.12 16.46 0.23 10.5 8.91 10.26" /></>,
+    trophy: <><path d="M6 9H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2m-4-3V5a2 2 0 0 0-4 0v1m0 0a9 9 0 0 1 9 9" /></>,
+    zap: <><polyline points="13 2 3 14 12 14 9 23 21 11 12 11 15 2" /></>,
   };
 
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -42,7 +55,7 @@ async function requestApi(path, options = {}) {
   }
 }
 
-export function ReferralPage({ account, onNavigate }) {
+export function ReferralPageEnhanced({ account, onNavigate }) {
   const [referralCode, setReferralCode] = useState('');
   const [referralLink, setReferralLink] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
@@ -74,8 +87,6 @@ export function ReferralPage({ account, onNavigate }) {
         setLoading(true);
         setError('');
 
-        // Fetch referral code
-        console.log('[Referrals] Fetching code...');
         const codeResponse = await requestApi('/api/referrals/code');
         const code = codeResponse?.code;
         if (!code) throw new Error('No referral code received');
@@ -85,18 +96,12 @@ export function ReferralPage({ account, onNavigate }) {
         const link = `${baseUrl}/register?ref=${code}`;
         setReferralLink(link);
 
-        // Fetch referral stats
-        console.log('[Referrals] Fetching stats...');
         const statsResponse = await requestApi('/api/referrals/stats');
-        console.log('[Referrals] Stats response:', statsResponse);
         if (statsResponse) {
           setStats(statsResponse);
         }
 
-        // Fetch referral list
-        console.log('[Referrals] Fetching list...');
         const listResponse = await requestApi('/api/referrals/list');
-        console.log('[Referrals] List response:', listResponse);
         if (listResponse?.referrals) {
           setReferrals(listResponse.referrals);
         }
@@ -146,6 +151,9 @@ export function ReferralPage({ account, onNavigate }) {
     );
   }
 
+  const tierIndex = stats.tier ? TIER_NAMES.indexOf(stats.tier) : -1;
+  const tierColor = tierIndex >= 0 ? TIER_COLORS[tierIndex] : '#666';
+
   return (
     <div className="app-shell">
       <style>{`
@@ -157,6 +165,7 @@ export function ReferralPage({ account, onNavigate }) {
           --light-gold: #E8C547;
           --text-light: #f5f5f5;
           --bg-dark: #0a0a0a;
+          --accent-green: #7ec850;
         }
 
         .referral-shell {
@@ -176,6 +185,7 @@ export function ReferralPage({ account, onNavigate }) {
           justify-content: space-between;
           margin-bottom: 40px;
           gap: 20px;
+          flex-wrap: wrap;
         }
 
         .referral-header-brand {
@@ -253,14 +263,14 @@ export function ReferralPage({ account, onNavigate }) {
 
         .referral-code-box {
           background: rgba(0, 0, 0, 0.3);
-          border: 1px solid var(--gold);
+          border: 2px solid var(--gold);
           border-radius: 8px;
           padding: 16px;
           margin-bottom: 16px;
         }
 
         .referral-code-label {
-          font-size: 11px;
+          font-size: 10px;
           text-transform: uppercase;
           letter-spacing: 1px;
           color: var(--gold);
@@ -276,11 +286,11 @@ export function ReferralPage({ account, onNavigate }) {
         }
 
         .referral-code-text {
-          font-size: 24px;
-          font-weight: 700;
-          letter-spacing: 2px;
-          color: var(--gold);
-          font-family: monospace;
+          font-size: 28px;
+          font-weight: 900;
+          letter-spacing: 3px;
+          color: var(--light-gold);
+          font-family: 'Courier New', monospace;
         }
 
         .referral-copy-button {
@@ -311,14 +321,14 @@ export function ReferralPage({ account, onNavigate }) {
 
         .referral-link-box {
           background: rgba(0, 0, 0, 0.3);
-          border: 1px solid #666;
+          border: 1px solid #555;
           border-radius: 8px;
           padding: 16px;
           margin-bottom: 24px;
         }
 
         .referral-link-label {
-          font-size: 11px;
+          font-size: 10px;
           text-transform: uppercase;
           letter-spacing: 1px;
           color: #aaa;
@@ -334,10 +344,10 @@ export function ReferralPage({ account, onNavigate }) {
 
         .referral-link-text {
           flex: 1;
-          font-size: 12px;
+          font-size: 11px;
           color: #ddd;
           word-break: break-all;
-          font-family: monospace;
+          font-family: 'Courier New', monospace;
           background: rgba(0, 0, 0, 0.2);
           padding: 8px;
           border-radius: 4px;
@@ -358,7 +368,7 @@ export function ReferralPage({ account, onNavigate }) {
         }
 
         .referral-stat-label {
-          font-size: 11px;
+          font-size: 10px;
           text-transform: uppercase;
           letter-spacing: 0.8px;
           color: #aaa;
@@ -389,7 +399,7 @@ export function ReferralPage({ account, onNavigate }) {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 12px;
+          padding: 10px 14px;
           border-radius: 20px;
           background: rgba(212, 175, 55, 0.2);
           color: var(--gold);
@@ -398,10 +408,21 @@ export function ReferralPage({ account, onNavigate }) {
           margin-bottom: 16px;
         }
 
+        .referral-tier-badge-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: rgba(212, 175, 55, 0.3);
+        }
+
         .referral-tier-name {
           font-size: 22px;
           font-weight: 700;
           margin-bottom: 16px;
+          word-break: break-word;
         }
 
         .referral-tier-stats {
@@ -444,6 +465,9 @@ export function ReferralPage({ account, onNavigate }) {
           font-size: 20px;
           font-weight: 700;
           margin-bottom: 24px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
 
         .referral-list {
@@ -459,6 +483,13 @@ export function ReferralPage({ account, onNavigate }) {
           display: grid;
           grid-template-columns: 1fr auto;
           gap: 16px;
+          align-items: center;
+          transition: all 0.2s;
+        }
+
+        .referral-item:hover {
+          border-color: rgba(212, 175, 55, 0.4);
+          background: rgba(0, 0, 0, 0.4);
         }
 
         .referral-item-info {
@@ -469,7 +500,7 @@ export function ReferralPage({ account, onNavigate }) {
         .referral-item-name {
           font-size: 14px;
           font-weight: 600;
-          color: var(--gold);
+          color: var(--text-light);
         }
 
         .referral-item-email {
@@ -477,27 +508,35 @@ export function ReferralPage({ account, onNavigate }) {
           color: #aaa;
         }
 
+        .referral-item-date {
+          font-size: 11px;
+          color: #666;
+          margin-top: 4px;
+        }
+
         .referral-item-amount {
           text-align: right;
           display: grid;
           gap: 6px;
+          align-items: flex-end;
         }
 
         .referral-item-value {
-          font-size: 14px;
+          font-size: 16px;
           font-weight: 700;
-          color: #64c864;
-        }
-
-        .referral-item-date {
-          font-size: 11px;
-          color: #666;
+          color: var(--accent-green);
         }
 
         .referral-empty {
           text-align: center;
           padding: 40px 20px;
           color: #666;
+        }
+
+        .referral-empty-icon {
+          font-size: 32px;
+          margin-bottom: 12px;
+          opacity: 0.5;
         }
 
         .loading {
@@ -559,11 +598,11 @@ export function ReferralPage({ account, onNavigate }) {
                 <div className="referral-main-card">
                   <div className="eyebrow"><span className="eyebrow-line" /> YOUR REFERRAL</div>
                   <h2 className="referral-card-title">Share and earn<span className="title-period">.</span></h2>
-                  <p className="referral-card-subtitle">Share your code or link with others to earn commissions on their deposits.</p>
+                  <p className="referral-card-subtitle">Share your code or link with others to earn commissions when they deposit.</p>
 
                   {referralCode && (
                     <div className="referral-code-box">
-                      <div className="referral-code-label">Your Referral Code</div>
+                      <div className="referral-code-label">Your Unique Referral Code</div>
                       <div className="referral-code-display">
                         <div className="referral-code-text">{referralCode}</div>
                         <button 
@@ -571,7 +610,7 @@ export function ReferralPage({ account, onNavigate }) {
                           onClick={() => copyToClipboard(referralCode)}
                         >
                           <Icon name={codeCopied ? 'check' : 'copy'} size={14} />
-                          {codeCopied ? 'Copied' : 'Copy'}
+                          {codeCopied ? 'Copied!' : 'Copy'}
                         </button>
                       </div>
                     </div>
@@ -579,7 +618,7 @@ export function ReferralPage({ account, onNavigate }) {
 
                   {referralLink && (
                     <div className="referral-link-box">
-                      <div className="referral-link-label">Your Referral Link</div>
+                      <div className="referral-link-label">Your Referral Registration Link</div>
                       <div className="referral-link-display">
                         <div className="referral-link-text">{referralLink}</div>
                         <button 
@@ -587,7 +626,6 @@ export function ReferralPage({ account, onNavigate }) {
                           onClick={() => copyToClipboard(referralLink, true)}
                         >
                           <Icon name={linkCopied ? 'check' : 'copy'} size={14} />
-                          {linkCopied ? 'Copied' : 'Copy'}
                         </button>
                       </div>
                     </div>
@@ -597,17 +635,17 @@ export function ReferralPage({ account, onNavigate }) {
                     <div className="referral-stat">
                       <div className="referral-stat-label">Direct Referrals</div>
                       <div className="referral-stat-value">{stats.directReferrals || 0}</div>
-                      <div className="referral-stat-secondary">{stats.directReferrals === 1 ? 'referral' : 'referrals'}</div>
+                      <div className="referral-stat-secondary">{stats.directReferrals === 1 ? 'member' : 'members'}</div>
                     </div>
                     <div className="referral-stat">
                       <div className="referral-stat-label">Commission Rate</div>
                       <div className="referral-stat-value">{(stats.commissionRate * 100).toFixed(0)}%</div>
-                      <div className="referral-stat-secondary">Current tier</div>
+                      <div className="referral-stat-secondary">of first deposit</div>
                     </div>
                     <div className="referral-stat">
                       <div className="referral-stat-label">Commissions Earned</div>
                       <div className="referral-stat-value">{stats.commissionsEarned || 0}</div>
-                      <div className="referral-stat-secondary">transactions</div>
+                      <div className="referral-stat-secondary">from deposits</div>
                     </div>
                     <div className="referral-stat">
                       <div className="referral-stat-label">Total Earnings</div>
@@ -619,25 +657,29 @@ export function ReferralPage({ account, onNavigate }) {
 
                 <div className="referral-side-card">
                   <div className="referral-tier-badge">
-                    <Icon name="star" size={14} />
-                    {stats.tier || 'Not yet a member'}
+                    <div className="referral-tier-badge-icon">
+                      <Icon name="star" size={12} />
+                    </div>
+                    {stats.tier || 'Tier Not Earned'}
                   </div>
-                  <h3 className="referral-tier-name">{stats.tier || '—'}</h3>
+                  <h3 className="referral-tier-name" style={{ color: tierColor }}>
+                    {stats.tier || 'Unranked'}
+                  </h3>
                   <div className="referral-tier-stats">
                     <div className="referral-tier-stat">
-                      <span className="referral-tier-stat-label">Direct Referrals</span>
+                      <span className="referral-tier-stat-label"><Icon name="users" size={12} style={{ marginRight: '4px', display: 'inline' }} /> Direct Referrals</span>
                       <span className="referral-tier-stat-value">{stats.directReferrals || 0}</span>
                     </div>
                     <div className="referral-tier-stat">
-                      <span className="referral-tier-stat-label">Commission Rate</span>
+                      <span className="referral-tier-stat-label"><Icon name="zap" size={12} style={{ marginRight: '4px', display: 'inline' }} /> Commission Rate</span>
                       <span className="referral-tier-stat-value">{(stats.commissionRate * 100).toFixed(0)}%</span>
                     </div>
                     <div className="referral-tier-stat">
-                      <span className="referral-tier-stat-label">Total Volume</span>
-                      <span className="referral-tier-stat-value">${(stats.directVolume || 0).toFixed(2)}</span>
+                      <span className="referral-tier-stat-label">Direct Volume</span>
+                      <span className="referral-tier-stat-value">${(stats.directVolume || 0).toFixed(0)}</span>
                     </div>
                     <div className="referral-tier-stat">
-                      <span className="referral-tier-stat-label">Team Total</span>
+                      <span className="referral-tier-stat-label"><Icon name="trophy" size={12} style={{ marginRight: '4px', display: 'inline' }} /> Team Total</span>
                       <span className="referral-tier-stat-value">{stats.teamTotal || 0}</span>
                     </div>
                   </div>
@@ -646,17 +688,20 @@ export function ReferralPage({ account, onNavigate }) {
 
               {referrals.length > 0 && (
                 <div className="referral-referrals-section">
-                  <h2 className="referral-section-title">Your Referrals ({referrals.length})</h2>
+                  <h2 className="referral-section-title">
+                    <Icon name="users" size={18} />
+                    Your Referred Members ({referrals.length})
+                  </h2>
                   <div className="referral-list">
                     {referrals.map((ref) => (
                       <div className="referral-item" key={ref.id}>
                         <div className="referral-item-info">
-                          <div className="referral-item-name">{ref.name}</div>
+                          <div className="referral-item-name">✓ {ref.name}</div>
                           <div className="referral-item-email">{ref.email}</div>
+                          <div className="referral-item-date">Joined {new Date(ref.signedUpAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
                         </div>
                         <div className="referral-item-amount">
                           <div className="referral-item-value">${(ref.totalDeposits || 0).toFixed(2)}</div>
-                          <div className="referral-item-date">{new Date(ref.signedUpAt).toLocaleDateString()}</div>
                         </div>
                       </div>
                     ))}
@@ -667,8 +712,9 @@ export function ReferralPage({ account, onNavigate }) {
               {referrals.length === 0 && !error && (
                 <div className="referral-referrals-section">
                   <div className="referral-empty">
-                    <p>You haven't referred anyone yet.</p>
-                    <p style={{ fontSize: '12px', marginTop: '8px' }}>Share your referral code or link to start earning commissions.</p>
+                    <div className="referral-empty-icon">📨</div>
+                    <p style={{ fontSize: '16px', fontWeight: '600', marginBottom: '4px' }}>No referrals yet</p>
+                    <p style={{ fontSize: '12px' }}>Share your referral code or link above to invite others and start earning commissions on their deposits.</p>
                   </div>
                 </div>
               )}
