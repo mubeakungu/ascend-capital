@@ -95,6 +95,217 @@ function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText
 }
 
 // ============================================================================
+// ACCOUNT MANAGEMENT
+// ============================================================================
+
+function AccountDetailModal({ accountId, onClose, onUpdate }) {
+  const [{ data, loading, error }, reload] = useLoad(
+    () => api(`/admin/accounts/${accountId}`),
+    [accountId]
+  );
+  const [editMode, setEditMode] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  useEffect(() => {
+    if (data?.account) {
+      setName(data.account.name);
+      setEmail(data.account.email);
+    }
+  }, [data]);
+
+  async function saveChanges(e) {
+    e?.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      await api(`/admin/accounts/${accountId}`, {
+        method: 'PATCH',
+        body: { name, email },
+      });
+      setNotice({ text: 'Account updated' });
+      setEditMode(false);
+      reload();
+      onUpdate();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  if (loading) return <div className="ad-overlay" onClick={onClose}><div className="ad-modal" onClick={(e) => e.stopPropagation()}><p>Loading…</p></div></div>;
+  if (error) return <div className="ad-overlay" onClick={onClose}><div className="ad-modal" onClick={(e) => e.stopPropagation()}><p className="ad-error">{error}</p></div></div>;
+
+  const account = data?.account;
+  if (!account) return null;
+
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges} style={{ maxWidth: '500px' }}>
+        <h3>Account Details</h3>
+        
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">ID</span>
+          <span className="ad-detail-value">{account.id}</span>
+        </div>
+
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">Status</span>
+          <span className={`ad-detail-value ${account.status === 'held' ? 'bad' : ''}`}>
+            <Badge value={account.status} />
+            {account.holdReason && <small>{account.holdReason}</small>}
+          </span>
+        </div>
+
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">Role</span>
+          <span className="ad-detail-value"><Badge value={account.role} /></span>
+        </div>
+
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">Balance</span>
+          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(account.balance)}</span>
+        </div>
+
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">Created</span>
+          <span className="ad-detail-value">{when(account.createdAt)}</span>
+        </div>
+
+        {editMode ? (
+          <>
+            <label>Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+            <label>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <Notice notice={notice} />
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => setEditMode(false)}>Cancel</button>
+              <button className="ad-btn" disabled={busy}>{busy ? 'Saving…' : 'Save Changes'}</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Name</span>
+              <span className="ad-detail-value">{account.name}</span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Email</span>
+              <span className="ad-detail-value">{account.email}</span>
+            </div>
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>
+              <button type="button" className="ad-btn" onClick={() => setEditMode(true)}>Edit</button>
+            </div>
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function AccountsManagement() {
+  const [{ data, error, loading }, reload] = useLoad(
+    () => api('/admin/accounts'),
+    []
+  );
+  const [selectedId, setSelectedId] = useState(null);
+  const [deleteId, setDeleteId] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const accounts = data?.accounts || [];
+
+  async function deleteAccount() {
+    if (!deleteId) return;
+    try {
+      await api(`/admin/accounts/${deleteId}`, {
+        method: 'DELETE',
+        body: { confirm: 'DELETE' },
+      });
+      setNotice({ text: 'Account deleted' });
+      setDeleteId(null);
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+  }
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  return (
+    <section>
+      <div className="ad-row">
+        <h2>Account Management</h2>
+        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
+      </div>
+
+      <Notice notice={notice} />
+
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Balance</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => (
+              <tr key={a.id}>
+                <td>{a.name}</td>
+                <td>{a.email}</td>
+                <td><Badge value={a.status} /></td>
+                <td className="num">{money(a.balance)}</td>
+                <td><Badge value={a.role} /></td>
+                <td>{new Date(a.createdAt).toLocaleDateString()}</td>
+                <td>
+                  <div className="ad-actions">
+                    <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)}>View</button>
+                    {a.role !== 'admin' && (
+                      <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)}>Delete</button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedId && (
+        <AccountDetailModal 
+          accountId={selectedId} 
+          onClose={() => setSelectedId(null)}
+          onUpdate={reload}
+        />
+      )}
+
+      {deleteId && (
+        <div className="ad-overlay" onClick={() => setDeleteId(null)}>
+          <div className="ad-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete Account?</h3>
+            <p style={{ color: 'var(--muted)' }}>This will permanently delete this account and all associated data.</p>
+            <div className="ad-row end">
+              <button className="ad-btn ghost" onClick={() => setDeleteId(null)}>Cancel</button>
+              <button className="ad-btn danger" onClick={deleteAccount}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
 // DASHBOARD / ANALYTICS
 // ============================================================================
 
@@ -155,17 +366,6 @@ function ReferralsManagement() {
     () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
     [searchId]
   );
-
-  const referrals = data ? [{
-    accountId: data.account.id,
-    accountName: data.account.name,
-    accountEmail: data.account.email,
-    tier: data.tier,
-    directReferrals: data.directReferrals,
-    teamTotal: data.teamTotal,
-    commissionsEarned: data.commissions.length,
-    totalEarnings: data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0),
-  }] : [];
 
   return (
     <section>
@@ -236,7 +436,6 @@ function ReferralsManagement() {
 
 function TradingManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
-  const [ask, setAsk] = useState(null);
   const [notice, setNotice] = useState(null);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
@@ -245,12 +444,22 @@ function TradingManagement() {
   const trades = data?.ledger || [];
   const totalProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
 
+  async function applyProfits() {
+    try {
+      await api('/admin/trading/apply-profits', { method: 'POST' });
+      setNotice({ text: 'Daily profits applied successfully' });
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+  }
+
   return (
     <section>
       <div className="ad-row">
         <h2>Trading & Profit Ledger</h2>
         <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
-        <button className="ad-btn" onClick={() => setAsk('apply')}>Apply Daily Profits</button>
+        <button className="ad-btn" onClick={applyProfits}>Apply Daily Profits</button>
       </div>
 
       <Notice notice={notice} />
@@ -289,20 +498,6 @@ function TradingManagement() {
         </table>
         {!trades.length && <p className="ad-empty">No trading activity yet</p>}
       </div>
-
-      {ask === 'apply' && (
-        <AskModal
-          title="Apply Daily Trading Profits"
-          label="This will credit today's profits to all active deposits. Continue?"
-          confirmText="Apply Profits"
-          onClose={() => setAsk(null)}
-          onSubmit={async () => {
-            await api('/admin/trading/apply-profits', { method: 'POST' });
-            setNotice({ text: 'Daily profits applied successfully' });
-            reload();
-          }}
-        />
-      )}
     </section>
   );
 }
@@ -333,7 +528,6 @@ function BalanceManagement() {
         throw new Error('Invalid amount');
       }
 
-      // Note: You'll need to add this endpoint to your app.js
       await api(`/admin/accounts/${memberId}/balance`, {
         method: 'POST',
         body: { action, amountCents: Math.round(amountNum * 100), reason }
@@ -406,6 +600,15 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [logo, setLogo] = useState(null);
+
+  useEffect(() => {
+    // Try to load logo
+    fetch('/api/public/logo')
+      .then(r => r.ok && r.blob())
+      .then(blob => blob && setLogo(URL.createObjectURL(blob)))
+      .catch(() => {});
+  }, []);
 
   async function submit(e) {
     e.preventDefault();
@@ -423,6 +626,7 @@ function Login({ onLogin }) {
   return (
     <div className="ad-login">
       <form className="ad-card ad-form" onSubmit={submit}>
+        {logo && <img src={logo} alt="Logo" className="ad-logo" />}
         <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
         <h2>Administrator sign in</h2>
         <label>Username</label>
@@ -439,9 +643,15 @@ function Login({ onLogin }) {
 export default function AdminDashboard() {
   const [account, setAccount] = useState(undefined);
   const [tab, setTab] = useState('dashboard');
+  const [logo, setLogo] = useState(null);
 
   useEffect(() => {
     api('/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
+    // Load logo
+    fetch('/api/public/logo')
+      .then(r => r.ok && r.blob())
+      .then(blob => blob && setLogo(URL.createObjectURL(blob)))
+      .catch(() => {});
   }, []);
 
   async function signOut() {
@@ -451,6 +661,7 @@ export default function AdminDashboard() {
 
   const tabs = [
     ['dashboard', 'Dashboard'],
+    ['accounts', 'Accounts'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
     ['balance', 'Balances'],
@@ -473,7 +684,10 @@ export default function AdminDashboard() {
     body = (
       <>
         <header className="ad-top">
-          <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
+          <div className="ad-brand">
+            {logo && <img src={logo} alt="Logo" style={{ height: '32px', marginRight: '8px', verticalAlign: 'middle' }} />}
+            <b>ascend</b> capital <span>Admin</span>
+          </div>
           <nav>
             {tabs.map(([key, label]) => (
               <button key={key} className={tab === key ? 'on' : ''} onClick={() => setTab(key)}>{label}</button>
@@ -483,6 +697,7 @@ export default function AdminDashboard() {
         </header>
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
+          {tab === 'accounts' && <AccountsManagement />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'balance' && <BalanceManagement />}
@@ -504,8 +719,9 @@ const CSS = `
 .ad *{box-sizing:border-box}
 .ad h2,.ad h3{font-family:Manrope,'DM Sans',sans-serif;margin:0}
 .ad h2{font-size:20px}.ad h3{font-size:15px;margin:18px 0 8px}
+.ad-logo{max-height:40px;width:auto;object-fit:contain}
 .ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card)}
-.ad-brand{font:600 18px Manrope,sans-serif}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
+.ad-brand{font:600 18px Manrope,sans-serif;display:flex;align-items:center}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
 .ad-top nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
 .ad-top nav button{background:none;border:0;color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit}
 .ad-top nav button.on{background:#1a241f;color:var(--text)}
@@ -541,4 +757,13 @@ const CSS = `
 .ad-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;justify-content:flex-end;align-items:center;z-index:50}
 .ad-modal{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(440px,92vw);margin:auto}
 .ad-modal h3{margin:0 0 6px}.ad-modal .ad-row{margin:14px 0 0}
+.ad-detail-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);align-items:center}
+.ad-detail-label{color:var(--muted);font-size:12px;font-weight:500}
+.ad-detail-value{color:var(--text)}
+.ad-actions{display:flex;gap:6px}
+.ad-badge{display:inline-block;background:var(--line);color:var(--text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase}
+.ad-badge.active{background:#1a3a2e;color:var(--accent)}
+.ad-badge.held{background:#3a2a20;color:var(--bad)}
+.ad-badge.admin{background:#1a2a3a;color:#5bc0ff}
+.ad-badge.member{background:#1a3a1a;color:#90ee90}
 `;
