@@ -1032,38 +1032,43 @@ export function createApp({ databasePath }) {
   });
 
   app.get('/api/referrals/stats', requireAccount, (request, response) => {
-    const directStats = db.prepare(`
-      SELECT COUNT(*) AS direct_count,
-        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
-      FROM referral_signups rs
-      LEFT JOIN accounts a ON a.id = rs.referred_account_id
-      LEFT JOIN transactions t ON t.account_id = a.id
-      WHERE rs.referrer_id = ?
-    `).get(request.account.id);
+    try {
+      const directStats = db.prepare(`
+        SELECT COUNT(*) AS direct_count,
+          COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
+        FROM referral_signups rs
+        LEFT JOIN accounts a ON a.id = rs.referred_account_id
+        LEFT JOIN transactions t ON t.account_id = a.id
+        WHERE rs.referrer_id = ?
+      `).get(request.account.id);
 
-    const commissionStats = db.prepare(`
-      SELECT COUNT(*) AS commission_count,
-        COALESCE(SUM(commission_cents), 0) AS total_commission_cents
-      FROM referral_commissions
-      WHERE referrer_id = ?
-    `).get(request.account.id);
+      const commissionStats = db.prepare(`
+        SELECT COUNT(*) AS commission_count,
+          COALESCE(SUM(commission_cents), 0) AS total_commission_cents
+        FROM referral_commissions
+        WHERE referrer_id = ?
+      `).get(request.account.id);
 
-    const directCount = directStats.direct_count;
-    const teamTotal = getTeamTotal(db, request.account.id);
-    const tier = getTierByProgress(directCount, teamTotal);
-    const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
-    const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
+      const directCount = directStats?.direct_count || 0;
+      const teamTotal = getTeamTotal(db, request.account.id) || 0;
+      const tier = getTierByProgress(directCount, teamTotal);
+      const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
+      const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
 
-    return response.json({
-      referralCode: db.prepare('SELECT code FROM referral_codes WHERE account_id = ?').get(request.account.id)?.code || null,
-      tier: tierName,
-      commissionRate: commissionRate,
-      directReferrals: directCount,
-      directVolume: directStats.direct_volume / 100,
-      commissionsEarned: commissionStats.commission_count,
-      totalEarnings: commissionStats.total_commission_cents / 100,
-      teamTotal,
-    });
+      return response.json({
+        referralCode: db.prepare('SELECT code FROM referral_codes WHERE account_id = ?').get(request.account.id)?.code || null,
+        tier: tierName,
+        commissionRate: commissionRate,
+        directReferrals: directCount,
+        directVolume: (directStats?.direct_volume || 0) / 100,
+        commissionsEarned: commissionStats?.commission_count || 0,
+        totalEarnings: (commissionStats?.total_commission_cents || 0) / 100,
+        teamTotal: teamTotal,
+      });
+    } catch (error) {
+      console.error('Error in /api/referrals/stats:', error);
+      return response.status(500).json({ error: 'Failed to fetch referral stats.' });
+    }
   });
 
   app.get('/api/referrals/list', requireAccount, (request, response) => {
