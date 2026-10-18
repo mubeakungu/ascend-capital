@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-// Change to the currency your platform uses.
 const CURRENCY = 'USD';
 
 const money = (n) =>
@@ -32,7 +31,6 @@ function useLoad(loader, deps) {
     } catch (e) {
       setState({ data: null, error: e.message, loading: false });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => { run(); }, [run]);
   return [state, run];
@@ -45,6 +43,16 @@ function Notice({ notice }) {
 
 function Badge({ value }) {
   return <span className={`ad-badge ${value}`}>{value}</span>;
+}
+
+function StatCard({ label, value, subtext }) {
+  return (
+    <div className="ad-stat-card">
+      <p className="ad-stat-label">{label}</p>
+      <p className="ad-stat-value">{value}</p>
+      {subtext && <p className="ad-stat-sub">{subtext}</p>}
+    </div>
+  );
 }
 
 function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText = 'Confirm', danger, onSubmit, onClose }) {
@@ -86,309 +94,255 @@ function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText
   );
 }
 
-function useReview(onDone, notify) {
-  const [target, setTarget] = useState(null);
-  const approve = async (tx) => {
-    if (!window.confirm(`Approve ${tx.type} of ${money(tx.amount)} for ${tx.accountName}?`)) return;
-    try {
-      await api(`/admin/transactions/${tx.id}/approve`, { method: 'POST' });
-      notify(`${tx.type} of ${money(tx.amount)} approved.`);
-      onDone();
-    } catch (e) {
-      notify(e.message, true);
-    }
-  };
-  const modal = target && (
-    <AskModal
-      title={`Reject ${target.type} of ${money(target.amount)}`}
-      label="Reason (the client can see this)"
-      multiline
-      min={3}
-      danger
-      confirmText="Reject"
-      onClose={() => setTarget(null)}
-      onSubmit={async (note) => {
-        await api(`/admin/transactions/${target.id}/reject`, { method: 'POST', body: { note } });
-        notify('Transaction rejected.');
-        onDone();
-      }}
-    />
-  );
-  return { approve, reject: setTarget, modal };
-}
+// ============================================================================
+// DASHBOARD / ANALYTICS
+// ============================================================================
 
-function TxTable({ rows, showClient, review, onClient }) {
-  if (!rows.length) return <p className="ad-empty">Nothing here yet.</p>;
-  return (
-    <div className="ad-scroll">
-      <table className="ad-table">
-        <thead>
-          <tr>
-            <th>Date</th>{showClient && <th>Client</th>}<th>Type</th><th>Amount</th><th>Reference</th><th>Status</th><th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((tx) => (
-            <tr key={tx.id}>
-              <td>{when(tx.createdAt)}</td>
-              {showClient && (
-                <td>
-                  <button className="ad-link" onClick={() => onClient?.(tx.accountId)}>{tx.accountName}</button>
-                  <small>{tx.accountEmail}</small>
-                </td>
-              )}
-              <td className={`ad-type ${tx.type}`}>{tx.type}</td>
-              <td className="num">{money(tx.amount)}</td>
-              <td className="ad-ref">{tx.reference}</td>
-              <td>
-                <Badge value={tx.status} />
-                {tx.reviewNote && <small>{tx.reviewNote}</small>}
-              </td>
-              <td className="ad-actions">
-                {tx.status === 'pending' && (
-                  <>
-                    <button className="ad-btn sm" onClick={() => review.approve(tx)}>Approve</button>
-                    <button className="ad-btn sm danger" onClick={() => review.reject(tx)}>Reject</button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+function Dashboard() {
+  const [{ data, error, loading }, reload] = useLoad(async () => {
+    const [accounts, queue, ledger] = await Promise.all([
+      api('/admin/accounts'),
+      api('/admin/transactions?status=pending'),
+      api('/admin/trading/ledger'),
+    ]);
+    return { accounts, queue, ledger };
+  }, []);
 
-function Queue({ onClient }) {
-  const [status, setStatus] = useState('pending');
-  const [type, setType] = useState('');
-  const [notice, setNotice] = useState(null);
-  const notify = (text, bad = false) => setNotice({ text, bad });
-  const [{ data, error, loading }, reload] = useLoad(() => {
-    const qs = new URLSearchParams();
-    if (status) qs.set('status', status);
-    if (type) qs.set('type', type);
-    return api(`/admin/transactions?${qs}`);
-  }, [status, type]);
-  const review = useReview(reload, notify);
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const acc = data?.accounts?.accounts || [];
+  const txns = data?.queue?.transactions || [];
+  const trades = data?.ledger?.ledger || [];
+
+  const totalMembers = acc.length;
+  const totalDeposits = acc.reduce((sum, a) => sum + a.balance, 0);
+  const pendingDeposits = txns.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
+  const pendingWithdrawals = txns.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
+  const totalTrades = trades.length;
+  const totalTradeProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
+  const activeDeposits = acc.reduce((sum, a) => sum + (a.pendingTransactions > 0 ? a.balance : 0), 0);
 
   return (
     <section>
-      <div className="ad-row">
-        <h2>Deposits &amp; withdrawals</h2>
-        <div className="ad-row grow end">
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All statuses</option>
-          </select>
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">Deposits &amp; withdrawals</option>
-            <option value="deposit">Deposits</option>
-            <option value="withdrawal">Withdrawals</option>
-          </select>
-          <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-        </div>
+      <h2>System Overview</h2>
+      <button className="ad-btn ghost" onClick={reload} style={{ marginBottom: '16px' }}>Refresh</button>
+      
+      <div className="ad-grid">
+        <StatCard label="Total Members" value={totalMembers} />
+        <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
+        <StatCard label="Held Accounts" value={acc.filter(a => a.status === 'held').length} />
+        <StatCard label="Total Deposits (All Time)" value={money(totalDeposits)} />
+        <StatCard label="Active Deposits" value={money(activeDeposits)} />
+        <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} requests`} />
+        <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} requests`} />
+        <StatCard label="Total Trades" value={totalTrades} />
+        <StatCard label="Total Trading Profit" value={money(totalTradeProfit)} />
+        <StatCard label="Pending Review" value={txns.length} subtext="deposits & withdrawals" />
       </div>
+    </section>
+  );
+}
+
+// ============================================================================
+// REFERRALS MANAGEMENT
+// ============================================================================
+
+function ReferralsManagement() {
+  const [searchId, setSearchId] = useState('');
+  const [notice, setNotice] = useState(null);
+  const [{ data, error, loading }, reload] = useLoad(
+    () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
+    [searchId]
+  );
+
+  const referrals = data ? [{
+    accountId: data.account.id,
+    accountName: data.account.name,
+    accountEmail: data.account.email,
+    tier: data.tier,
+    directReferrals: data.directReferrals,
+    teamTotal: data.teamTotal,
+    commissionsEarned: data.commissions.length,
+    totalEarnings: data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0),
+  }] : [];
+
+  return (
+    <section>
+      <h2>Referral Management</h2>
+      <div className="ad-row" style={{ marginBottom: '16px' }}>
+        <input 
+          placeholder="Search by member ID" 
+          value={searchId} 
+          onChange={(e) => setSearchId(e.target.value)}
+          style={{ flex: 1, maxWidth: '300px' }}
+        />
+        <button className="ad-btn ghost" onClick={reload}>Search</button>
+      </div>
+      
       <Notice notice={notice} />
       {error && <p className="ad-error">{error}</p>}
-      {loading && !data ? <p className="ad-empty">Loading…</p> : data && <TxTable rows={data.transactions} showClient review={review} onClient={onClient} />}
-      {review.modal}
+
+      {searchId && loading ? (
+        <p className="ad-empty">Loading…</p>
+      ) : data ? (
+        <div>
+          <div className="ad-grid">
+            <StatCard label="Direct Referrals" value={data.directReferrals} />
+            <StatCard label="Team Total" value={data.teamTotal} />
+            <StatCard label="Current Tier" value={data.tier || 'None'} />
+            <StatCard label="Commissions Earned" value={data.commissions.length} />
+            <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
+          </div>
+
+          <h3>Referrals (Direct)</h3>
+          <div className="ad-scroll">
+            <table className="ad-table">
+              <thead>
+                <tr>
+                  <th>Member Name</th>
+                  <th>Email</th>
+                  <th>Commission Rate</th>
+                  <th>Earned</th>
+                  <th>Transaction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.commissions.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.referredName}</td>
+                    <td>{c.referredEmail}</td>
+                    <td>{(c.commissionRate * 100).toFixed(1)}%</td>
+                    <td className="num">{money(c.commissionEarned)}</td>
+                    <td>{c.transactionType} {money(c.transactionAmount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : searchId ? (
+        <p className="ad-empty">Enter a member ID to view referral data</p>
+      ) : (
+        <p className="ad-empty">Enter a member ID to search</p>
+      )}
     </section>
   );
 }
 
-function ClientDetail({ id, onClose, onChanged }) {
-  const [notice, setNotice] = useState(null);
-  const notify = (text, bad = false) => setNotice({ text, bad });
+// ============================================================================
+// TRADING MANAGEMENT
+// ============================================================================
+
+function TradingManagement() {
+  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
   const [ask, setAsk] = useState(null);
-  const [{ data, error, loading }, reload] = useLoad(() => api(`/admin/accounts/${id}/activity`), [id]);
-  const refresh = () => { reload(); onChanged(); };
-  const review = useReview(refresh, notify);
-  const post = (path, body) => api(`/admin/accounts/${id}/${path}`, { method: 'POST', body });
-  const acc = data?.account;
-  const s = data?.summary;
+  const [notice, setNotice] = useState(null);
 
-  return (
-    <div className="ad-overlay" onClick={onClose}>
-      <aside className="ad-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="ad-row">
-          <h2>{acc?.name ?? 'Client'}</h2>
-          <button className="ad-btn ghost sm" onClick={onClose}>Close</button>
-        </div>
-        {loading && !data && <p className="ad-empty">Loading…</p>}
-        {error && <p className="ad-error">{error}</p>}
-        <Notice notice={notice} />
-        {acc && s && (
-          <>
-            <p className="ad-muted">{acc.email} · joined {when(acc.createdAt)} · <Badge value={acc.status} /></p>
-            {acc.status === 'held' && (
-              <p className="ad-notice bad">On hold since {when(acc.heldAt)} — {acc.holdReason}</p>
-            )}
-            <div className="ad-stats">
-              <div><span>Balance</span><b>{money(s.balance)}</b></div>
-              <div><span>Total deposited</span><b>{money(s.totalDeposited)}</b></div>
-              <div><span>Total withdrawn</span><b>{money(s.totalWithdrawn)}</b></div>
-              <div><span>Pending deposits</span><b>{money(s.pendingDeposits)}</b></div>
-              <div><span>Pending withdrawals</span><b>{money(s.pendingWithdrawals)}</b></div>
-              <div><span>Rejected requests</span><b>{s.rejectedCount}</b></div>
-            </div>
-            {acc.role !== 'admin' && (
-              <div className="ad-row">
-                {acc.status === 'held'
-                  ? <button className="ad-btn" onClick={() => setAsk('release')}>Release hold</button>
-                  : <button className="ad-btn danger" onClick={() => setAsk('hold')}>Hold account (fraud)</button>}
-                <button className="ad-btn ghost" onClick={() => setAsk('password')}>Reset password</button>
-              </div>
-            )}
-            <h3>Recent transactions</h3>
-            <TxTable rows={data.transactions} review={review} />
-          </>
-        )}
-        {ask === 'hold' && (
-          <AskModal
-            title="Put account on hold"
-            label="Reason (required, recorded in the audit log)"
-            multiline min={3} danger confirmText="Hold account"
-            onClose={() => setAsk(null)}
-            onSubmit={async (reason) => { await post('hold', { reason }); notify('Account placed on hold and signed out.'); refresh(); }}
-          />
-        )}
-        {ask === 'release' && (
-          <AskModal
-            title="Release account"
-            label="Note (optional)"
-            multiline confirmText="Release"
-            onClose={() => setAsk(null)}
-            onSubmit={async (note) => { await post('release', { note }); notify('Account released.'); refresh(); }}
-          />
-        )}
-        {ask === 'password' && (
-          <AskModal
-            title="Set a new password"
-            label="New password (at least 12 characters)"
-            type="password" min={12} confirmText="Update password"
-            onClose={() => setAsk(null)}
-            onSubmit={async (newPassword) => { await post('password', { newPassword }); notify('Password updated. The client was signed out everywhere.'); }}
-          />
-        )}
-        {review.modal}
-      </aside>
-    </div>
-  );
-}
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
 
-function Clients({ openId, setOpenId }) {
-  const [query, setQuery] = useState('');
-  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (data?.accounts ?? []).filter((a) => !q || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q));
-  }, [data, query]);
+  const trades = data?.ledger || [];
+  const totalProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
 
   return (
     <section>
       <div className="ad-row">
-        <h2>Clients</h2>
-        <div className="ad-row grow end">
-          <input placeholder="Search name or email" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-        </div>
+        <h2>Trading & Profit Ledger</h2>
+        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
+        <button className="ad-btn" onClick={() => setAsk('apply')}>Apply Daily Profits</button>
       </div>
-      {error && <p className="ad-error">{error}</p>}
-      {loading && !data ? <p className="ad-empty">Loading…</p> : (
-        <div className="ad-scroll">
-          <table className="ad-table">
-            <thead><tr><th>Client</th><th>Status</th><th>Balance</th><th>Pending</th><th>Joined</th><th /></tr></thead>
-            <tbody>
-              {rows.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.name}{a.role === 'admin' && ' (admin)'}<small>{a.email}</small></td>
-                  <td><Badge value={a.status} /></td>
-                  <td className="num">{money(a.balance)}</td>
-                  <td>{a.pendingTransactions}</td>
-                  <td>{when(a.createdAt)}</td>
-                  <td className="ad-actions"><button className="ad-btn sm ghost" onClick={() => setOpenId(a.id)}>View</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!rows.length && <p className="ad-empty">No clients found.</p>}
-        </div>
-      )}
-      {openId && <ClientDetail id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
-    </section>
-  );
-}
 
-const AUDIT_ACTIONS = [
-  ['', 'All actions'],
-  ['transaction.approved', 'Approvals'],
-  ['transaction.rejected', 'Rejections'],
-  ['account.hold', 'Holds'],
-  ['account.release', 'Releases'],
-  ['password.reset_by_admin', 'Admin password resets'],
-  ['password.change_self', 'Own password changes'],
-];
+      <Notice notice={notice} />
 
-function Audit() {
-  const [action, setAction] = useState('');
-  const [{ data, error, loading }, reload] = useLoad(
-    () => api(`/admin/audit${action ? `?action=${encodeURIComponent(action)}` : ''}`),
-    [action],
-  );
-  return (
-    <section>
-      <div className="ad-row">
-        <h2>Audit log</h2>
-        <div className="ad-row grow end">
-          <select value={action} onChange={(e) => setAction(e.target.value)}>
-            {AUDIT_ACTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-        </div>
+      <div className="ad-grid">
+        <StatCard label="Total Trades" value={trades.length} />
+        <StatCard label="Total Profit Generated" value={money(totalProfit)} />
       </div>
-      {error && <p className="ad-error">{error}</p>}
-      {loading && !data ? <p className="ad-empty">Loading…</p> : data && (
-        <div className="ad-scroll">
-          <table className="ad-table">
-            <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th><th>IP</th></tr></thead>
-            <tbody>
-              {data.entries.map((e) => (
-                <tr key={e.id}>
-                  <td>{when(e.createdAt)}</td>
-                  <td>{e.actorEmail ?? '—'}</td>
-                  <td>{e.action}</td>
-                  <td className="ad-ref">{Object.entries(e.detail).map(([k, v]) => `${k}: ${v}`).join(' · ')}</td>
-                  <td>{e.ip ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!data.entries.length && <p className="ad-empty">No entries yet.</p>}
-        </div>
+
+      <h3>Recent Trading Activity</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Member</th>
+              <th>Deposit Amount</th>
+              <th>Daily Profit</th>
+              <th>Credited</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((t) => (
+              <tr key={t.id}>
+                <td>{t.profitDate}</td>
+                <td>
+                  {t.accountName}
+                  <small>{t.accountEmail}</small>
+                </td>
+                <td className="num">{money(t.depositAmount)}</td>
+                <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
+                <td>{when(t.creditedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!trades.length && <p className="ad-empty">No trading activity yet</p>}
+      </div>
+
+      {ask === 'apply' && (
+        <AskModal
+          title="Apply Daily Trading Profits"
+          label="This will credit today's profits to all active deposits. Continue?"
+          confirmText="Apply Profits"
+          onClose={() => setAsk(null)}
+          onSubmit={async () => {
+            await api('/admin/trading/apply-profits', { method: 'POST' });
+            setNotice({ text: 'Daily profits applied successfully' });
+            reload();
+          }}
+        />
       )}
     </section>
   );
 }
 
-function Security({ forced, onChanged }) {
-  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
+// ============================================================================
+// BALANCE MANAGEMENT
+// ============================================================================
+
+function BalanceManagement() {
+  const [memberId, setMemberId] = useState('');
+  const [action, setAction] = useState('adjust');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   async function submit(e) {
     e.preventDefault();
-    if (form.newPassword !== form.confirm) return setNotice({ text: 'New passwords do not match.', bad: true });
+    if (!memberId || !amount || !reason) {
+      setNotice({ text: 'All fields required', bad: true });
+      return;
+    }
+
     setBusy(true);
     try {
-      await api('/auth/password', { method: 'POST', body: { currentPassword: form.currentPassword, newPassword: form.newPassword } });
-      setForm({ currentPassword: '', newPassword: '', confirm: '' });
-      setNotice({ text: 'Password changed. Your other sessions were signed out.' });
-      onChanged?.();
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error('Invalid amount');
+      }
+
+      // Note: You'll need to add this endpoint to your app.js
+      await api(`/admin/accounts/${memberId}/balance`, {
+        method: 'POST',
+        body: { action, amountCents: Math.round(amountNum * 100), reason }
+      });
+
+      setNotice({ text: `Balance ${action}ed by ${money(amountNum)}` });
+      setMemberId('');
+      setAmount('');
+      setReason('');
     } catch (err) {
       setNotice({ text: err.message, bad: true });
     }
@@ -397,21 +351,55 @@ function Security({ forced, onChanged }) {
 
   return (
     <section>
-      <h2>Change your password</h2>
-      {forced && <p className="ad-notice">You are signed in with a temporary password. Choose a new one to continue.</p>}
-      <form className="ad-form" onSubmit={submit}>
-        <label>Current password</label>
-        <input type="password" autoComplete="current-password" value={form.currentPassword} onChange={set('currentPassword')} required />
-        <label>New password (at least 12 characters)</label>
-        <input type="password" autoComplete="new-password" value={form.newPassword} onChange={set('newPassword')} required />
-        <label>Confirm new password</label>
-        <input type="password" autoComplete="new-password" value={form.confirm} onChange={set('confirm')} required />
+      <h2>Adjust Member Balance</h2>
+      <form className="ad-form" onSubmit={submit} style={{ maxWidth: '500px' }}>
+        <label>Member ID</label>
+        <input 
+          type="text" 
+          value={memberId} 
+          onChange={(e) => setMemberId(e.target.value)}
+          placeholder="Enter member ID"
+          required
+        />
+
+        <label>Action</label>
+        <select value={action} onChange={(e) => setAction(e.target.value)}>
+          <option value="adjust">Adjust (add)</option>
+          <option value="deduct">Deduct (subtract)</option>
+          <option value="set">Set (replace balance)</option>
+        </select>
+
+        <label>Amount (USD)</label>
+        <input 
+          type="number" 
+          step="0.01"
+          value={amount} 
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          required
+        />
+
+        <label>Reason</label>
+        <textarea 
+          rows={3}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why are you adjusting this balance?"
+          required
+        />
+
         <Notice notice={notice} />
-        <button className="ad-btn" disabled={busy}>{busy ? 'Saving…' : 'Update password'}</button>
+        <button className="ad-btn" disabled={busy}>
+          {busy ? 'Processing…' : `${action.charAt(0).toUpperCase() + action.slice(1)} Balance`}
+        </button>
       </form>
     </section>
   );
 }
+
+// ============================================================================
+// MAIN ADMIN DASHBOARD
+// ============================================================================
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -450,8 +438,7 @@ function Login({ onLogin }) {
 
 export default function AdminDashboard() {
   const [account, setAccount] = useState(undefined);
-  const [tab, setTab] = useState('queue');
-  const [openId, setOpenId] = useState(null);
+  const [tab, setTab] = useState('dashboard');
 
   useEffect(() => {
     api('/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
@@ -462,9 +449,12 @@ export default function AdminDashboard() {
     setAccount(null);
   }
 
-  const refreshAccount = () => api('/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
-  const openClient = (id) => { setTab('clients'); setOpenId(id); };
-  const tabs = [['queue', 'Review queue'], ['clients', 'Clients'], ['audit', 'Audit log'], ['security', 'Security']];
+  const tabs = [
+    ['dashboard', 'Dashboard'],
+    ['referrals', 'Referrals'],
+    ['trading', 'Trading'],
+    ['balance', 'Balances'],
+  ];
 
   let body;
   if (account === undefined) body = <p className="ad-empty">Loading…</p>;
@@ -479,16 +469,6 @@ export default function AdminDashboard() {
         </div>
       </div>
     );
-  } else if (account.mustChangePassword) {
-    body = (
-      <>
-        <header className="ad-top">
-          <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
-          <div className="ad-who">{account.email}<button className="ad-btn ghost sm" onClick={signOut}>Sign out</button></div>
-        </header>
-        <main className="ad-main"><Security forced onChanged={refreshAccount} /></main>
-      </>
-    );
   } else {
     body = (
       <>
@@ -502,10 +482,10 @@ export default function AdminDashboard() {
           <div className="ad-who">{account.email}<button className="ad-btn ghost sm" onClick={signOut}>Sign out</button></div>
         </header>
         <main className="ad-main">
-          {tab === 'queue' && <Queue onClient={openClient} />}
-          {tab === 'clients' && <Clients openId={openId} setOpenId={setOpenId} />}
-          {tab === 'audit' && <Audit />}
-          {tab === 'security' && <Security />}
+          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'referrals' && <ReferralsManagement />}
+          {tab === 'trading' && <TradingManagement />}
+          {tab === 'balance' && <BalanceManagement />}
         </main>
       </>
     );
@@ -539,20 +519,20 @@ const CSS = `
 .ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:5px 10px;font-size:12px}
 .ad-btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 .ad-btn.danger{background:var(--bad)}
-.ad-link{background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font:inherit;text-align:left}
-.ad-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.ad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0}
+.ad-stat-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.ad-stat-label{color:var(--muted);font-size:12px;margin:0 0 4px}
+.ad-stat-value{font:700 24px Manrope,sans-serif;margin:0;color:var(--accent)}
+.ad-stat-sub{color:var(--muted);font-size:12px;margin:4px 0 0}
+.ad-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card);margin:12px 0}
 .ad-table{width:100%;border-collapse:collapse;min-width:640px}
 .ad-table th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
 .ad-table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 .ad-table tr:last-child td{border-bottom:0}
 .ad-table small{display:block;color:var(--muted);margin-top:2px}
 .ad-table .num{white-space:nowrap;font-variant-numeric:tabular-nums}
-.ad-ref{word-break:break-word;max-width:280px}
-.ad-actions{white-space:nowrap;text-align:right}.ad-actions .ad-btn{margin-left:6px}
-.ad-type.deposit{color:var(--accent)}.ad-type.withdrawal{color:var(--warn)}
-.ad-badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;text-transform:capitalize;background:#1a241f}
-.ad-badge.pending{color:var(--warn)}.ad-badge.approved,.ad-badge.active{color:var(--accent)}.ad-badge.rejected,.ad-badge.held{color:var(--bad)}
-.ad-empty{color:var(--muted);padding:24px;text-align:center}.ad-muted{color:var(--muted)}
+.ad-empty{color:var(--muted);padding:24px;text-align:center}
+.ad-muted{color:var(--muted)}
 .ad-error{color:var(--bad);margin:8px 0}
 .ad-notice{background:#16221b;border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:10px 0}.ad-notice.bad{color:var(--bad);border-color:#4a2a26;background:#201513}
 .ad-login{min-height:100vh;display:grid;place-items:center;padding:20px}
@@ -561,8 +541,4 @@ const CSS = `
 .ad-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;justify-content:flex-end;align-items:center;z-index:50}
 .ad-modal{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(440px,92vw);margin:auto}
 .ad-modal h3{margin:0 0 6px}.ad-modal .ad-row{margin:14px 0 0}
-.ad-drawer{background:var(--bg);border-left:1px solid var(--line);height:100%;width:min(760px,100%);overflow-y:auto;padding:22px}
-.ad-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
-.ad-stats div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.ad-stats span{display:block;color:var(--muted);font-size:12px}.ad-stats b{font:700 16px Manrope,sans-serif}
 `;
