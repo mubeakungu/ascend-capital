@@ -762,6 +762,10 @@ export function createApp({ databasePath }) {
   seedInitialAdmin();
   scheduleDailyTradingProfits();
 
+  // =========================================================================
+  // PUBLIC ENDPOINTS
+  // =========================================================================
+
   app.get('/api/health', (_request, response) => response.json({
     status: 'ok',
     accountStorage: process.env.ACCOUNT_STORAGE_MODE ?? 'local',
@@ -787,6 +791,10 @@ export function createApp({ databasePath }) {
       return response.status(404).json({ error: 'Logo file not found.' });
     }
   });
+
+  // =========================================================================
+  // AUTHENTICATION ENDPOINTS
+  // =========================================================================
 
   app.post('/api/auth/register', authRateLimit, async (request, response, next) => {
     try {
@@ -917,8 +925,7 @@ export function createApp({ databasePath }) {
   });
 
   // =========================================================================
-  // ADMIN AUTHENTICATION ENDPOINTS (separate from client auth)
-  // Uses ADMIN_SESSION_COOKIE to allow simultaneous client + admin sessions
+  // ADMIN AUTHENTICATION ENDPOINTS
   // =========================================================================
 
   app.post('/api/admin/auth/login', authRateLimit, async (request, response, next) => {
@@ -998,13 +1005,11 @@ export function createApp({ databasePath }) {
     return response.status(201).json({ code });
   });
 
-  // Tier progression endpoint (v2)
   app.get('/api/referrals/tier-progression', requireAccount, (request, response) => {
     const progression = getTierProgression(db, request.account.id);
     return response.json(progression);
   });
 
-  // Earned rewards endpoint (v2)
   app.get('/api/referrals/earned-rewards', requireAccount, (request, response) => {
     const rewards = db.prepare(`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
@@ -1100,6 +1105,10 @@ export function createApp({ databasePath }) {
     });
   });
 
+  // =========================================================================
+  // TRADING ENDPOINTS
+  // =========================================================================
+
   app.get('/api/trading/history', requireAccount, (request, response) => {
     const profits = db.prepare(`
       SELECT
@@ -1132,9 +1141,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Transactions
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // TRANSACTION ENDPOINTS
+  // =========================================================================
 
   app.post('/api/transactions', updateRateLimit, requireAccount, (request, response, next) => {
     try {
@@ -1201,9 +1210,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Admin
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // ADMIN ENDPOINTS
+  // =========================================================================
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
@@ -1573,7 +1582,6 @@ export function createApp({ databasePath }) {
     }
   });
 
-  // Admin: view tier rewards for a member
   app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAdminSession, (request, response) => {
     const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
@@ -1606,7 +1614,6 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // Admin: view all referral data for a member
   app.get('/api/admin/referrals/:accountId', adminLimiter, requireAdminSession, (request, response) => {
     const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
@@ -1735,6 +1742,10 @@ export function createApp({ databasePath }) {
       return next(error);
     }
   });
+
+  // =========================================================================
+  // ERROR HANDLERS
+  // =========================================================================
 
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
 
