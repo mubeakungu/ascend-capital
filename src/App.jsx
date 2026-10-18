@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReferralPage } from './referral-page';
+import { RegistrationPage } from './registration-page';
 
 const plans = [
   { deposit: 300, earning: '8', dailyIncome: 0.27 },
@@ -665,9 +666,13 @@ function App() {
     }
   }
 
-  if (route === '/login' || route === '/register') {
+  if (route === '/register') {
+    return <RegistrationPage onNavigate={navigate} />;
+  }
+
+  if (route === '/login') {
     return <AuthPage
-      mode={route.slice(1)}
+      mode="login"
       name={accountName}
       email={accountEmail}
       password={accountPassword}
