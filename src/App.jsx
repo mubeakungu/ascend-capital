@@ -25,7 +25,7 @@ const ranks = [
   { name: 'Star 6', direct: 11, team: 150, reward: '$1,000' },
   { name: 'Star 7', direct: 12, team: 400, reward: '$2,500 + house' },
   { name: 'Star 8', direct: 13, team: 700, reward: '$4,500 + Mazda CX-5' },
-  { name: 'Crown Leader', direct: 14, team: 100, reward: '$7,000 + Mercedes-Benz E300' },
+  { name: 'Crown Leader', direct: 14, team: 1000, reward: '$7,000 + Mercedes-Benz E300' },
 ];
 
 const navItems = [
