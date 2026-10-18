@@ -270,7 +270,11 @@ export function createApp({ databasePath }) {
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
+      hold_reason TEXT,
+      held_at TEXT,
+      must_change_password INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
@@ -279,6 +283,7 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
   `);
+  
   const accountColumns = db.prepare('PRAGMA table_info(accounts)').all();
   if (!accountColumns.some((column) => column.name === 'role')) {
     db.exec("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))");
@@ -295,11 +300,12 @@ export function createApp({ databasePath }) {
   if (!accountColumns.some((column) => column.name === 'must_change_password')) {
     db.exec('ALTER TABLE accounts ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -313,6 +319,7 @@ export function createApp({ databasePath }) {
     CREATE UNIQUE INDEX IF NOT EXISTS transactions_deposit_reference_idx
       ON transactions(reference COLLATE NOCASE)
       WHERE type = 'deposit' AND status IN ('pending', 'approved');
+    
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor_id TEXT,
@@ -324,6 +331,7 @@ export function createApp({ databasePath }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at);
+    
     CREATE TABLE IF NOT EXISTS referral_codes (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -331,6 +339,7 @@ export function createApp({ databasePath }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id);
+    
     CREATE TABLE IF NOT EXISTS referral_signups (
       id TEXT PRIMARY KEY,
       referrer_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
@@ -340,6 +349,7 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id);
+    
     CREATE TABLE IF NOT EXISTS referral_commissions (
       id TEXT PRIMARY KEY,
       referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -351,6 +361,7 @@ export function createApp({ databasePath }) {
     );
     CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
     CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
+    
     CREATE TABLE IF NOT EXISTS trading_ledger (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -482,7 +493,7 @@ export function createApp({ databasePath }) {
     if (request.account.role !== 'admin') {
       return response.status(403).json({ error: 'Administrator access is required.' });
     }
-    if (request.account.must_change_password) {
+    if (request.account.mustChangePassword) {
       return response.status(403).json({
         error: 'Change your temporary password to continue.',
         code: 'PASSWORD_CHANGE_REQUIRED',
@@ -745,6 +756,10 @@ export function createApp({ databasePath }) {
   seedInitialAdmin();
   scheduleDailyTradingProfits();
 
+  // =========================================================================
+  // PUBLIC ENDPOINTS
+  // =========================================================================
+
   app.get('/api/health', (_request, response) => response.json({
     status: 'ok',
     accountStorage: process.env.ACCOUNT_STORAGE_MODE ?? 'local',
@@ -753,6 +768,10 @@ export function createApp({ databasePath }) {
   app.get('/api/public/config', (_request, response) => response.json({
     binanceWalletAddress: process.env.BINANCE_WALLET_ADDRESS?.trim() ?? '',
   }));
+
+  // =========================================================================
+  // AUTHENTICATION ENDPOINTS
+  // =========================================================================
 
   app.post('/api/auth/register', authRateLimit, async (request, response, next) => {
     try {
@@ -882,9 +901,9 @@ export function createApp({ databasePath }) {
     }
   });
 
-  // ---------------------------------------------------------------------------
-  // Referral Endpoints
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // REFERRAL ENDPOINTS
+  // =========================================================================
 
   app.get('/api/referrals/code', requireAccount, (request, response) => {
     const existing = db.prepare('SELECT code FROM referral_codes WHERE account_id = ? LIMIT 1')
@@ -904,13 +923,11 @@ export function createApp({ databasePath }) {
     return response.status(201).json({ code });
   });
 
-  // Tier progression endpoint (v2)
   app.get('/api/referrals/tier-progression', requireAccount, (request, response) => {
     const progression = getTierProgression(db, request.account.id);
     return response.json(progression);
   });
 
-  // Earned rewards endpoint (v2)
   app.get('/api/referrals/earned-rewards', requireAccount, (request, response) => {
     const rewards = db.prepare(`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
@@ -1001,6 +1018,10 @@ export function createApp({ databasePath }) {
     });
   });
 
+  // =========================================================================
+  // TRADING ENDPOINTS
+  // =========================================================================
+
   app.get('/api/trading/history', requireAccount, (request, response) => {
     const profits = db.prepare(`
       SELECT
@@ -1033,9 +1054,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Transactions
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // TRANSACTION ENDPOINTS
+  // =========================================================================
 
   app.post('/api/transactions', updateRateLimit, requireAccount, (request, response, next) => {
     try {
@@ -1102,9 +1123,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Admin
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // ADMIN ENDPOINTS
+  // =========================================================================
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
@@ -1128,21 +1149,6 @@ export function createApp({ databasePath }) {
       pendingTransactions: row.pending_count,
     }));
     return response.json({ accounts });
-  });
-
-  app.patch('/api/admin/accounts/:id/profile', adminLimiter, requireAccount, requireAdmin, (request, response) => {
-    const name = request.body?.name;
-    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
-      return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
-    }
-
-    const target = db.prepare('SELECT id, role FROM accounts WHERE id = ?').get(request.params.id);
-    if (!target) return response.status(404).json({ error: 'Member account not found.' });
-    if (target.role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
-
-    db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), target.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
-    return response.json({ account: accountView(account) });
   });
 
   app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAccount, requireAdmin, (request, response) => {
@@ -1409,40 +1415,6 @@ export function createApp({ databasePath }) {
     }
   });
 
-  // Admin: view tier rewards for a member
-  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAccount, requireAdmin, (request, response) => {
-    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
-
-    const progression = getTierProgression(db, account.id);
-    const rewards = db.prepare(`
-      SELECT tier_index, tier_name, reward_cents, physical_reward,
-        physical_reward_value_cents, direct_referrals_at_award, 
-        team_total_at_award, credited_at, transaction_id
-      FROM referral_tier_rewards
-      WHERE referrer_id = ?
-      ORDER BY tier_index ASC
-    `).all(account.id);
-
-    return response.json({
-      account: { id: account.id, name: account.name, email: account.email },
-      directReferrals: progression.directReferrals,
-      teamTotal: progression.teamTotal,
-      currentTier: progression.currentTierName,
-      earnedRewards: rewards.map(r => ({
-        tierIndex: r.tier_index,
-        tierName: r.tier_name,
-        amountUSD: r.reward_cents / 100,
-        physicalReward: r.physical_reward,
-        directWhen: r.direct_referrals_at_award,
-        teamTotalWhen: r.team_total_at_award,
-        creditedAt: r.credited_at,
-        transactionId: r.transaction_id,
-      })),
-    });
-  });
-
-  // Admin: view all referral data for a member
   app.get('/api/admin/referrals/:accountId', adminLimiter, requireAccount, requireAdmin, (request, response) => {
     const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
@@ -1571,6 +1543,10 @@ export function createApp({ databasePath }) {
       return next(error);
     }
   });
+
+  // =========================================================================
+  // ERROR HANDLING
+  // =========================================================================
 
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
 
