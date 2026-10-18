@@ -6,6 +6,7 @@ const money = (n) =>
   `${CURRENCY} ${Number(n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 
+// Admin API helper - uses same-origin credentials for ADMIN session cookie (separate from client)
 async function api(path, { method = 'GET', body } = {}) {
   const init = { method, credentials: 'same-origin' };
   if (method !== 'GET') {
@@ -100,7 +101,7 @@ function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText
 
 function AccountDetailModal({ accountId, onClose, onUpdate }) {
   const [{ data, loading, error }, reload] = useLoad(
-    () => api(`/admin/accounts/${accountId}`),
+    () => api(`/admin/accounts/${accountId}/activity`),
     [accountId]
   );
   const [editMode, setEditMode] = useState(false);
@@ -166,7 +167,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
 
         <div className="ad-detail-row">
           <span className="ad-detail-label">Balance</span>
-          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(account.balance)}</span>
+          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
         </div>
 
         <div className="ad-detail-row">
@@ -615,7 +616,7 @@ function Login({ onLogin }) {
     setBusy(true);
     setError('');
     try {
-      const data = await api('/auth/login', { method: 'POST', body: { email, password } });
+      const data = await api('/admin/auth/login', { method: 'POST', body: { email, password } });
       onLogin(data.account);
     } catch (err) {
       setError(err.message);
@@ -646,7 +647,8 @@ export default function AdminDashboard() {
   const [logo, setLogo] = useState(null);
 
   useEffect(() => {
-    api('/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
+    // Check admin auth session (separate from client session)
+    api('/admin/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
     // Load logo
     fetch('/api/public/logo')
       .then(r => r.ok && r.blob())
@@ -655,7 +657,7 @@ export default function AdminDashboard() {
   }, []);
 
   async function signOut() {
-    await api('/auth/logout', { method: 'POST' }).catch(() => {});
+    await api('/admin/auth/logout', { method: 'POST' }).catch(() => {});
     setAccount(null);
   }
 
