@@ -455,10 +455,14 @@ function App() {
       const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
       setDailyIncome(dailyIncomeValue);
       
-      // Fetch referral earnings (5% of referrals' first deposits)
+      // Fetch referral earnings (5% commission from referred users' first deposits)
       try {
         const referralResult = await requestApi('/api/referrals/earnings');
-        setReferralEarnings(typeof referralResult.totalEarnings === 'number' ? referralResult.totalEarnings : 0);
+        // Calculate 5% from referral deposits
+        const referralBonusAmount = typeof referralResult.totalReferralDeposits === 'number' 
+          ? Math.floor(referralResult.totalReferralDeposits * 0.05)
+          : (typeof referralResult.totalEarnings === 'number' ? referralResult.totalEarnings : 0);
+        setReferralEarnings(referralBonusAmount);
       } catch {
         setReferralEarnings(0);
       }
@@ -1349,11 +1353,11 @@ function App() {
             </article>
             <article className="balance-card">
               <div className="card-topline">
-                <span className="balance-label">Referral earnings</span>
+                <span className="balance-label">Referral bonus earned</span>
                 <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
               </div>
               <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings}</div>
-              <div className="balance-bottom"><span className="balance-caption">5% from referral deposits</span><button className="text-link" onClick={() => navigate('referrals')}>Refer friends <Icon name="arrow" size={13} /></button></div>
+              <div className="balance-bottom"><span className="balance-caption">5% of referred friends' first deposits</span><button className="text-link" onClick={() => navigate('referrals')}>Share link <Icon name="arrow" size={13} /></button></div>
             </article>
           </section>
 
@@ -1409,7 +1413,8 @@ function App() {
               <div className="referral-banner" style={{background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%)', border: '2px solid rgba(212, 175, 55, 0.4)'}}>
                 <div className="referral-banner-content">
                   <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
-                  <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your code and earn 5% on first deposits</div>
+                  <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your link and earn 5% from each friend's first deposit</div>
+                  <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>Example: Friend deposits $2000 → You earn $100 (5%)</div>
                   {account?.referralCode ? (
                     <div style={{background: 'rgba(0, 0, 0, 0.5)', padding: '12px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '14px', fontWeight: '600', color: 'var(--gold)', marginBottom: '12px', wordBreak: 'break-all'}}>
                       {`${window.location.origin}/?ref=${account.referralCode}`}
