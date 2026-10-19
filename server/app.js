@@ -1,6 +1,6 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { DatabaseSync } from 'node:sqlite';
+import postgres from 'postgres';
 import express from 'express';
 import {
   initializeTierRewardsTable,
