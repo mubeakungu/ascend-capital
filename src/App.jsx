@@ -152,7 +152,7 @@ function AuthPage({ mode, name, email, password, phone, pin, error, storageMode,
               </div>
             </>
           )}
-          <label className="account-field">Password<input type="password" autoComplete={registering ? 'new-password' : 'current-password'} minLength={12} maxLength={128} value={password} onChange={(event) => onPasswordChange(event.target.value)} required />{registering && <span className="field-hint">Use at least 12 characters.</span>}</label>
+          <label className="account-field">Password<input type="password" autoComplete={registering ? 'new-password' : 'current-password'} minLength={6} maxLength={128} value={password} onChange={(event) => onPasswordChange(event.target.value)} required />{registering && <span className="field-hint">Use at least 6 characters.</span>}</label>
           {error && <div className="modal-message" role="alert">{error}</div>}
           <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
         </form>
@@ -1685,8 +1685,8 @@ function App() {
               )}
               {accountMode !== 'profile' && (
                 <label className="account-field">Password
-                  <input type="password" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} minLength={12} maxLength={128} value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
-                  <span className="field-hint">Use at least 12 characters.</span>
+                  <input type="password" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} minLength={6} maxLength={128} value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
+                  <span className="field-hint">Use at least 6 characters.</span>
                 </label>
               )}
               {accountError && <div className="modal-message" role="alert">{accountError}</div>}
