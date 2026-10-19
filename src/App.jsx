@@ -118,7 +118,62 @@ async function requestApi(path, options = {}) {
   return result;
 }
 
-function AuthPage({ mode, name, email, password, phone, pin, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onPhoneChange, onPinChange, onSubmit, onNavigate }) {
+// PASSWORD TOGGLE INPUT COMPONENT - Copy this into your code
+function PasswordToggleInput({ label, value, onChange, error, required = false, showPassword, onToggle, autoComplete = 'current-password' }) {
+  return (
+    <label className="account-field" style={{position: 'relative'}}>
+      {label}
+      <input 
+        type={showPassword ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        minLength={6}
+        maxLength={128}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        style={{paddingRight: '40px'}}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={showPassword ? 'Hide password' : 'Show password'}
+        tabIndex={-1}
+        style={{
+          position: 'absolute',
+          right: '12px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#6b7280',
+          transition: 'color 0.2s ease',
+          marginTop: '22px'
+        }}
+        onMouseEnter={(e) => e.target.style.color = '#374151'}
+        onMouseLeave={(e) => e.target.style.color = '#6b7280'}
+      >
+        {showPassword ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        )}
+      </button>
+    </label>
+  );
+}
+
+function AuthPage({ mode, name, email, password, phone, pin, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onPhoneChange, onPinChange, onSubmit, onNavigate, showPassword, onTogglePasswordVisibility }) {
   const registering = mode === 'register';
 
   return (
@@ -152,7 +207,18 @@ function AuthPage({ mode, name, email, password, phone, pin, error, storageMode,
               </div>
             </>
           )}
-          <label className="account-field">Password<input type="password" autoComplete={registering ? 'new-password' : 'current-password'} minLength={6} maxLength={128} value={password} onChange={(event) => onPasswordChange(event.target.value)} required />{registering && <span className="field-hint">Use at least 6 characters.</span>}</label>
+          <>
+            <PasswordToggleInput
+              label="Password"
+              value={password}
+              onChange={onPasswordChange}
+              showPassword={showPassword}
+              onToggle={onTogglePasswordVisibility}
+              autoComplete={registering ? 'new-password' : 'current-password'}
+              required
+            />
+            {registering && <span className="field-hint">Use at least 6 characters.</span>}
+          </>
           {error && <div className="modal-message" role="alert">{error}</div>}
           <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
         </form>
@@ -364,6 +430,10 @@ function App() {
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [referralStats, setReferralStats] = useState(null);
   const [referralStatsLoading, setReferralStatsLoading] = useState(false);
+  
+  // PASSWORD VISIBILITY STATE
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAccountPassword, setShowAccountPassword] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -821,6 +891,8 @@ function App() {
       onPinChange={setAccountPin}
       onSubmit={submitAccount}
       onNavigate={navigate}
+      showPassword={showPassword}
+      onTogglePasswordVisibility={() => setShowPassword(!showPassword)}
     />;
   }
 
@@ -1684,10 +1756,18 @@ function App() {
                 </label>
               )}
               {accountMode !== 'profile' && (
-                <label className="account-field">Password
-                  <input type="password" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} minLength={6} maxLength={128} value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
+                <>
+                  <PasswordToggleInput
+                    label="Password"
+                    value={accountPassword}
+                    onChange={setAccountPassword}
+                    showPassword={showAccountPassword}
+                    onToggle={() => setShowAccountPassword(!showAccountPassword)}
+                    autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'}
+                    required
+                  />
                   <span className="field-hint">Use at least 6 characters.</span>
-                </label>
+                </>
               )}
               {accountError && <div className="modal-message" role="alert">{accountError}</div>}
               {accountMessage && <div className="modal-message modal-success" role="status">{accountMessage}</div>}
