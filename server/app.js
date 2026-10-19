@@ -26,6 +26,10 @@ const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
 const DEFAULT_INITIAL_ADMIN_PASSWORD = 'Admin@123';
 
+// Earnings activation settings
+const EARNINGS_ACTIVATION_HOUR = parseInt(process.env.EARNINGS_ACTIVATION_HOUR ?? '10', 10);
+const EARNINGS_ACTIVATION_MINUTE = parseInt(process.env.EARNINGS_ACTIVATION_MINUTE ?? '0', 10);
+
 // Referral tier commission rates
 const REFERRAL_COMMISSION_RATES = [
   0.05,  // Star 1: 5%
@@ -236,6 +240,37 @@ function createRateLimiter({ limit, windowMs }) {
   };
 }
 
+// EARNINGS HELPER FUNCTIONS
+function calculateEarningsStatus(lastDepositTime) {
+  if (!lastDepositTime) {
+    return {
+      earningsActive: false,
+      earningsStartTime: null,
+    };
+  }
+
+  const depositDate = new Date(lastDepositTime);
+  const nextDay = new Date(depositDate);
+  nextDay.setDate(nextDay.getDate() + 1);
+  nextDay.setHours(EARNINGS_ACTIVATION_HOUR, EARNINGS_ACTIVATION_MINUTE, 0, 0);
+
+  const now = new Date();
+  const isActive = now >= nextDay;
+
+  const timeStr = isActive ? null : nextDay.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  return {
+    earningsActive: isActive,
+    earningsStartTime: timeStr,
+  };
+}
+
 // Referral helper functions
 function generateReferralCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -327,6 +362,9 @@ export function createApp({ databasePath }) {
   }
   if (!accountColumns.some((column) => column.name === 'pin')) {
     db.exec('ALTER TABLE accounts ADD COLUMN pin TEXT');
+  }
+  if (!accountColumns.some((column) => column.name === 'last_deposit_time')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN last_deposit_time TEXT');
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -1406,10 +1444,20 @@ export function createApp({ databasePath }) {
       }
 
       const id = randomBytes(16).toString('hex');
-      db.prepare(`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?)
-      `).run(id, request.account.id, input.type, amountCents, reference, new Date().toISOString());
+      const now = new Date().toISOString();
+      
+      withTransaction(() => {
+        db.prepare(`
+          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+          VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        `).run(id, request.account.id, input.type, amountCents, reference, now);
+
+        // If it's a deposit, update last_deposit_time
+        if (input.type === 'deposit') {
+          db.prepare('UPDATE accounts SET last_deposit_time = ? WHERE id = ?')
+            .run(now, request.account.id);
+        }
+      });
 
       return response.status(201).json({ transaction: transactionView(getTransaction(id)) });
     } catch (error) {
@@ -1426,10 +1474,30 @@ export function createApp({ databasePath }) {
       ORDER BY t.created_at DESC
       LIMIT 100
     `).all(request.account.id);
+
+    // Get last deposit time and earnings status
+    const accountRow = db.prepare('SELECT last_deposit_time FROM accounts WHERE id = ?')
+      .get(request.account.id);
+    
+    const lastDepositTime = accountRow?.last_deposit_time || null;
+    const earningsStatus = calculateEarningsStatus(lastDepositTime);
+
+    // Calculate daily income
+    let dailyIncome = 0;
+    if (earningsStatus.earningsActive && lastDepositTime) {
+      const balance = approvedBalanceCents(request.account.id) / 100;
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === balance);
+      dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
+    }
+
     return response.json({
       balance: approvedBalanceCents(request.account.id) / 100,
       pendingWithdrawals: pendingWithdrawalsCents(request.account.id) / 100,
       transactions: rows.map((row) => transactionView(row)),
+      lastDepositTime,
+      earningsActive: earningsStatus.earningsActive,
+      earningsStartTime: earningsStatus.earningsStartTime,
+      dailyIncome,
     });
   });
 
