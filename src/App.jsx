@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ReferralPage } from './referral-page';
 import DownloadAndroidButton from './components/DownloadAndroidButton';
 
 const plans = [
@@ -785,10 +784,6 @@ function App() {
       onSubmit={submitAccount}
       onNavigate={navigate}
     />;
-  }
-
-  if (route === '/referrals' && account) {
-    return <ReferralPage account={account} onNavigate={navigate} />;
   }
 
   if (route === '/admin' && account) {
