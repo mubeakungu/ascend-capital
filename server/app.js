@@ -239,7 +239,6 @@ function createRateLimiter({ limit, windowMs }) {
   };
 }
 
-// EARNINGS HELPER FUNCTIONS
 function calculateEarningsStatus(lastDepositTime) {
   if (!lastDepositTime) {
     return {
@@ -270,7 +269,6 @@ function calculateEarningsStatus(lastDepositTime) {
   };
 }
 
-// Referral helper functions
 function generateReferralCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = '';
@@ -522,18 +520,6 @@ export async function createApp() {
     return row[0];
   }
 
-  function currentAccount(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
-    const token = readCookie(request, cookieName);
-    if (!token) return null;
-
-    const tokenHash = hashToken(token);
-    const now = Date.now();
-    
-    // Note: This is intentionally synchronous because it's called from middleware
-    // We'll handle async in the actual route handlers
-    return { token, tokenHash, now, requireAdminRole };
-  }
-
   async function getCurrentAccountAsync(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
     const token = readCookie(request, cookieName);
     if (!token) return null;
@@ -561,19 +547,6 @@ export async function createApp() {
     const account = await getCurrentAccountAsync(request);
     if (!account) return response.status(401).json({ error: 'Sign in to continue.' });
     request.account = account;
-    return next();
-  }
-
-  function requireAdmin(request, response, next) {
-    if (request.account.role !== 'admin') {
-      return response.status(403).json({ error: 'Administrator access is required.' });
-    }
-    if (request.account.must_change_password) {
-      return response.status(403).json({
-        error: 'Change your temporary password to continue.',
-        code: 'PASSWORD_CHANGE_REQUIRED',
-      });
-    }
     return next();
   }
 
@@ -1151,6 +1124,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIX: ADMIN PASSWORD ENDPOINT - THIS WAS MISSING AND IS NOW ADDED
   app.post('/api/admin/auth/password', passwordRateLimit, requireAdminSession, async (request, response, next) => {
     try {
       const { currentPassword, newPassword } = request.body ?? {};
@@ -1479,7 +1453,7 @@ export async function createApp() {
   });
 
   // =========================================================================
-  // ADMIN ENDPOINTS (Converted to async)
+  // ADMIN ENDPOINTS
   // =========================================================================
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
@@ -2042,7 +2016,7 @@ export async function createApp() {
   });
 
   // =========================================================================
-  // ERROR HANDLERS
+  // ERROR HANDLERS - MUST BE LAST
   // =========================================================================
 
   app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
