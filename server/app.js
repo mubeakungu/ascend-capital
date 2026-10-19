@@ -18,6 +18,8 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
+const PIN_PATTERN = /^\d{6}$/;
 const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
@@ -87,6 +89,7 @@ function accountView(row) {
     id: row.id,
     name: row.name,
     email: row.email,
+    phone: row.phone ?? null,
     role: row.role ?? 'member',
     status: row.status ?? 'active',
     mustChangePassword: Boolean(row.must_change_password),
@@ -159,12 +162,18 @@ function passwordError(password) {
   return null;
 }
 
-function validationMessage({ name, email, password }, requireName) {
+function validationMessage({ name, email, password, phone, pin }, requireName) {
   if (requireName && (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80)) {
     return 'Name must be between 2 and 80 characters.';
   }
   if (typeof email !== 'string' || email.length > 254 || !EMAIL_PATTERN.test(email.trim())) {
     return 'Enter a valid email address.';
+  }
+  if (phone && (typeof phone !== 'string' || !PHONE_PATTERN.test(phone.trim()))) {
+    return 'Enter a valid phone number.';
+  }
+  if (pin && (typeof pin !== 'string' || !PIN_PATTERN.test(pin))) {
+    return 'PIN must be exactly 6 digits.';
   }
   return passwordError(password);
 }
@@ -285,6 +294,8 @@ export function createApp({ databasePath }) {
       email TEXT NOT NULL UNIQUE COLLATE NOCASE,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
+      phone TEXT,
+      pin TEXT,
       created_at TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))
     );
@@ -310,6 +321,12 @@ export function createApp({ databasePath }) {
   }
   if (!accountColumns.some((column) => column.name === 'must_change_password')) {
     db.exec('ALTER TABLE accounts ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!accountColumns.some((column) => column.name === 'phone')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN phone TEXT');
+  }
+  if (!accountColumns.some((column) => column.name === 'pin')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN pin TEXT');
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -493,7 +510,7 @@ export function createApp({ databasePath }) {
     const now = Date.now();
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now);
     const row = db.prepare(`
-      SELECT accounts.id, accounts.name, accounts.email, accounts.created_at, accounts.role, accounts.status,
+      SELECT accounts.id, accounts.name, accounts.email, accounts.phone, accounts.created_at, accounts.role, accounts.status,
         accounts.must_change_password
       FROM sessions
       JOIN accounts ON accounts.id = sessions.account_id
@@ -965,9 +982,18 @@ export function createApp({ databasePath }) {
       const id = randomBytes(16).toString('hex');
       const createdAt = new Date().toISOString();
       db.prepare(`
-        INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, input.name.trim(), email, salt.toString('hex'), passwordHash.toString('hex'), createdAt);
+        INSERT INTO accounts (id, name, email, password_salt, password_hash, phone, pin, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        input.name.trim(),
+        email,
+        salt.toString('hex'),
+        passwordHash.toString('hex'),
+        input.phone?.trim() || null,
+        input.pin || null,
+        createdAt
+      );
 
       // Track referral if provided
       const referralCode = input.referralCode?.trim().toUpperCase();
@@ -975,7 +1001,7 @@ export function createApp({ databasePath }) {
         trackReferralSignup(id, referralCode);
       }
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(id);
+      const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(id);
       await createAccountSession(id, response);
       return response.status(201).json({ account: accountView(account) });
     } catch (error) {
@@ -991,7 +1017,7 @@ export function createApp({ databasePath }) {
 
       const email = input.email.trim().toLowerCase();
       const row = db.prepare(`
-        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
+        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
         FROM accounts WHERE email = ?
       `).get(email);
 
@@ -1025,7 +1051,7 @@ export function createApp({ databasePath }) {
       return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
     }
     db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), request.account.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
+    const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
       .get(request.account.id);
     return response.json({ account: accountView(account) });
   });
@@ -1090,7 +1116,7 @@ export function createApp({ databasePath }) {
 
       const email = input.email.trim().toLowerCase();
       const row = db.prepare(`
-        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
+        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
         FROM accounts WHERE email = ? AND role = 'admin'
       `).get(email);
 
@@ -1446,7 +1472,7 @@ export function createApp({ databasePath }) {
     if (target.role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
 
     db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), target.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
+    const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
     return response.json({ account: accountView(account) });
   });
 
@@ -1528,7 +1554,7 @@ export function createApp({ databasePath }) {
         });
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
+      const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
         .get(target.id);
       return response.json({ account: accountView(account) });
     } catch (error) {
@@ -1726,7 +1752,7 @@ export function createApp({ databasePath }) {
         recordAudit(request, 'account.hold', target.id, { email: target.email, reason });
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
+      const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
       return response.json({ account: accountView(account) });
     } catch (error) {
       return next(error);
@@ -1748,7 +1774,7 @@ export function createApp({ databasePath }) {
         recordAudit(request, 'account.release', target.id, { email: target.email, note });
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
+      const account = db.prepare('SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
       return response.json({ account: accountView(account) });
     } catch (error) {
       return next(error);
