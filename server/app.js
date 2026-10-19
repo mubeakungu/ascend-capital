@@ -156,8 +156,8 @@ function hashToken(token) {
 }
 
 function passwordError(password) {
-  if (typeof password !== 'string' || password.length < 12 || password.length > 128) {
-    return 'Password must be between 12 and 128 characters.';
+  if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+    return 'Password must be between 6 and 128 characters.';
   }
   return null;
 }
