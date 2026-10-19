@@ -118,7 +118,6 @@ async function requestApi(path, options = {}) {
   return result;
 }
 
-// PASSWORD TOGGLE INPUT COMPONENT - Copy this into your code
 function PasswordToggleInput({ label, value, onChange, error, required = false, showPassword, onToggle, autoComplete = 'current-password' }) {
   return (
     <label className="account-field" style={{position: 'relative'}}>
@@ -430,6 +429,9 @@ function App() {
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [referralStats, setReferralStats] = useState(null);
   const [referralStatsLoading, setReferralStatsLoading] = useState(false);
+  const [earningsActive, setEarningsActive] = useState(false);
+  const [earningsStartTime, setEarningsStartTime] = useState(null);
+  const [lastDepositTime, setLastDepositTime] = useState(null);
   
   // PASSWORD VISIBILITY STATE
   const [showPassword, setShowPassword] = useState(false);
@@ -459,6 +461,38 @@ function App() {
     const interval = setInterval(checkPrimeHour, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Check earnings status every minute
+  useEffect(() => {
+    const checkEarnings = () => {
+      if (lastDepositTime) {
+        const depositDate = new Date(lastDepositTime);
+        const nextDay = new Date(depositDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        nextDay.setHours(10, 0, 0, 0);
+        
+        const now = new Date();
+        const isActive = now >= nextDay;
+        
+        setEarningsActive(isActive);
+        
+        if (!isActive) {
+          const timeStr = nextDay.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          });
+          setEarningsStartTime(timeStr);
+        }
+      }
+    };
+    
+    checkEarnings();
+    const interval = setInterval(checkEarnings, 60000);
+    return () => clearInterval(interval);
+  }, [lastDepositTime]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -519,11 +553,23 @@ function App() {
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
       
-      // Match balance to plan and use plan's dailyIncome value
-      const depositAmount = result.balance || 0;
-      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
-      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
-      setDailyIncome(dailyIncomeValue);
+      // Get earnings data from backend
+      if (result.lastDepositTime) {
+        setLastDepositTime(result.lastDepositTime);
+      }
+      
+      if (result.earningsActive) {
+        setEarningsActive(result.earningsActive);
+        const depositAmount = result.balance || 0;
+        const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+        const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+        setDailyIncome(dailyIncomeValue);
+      } else {
+        setDailyIncome(0);
+        if (result.earningsStartTime) {
+          setEarningsStartTime(result.earningsStartTime);
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -550,7 +596,6 @@ function App() {
     setWeeklyLoading(true);
     try {
       const result = await requestApi('/api/referrals/weekly-salary');
-      // Ensure result has expected structure
       setWeeklyData({
         tier: result?.tier || null,
         weeklySalary: typeof result?.weeklySalary === 'number' ? result.weeklySalary : 0,
@@ -562,7 +607,6 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to fetch weekly salary:', error);
-      // Set default structure on error
       setWeeklyData({
         tier: null,
         weeklySalary: 0,
@@ -594,15 +638,11 @@ function App() {
       const result = await requestApi('/api/referrals/stats');
       setReferralStats(result);
       
-      // Use totalEarned from backend (already calculated 5% bonus)
-      // Fallback: calculate 5% from total referral deposits if totalEarned not provided
       let bonusAmount = 0;
       
       if (typeof result.totalEarned === 'number') {
-        // Backend returns total earned (5% already calculated)
         bonusAmount = Math.floor(result.totalEarned);
       } else {
-        // Fallback: calculate 5% from referral deposits
         const totalReferralDeposits = 
           result.totalReferralDeposits || 
           result.referralDepositsTotal || 
@@ -625,7 +665,6 @@ function App() {
   useEffect(() => {
     if (account) {
       fetchWeeklySalary();
-      // Fetch referral stats after a brief delay to ensure sync
       const timer = setTimeout(() => {
         fetchReferralStats();
       }, 300);
@@ -706,11 +745,6 @@ function App() {
 
     setTransactionLoading(true);
     try {
-      const payload = {
-        amount: value,
-        ...(modal === 'withdraw' && { destination: destination.trim() }),
-      };
-
       const result = await requestApi('/api/transactions', {
         method: 'POST',
         body: JSON.stringify({
@@ -734,12 +768,25 @@ function App() {
       setBalance(newBalance);
       
       if (modal === 'deposit') {
-        // Use the deposit amount as the plan (don't compound)
         setTotalDeposits(value);
-        // Match deposit to plan and use plan's dailyIncome
-        const matchingPlan = plans.find((plan) => plan.deposit === value);
-        const newDailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
-        setDailyIncome(newDailyIncomeValue);
+        
+        // Set deposit time to activate earnings tomorrow at 10:00 AM
+        const now = new Date();
+        setLastDepositTime(now.toISOString());
+        setEarningsActive(false);
+        
+        const nextDay = new Date();
+        nextDay.setDate(nextDay.getDate() + 1);
+        nextDay.setHours(10, 0, 0, 0);
+        const timeStr = nextDay.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+        setEarningsStartTime(timeStr);
+        setDailyIncome(0);
       }
 
       setModal(null);
@@ -842,6 +889,8 @@ function App() {
       setDemoActivity([]);
       setWeeklyData(null);
       setReferralStats(null);
+      setLastDepositTime(null);
+      setEarningsActive(false);
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -872,7 +921,6 @@ function App() {
     }
   }
 
-  // AUTH GATE - Show login/register if not signed in
   if (!account && !accountLoading) {
     return <AuthPage
       mode={accountMode}
@@ -926,6 +974,30 @@ function App() {
           height: 40px;
           border-radius: 50%;
           object-fit: cover;
+        }
+
+        .pending-earnings {
+          font-size: 12px;
+          color: var(--gold);
+          font-weight: 500;
+        }
+
+        .graph-placeholder {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 16px;
+          padding: 60px 20px;
+          text-align: center;
+          color: var(--text-light);
+        }
+
+        .graph-placeholder small {
+          display: block;
+          color: var(--gold);
+          font-size: 12px;
+          margin-top: 8px;
         }
 
         .referral-notice {
@@ -1434,12 +1506,19 @@ function App() {
                 <span className="balance-label">Daily trade income</span>
                 <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
               </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome}</div>
-              <div className="balance-bottom"><span className="balance-caption">Estimated daily earnings</span><button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button></div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{earningsActive ? dailyIncome : '0'}</div>
+              <div className="balance-bottom">
+                <span className="balance-caption">Estimated daily earnings</span>
+                {!earningsActive && lastDepositTime ? (
+                  <span className="pending-earnings">Starts {earningsStartTime}</span>
+                ) : (
+                  <button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button>
+                )}
+              </div>
             </article>
           </section>
 
-          {account && totalDeposits > 0 && (
+          {account && totalDeposits > 0 && earningsActive && (
             <div className="daily-income-card">
               <div className="daily-income-label"><Icon name="trending" size={14} style={{marginRight: '6px'}} /> Your daily trade profit</div>
               <div className="daily-income-value">
@@ -1450,7 +1529,21 @@ function App() {
             </div>
           )}
 
-          <TradingGraph balance={balance} totalDeposits={totalDeposits} />
+          {lastDepositTime && !earningsActive ? (
+            <section className="trading-graph-section">
+              <div className="section-heading">
+                <div><div className="eyebrow"><span className="eyebrow-line" /> MARKET PERFORMANCE</div><h2>Currency trading profits</h2><p className="section-subtitle">Daily profit tracking across major currency pairs linked to your deposits.</p></div>
+                <span className="count-tag">15 days <span className="count-dot" /></span>
+              </div>
+              <div className="graph-placeholder">
+                <Icon name="chart" size={48} />
+                <p>Your trading earnings will begin tomorrow at 10:00 AM. Check back then to see your profit tracking.</p>
+                <small>Earnings activate: {earningsStartTime}</small>
+              </div>
+            </section>
+          ) : (
+            <TradingGraph balance={balance} totalDeposits={totalDeposits} />
+          )}
 
           <section className="action-row" aria-label="Wallet actions">
             <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
@@ -1480,7 +1573,7 @@ function App() {
                 </article>
               ))}
             </div>
-            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income is estimated based on plan. Minimum withdrawal is $40.</p></div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income starts tomorrow at 10:00 AM. Minimum withdrawal is $40.</p></div>
           </section>
 
           <section className="referral-layout" id="referrals">
@@ -1672,7 +1765,7 @@ function App() {
 
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
-            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Daily income is calculated and compounded automatically.</p></div>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Earnings start the next day at 10:00 AM.</p></div>
             <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
           </section>
 
