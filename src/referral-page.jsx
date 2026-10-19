@@ -14,7 +14,7 @@ const TIER_REWARDS = [
   { name: 'Star 6', direct: 11, team: 150, reward: '$1,000', rate: '12%' },
   { name: 'Star 7', direct: 12, team: 400, reward: '$2,500 + House', rate: '14%' },
   { name: 'Star 8', direct: 13, team: 700, reward: '$4,500 + Mazda CX-5', rate: '16%' },
-  { name: 'Crown Leader', direct: 14, team: 1000, reward: '$7,000 + Mercedes E300', rate: '18%' },
+  { name: 'Crown Leader', direct: 14, team: 100, reward: '$7,000 + Mercedes E300', rate: '18%' },
 ];
 
 function Icon({ name, size = 18 }) {
@@ -164,7 +164,7 @@ export function ReferralPage({ account, onNavigate }) {
           background: linear-gradient(135deg, var(--dark-blue) 0%, var(--bg) 100%);
           color: var(--text);
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          padding: 20px;
+          padding: 40px 20px;
         }
 
         .referral-container {
@@ -176,9 +176,8 @@ export function ReferralPage({ account, onNavigate }) {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 40px;
+          margin-bottom: 50px;
           gap: 20px;
-          flex-wrap: wrap;
         }
 
         .referral-brand {
@@ -189,22 +188,22 @@ export function ReferralPage({ account, onNavigate }) {
           color: var(--text);
           cursor: pointer;
           font-weight: 700;
-          font-size: 18px;
+          font-size: 20px;
         }
 
         .referral-brand img {
-          width: 40px;
-          height: 40px;
+          width: 45px;
+          height: 45px;
           border-radius: 50%;
         }
 
         .referral-btn-back {
-          padding: 10px 16px;
+          padding: 10px 18px;
           border: 1px solid var(--gold);
           border-radius: 6px;
           background: transparent;
           color: var(--gold);
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.2s;
@@ -219,8 +218,8 @@ export function ReferralPage({ account, onNavigate }) {
 
         .referral-main {
           display: grid;
-          grid-template-columns: 1fr 320px;
-          gap: 24px;
+          grid-template-columns: 1fr 350px;
+          gap: 30px;
           margin-bottom: 40px;
         }
 
@@ -230,43 +229,12 @@ export function ReferralPage({ account, onNavigate }) {
           }
         }
 
-        @media (max-width: 640px) {
-          .referral-page {
-            padding: 16px;
-          }
-
-          .referral-header {
-            margin-bottom: 30px;
-            gap: 12px;
-          }
-
-          .referral-brand {
-            font-size: 16px;
-            flex: 1;
-          }
-
-          .referral-btn-back {
-            padding: 8px 12px;
-            font-size: 10px;
-          }
-
-          .referral-main {
-            gap: 16px;
-          }
-        }
-
         .referral-card {
           background: var(--card-bg);
           border: 1px solid rgba(212, 175, 55, 0.3);
           border-radius: 16px;
-          padding: 32px;
+          padding: 40px;
           backdrop-filter: blur(10px);
-        }
-
-        @media (max-width: 640px) {
-          .referral-card {
-            padding: 20px;
-          }
         }
 
         .referral-section-title {
@@ -274,12 +242,6 @@ export function ReferralPage({ account, onNavigate }) {
           font-weight: 700;
           margin-bottom: 10px;
           color: var(--text);
-        }
-
-        @media (max-width: 640px) {
-          .referral-section-title {
-            font-size: 22px;
-          }
         }
 
         .referral-section-desc {
@@ -309,37 +271,21 @@ export function ReferralPage({ account, onNavigate }) {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
+          gap: 15px;
           margin-bottom: 15px;
-          flex-wrap: wrap;
-        }
-
-        @media (max-width: 640px) {
-          .referral-code-box {
-            padding: 16px;
-            gap: 10px;
-          }
         }
 
         .referral-code-text {
-          font-size: 28px;
+          font-size: 32px;
           font-weight: 700;
-          letter-spacing: 2px;
+          letter-spacing: 3px;
           color: var(--gold);
           font-family: 'Monaco', monospace;
           flex: 1;
-          min-width: 150px;
-        }
-
-        @media (max-width: 640px) {
-          .referral-code-text {
-            font-size: 20px;
-            letter-spacing: 1px;
-          }
         }
 
         .referral-btn-copy {
-          padding: 10px 14px;
+          padding: 10px 16px;
           border: 1px solid var(--gold);
           border-radius: 6px;
           background: transparent;
@@ -352,13 +298,6 @@ export function ReferralPage({ account, onNavigate }) {
           align-items: center;
           gap: 6px;
           white-space: nowrap;
-        }
-
-        @media (max-width: 640px) {
-          .referral-btn-copy {
-            padding: 8px 12px;
-            font-size: 10px;
-          }
         }
 
         .referral-btn-copy:hover {
@@ -375,31 +314,22 @@ export function ReferralPage({ account, onNavigate }) {
           background: rgba(0, 0, 0, 0.5);
           border: 1px solid #444;
           border-radius: 12px;
-          padding: 12px;
+          padding: 16px;
           display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        @media (max-width: 640px) {
-          .referral-link-box {
-            padding: 10px;
-            gap: 8px;
-          }
+          gap: 12px;
         }
 
         .referral-link-text {
           flex: 1;
-          font-size: 11px;
+          font-size: 12px;
           color: #ddd;
           word-break: break-all;
           font-family: monospace;
           background: rgba(0, 0, 0, 0.3);
           padding: 10px;
           border-radius: 6px;
-          max-height: 80px;
+          max-height: 60px;
           overflow: auto;
-          min-width: 150px;
         }
 
         .referral-stats {
@@ -409,25 +339,11 @@ export function ReferralPage({ account, onNavigate }) {
           margin-top: 40px;
         }
 
-        @media (max-width: 640px) {
-          .referral-stats {
-            grid-template-columns: 1fr;
-            gap: 12px;
-            margin-top: 30px;
-          }
-        }
-
         .referral-stat {
           background: rgba(0, 0, 0, 0.3);
           border: 1px solid rgba(212, 175, 55, 0.2);
           border-radius: 12px;
           padding: 20px;
-        }
-
-        @media (max-width: 640px) {
-          .referral-stat {
-            padding: 16px;
-          }
         }
 
         .referral-stat-label {
@@ -439,15 +355,9 @@ export function ReferralPage({ account, onNavigate }) {
         }
 
         .referral-stat-value {
-          font-size: 24px;
+          font-size: 28px;
           font-weight: 700;
           color: var(--gold);
-        }
-
-        @media (max-width: 640px) {
-          .referral-stat-value {
-            font-size: 20px;
-          }
         }
 
         .referral-stat-sub {
@@ -462,31 +372,11 @@ export function ReferralPage({ account, onNavigate }) {
           gap: 20px;
         }
 
-        @media (max-width: 1024px) {
-          .referral-sidebar {
-            flex-direction: row;
-            gap: 20px;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .referral-sidebar {
-            flex-direction: column;
-          }
-        }
-
         .referral-tier-card {
           background: linear-gradient(135deg, rgba(212, 175, 55, 0.2) 0%, rgba(0, 51, 102, 0.2) 100%);
           border: 2px solid var(--gold);
           border-radius: 16px;
           padding: 24px;
-          flex: 1;
-        }
-
-        @media (max-width: 640px) {
-          .referral-tier-card {
-            padding: 20px;
-          }
         }
 
         .referral-tier-badge {
@@ -503,15 +393,9 @@ export function ReferralPage({ account, onNavigate }) {
         }
 
         .referral-tier-name {
-          font-size: 20px;
+          font-size: 24px;
           font-weight: 700;
           margin-bottom: 20px;
-        }
-
-        @media (max-width: 640px) {
-          .referral-tier-name {
-            font-size: 18px;
-          }
         }
 
         .referral-tier-stat {
@@ -558,15 +442,8 @@ export function ReferralPage({ account, onNavigate }) {
           background: var(--card-bg);
           border: 1px solid rgba(212, 175, 55, 0.3);
           border-radius: 16px;
-          padding: 32px;
+          padding: 40px;
           margin-top: 40px;
-        }
-
-        @media (max-width: 640px) {
-          .referral-referrals-section {
-            padding: 20px;
-            margin-top: 30px;
-          }
         }
 
         .referral-referrals-title {
@@ -575,24 +452,11 @@ export function ReferralPage({ account, onNavigate }) {
           margin-bottom: 24px;
         }
 
-        @media (max-width: 640px) {
-          .referral-referrals-title {
-            font-size: 18px;
-            margin-bottom: 16px;
-          }
-        }
-
         .referral-list {
           display: grid;
           gap: 12px;
           max-height: 600px;
           overflow-y: auto;
-        }
-
-        @media (max-width: 640px) {
-          .referral-list {
-            max-height: 400px;
-          }
         }
 
         .referral-item {
@@ -604,15 +468,6 @@ export function ReferralPage({ account, onNavigate }) {
           justify-content: space-between;
           align-items: center;
           transition: all 0.2s;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-
-        @media (max-width: 640px) {
-          .referral-item {
-            padding: 12px;
-            gap: 8px;
-          }
         }
 
         .referral-item:hover {
@@ -622,31 +477,18 @@ export function ReferralPage({ account, onNavigate }) {
 
         .referral-item-info {
           flex: 1;
-          min-width: 150px;
         }
 
         .referral-item-name {
-          font-size: 13px;
+          font-size: 14px;
           font-weight: 600;
           color: var(--gold);
           margin-bottom: 4px;
         }
 
-        @media (max-width: 640px) {
-          .referral-item-name {
-            font-size: 12px;
-          }
-        }
-
         .referral-item-email {
-          font-size: 11px;
+          font-size: 12px;
           color: var(--muted);
-        }
-
-        @media (max-width: 640px) {
-          .referral-item-email {
-            font-size: 10px;
-          }
         }
 
         .referral-item-amount {
@@ -654,38 +496,26 @@ export function ReferralPage({ account, onNavigate }) {
         }
 
         .referral-item-value {
-          font-size: 13px;
+          font-size: 14px;
           font-weight: 700;
           color: var(--success);
           margin-bottom: 4px;
         }
 
-        @media (max-width: 640px) {
-          .referral-item-value {
-            font-size: 12px;
-          }
-        }
-
         .referral-item-date {
-          font-size: 10px;
+          font-size: 11px;
           color: #666;
         }
 
         .referral-empty {
           text-align: center;
-          padding: 40px 20px;
+          padding: 60px 20px;
           color: var(--muted);
-        }
-
-        @media (max-width: 640px) {
-          .referral-empty {
-            padding: 30px 16px;
-          }
         }
 
         .loading {
           text-align: center;
-          padding: 40px 20px;
+          padding: 60px 20px;
           color: var(--muted);
         }
 
@@ -693,17 +523,10 @@ export function ReferralPage({ account, onNavigate }) {
           background: rgba(231, 76, 60, 0.1);
           border: 1px solid rgba(231, 76, 60, 0.5);
           border-radius: 10px;
-          padding: 16px;
+          padding: 18px;
           color: #ff6b6b;
           margin-bottom: 20px;
           font-size: 13px;
-        }
-
-        @media (max-width: 640px) {
-          .error-box {
-            padding: 12px;
-            font-size: 12px;
-          }
         }
 
         .eyebrow {
@@ -728,7 +551,7 @@ export function ReferralPage({ account, onNavigate }) {
         <div className="referral-header">
           <a className="referral-brand" href="/" onClick={(e) => { e.preventDefault(); onNavigate('/'); }}>
             <img src="/ascend-logo.jpg" alt="Ascend" />
-            <span>ascend<br/>capital</span>
+            <span>ascend<br />capital</span>
           </a>
           <button className="referral-btn-back" onClick={() => onNavigate('/')}>
             <Icon name="arrow" size={14} /> Back to dashboard
@@ -852,8 +675,8 @@ export function ReferralPage({ account, onNavigate }) {
             {referrals.length === 0 && !error && (
               <div className="referral-referrals-section">
                 <div className="referral-empty">
-                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>📢</div>
-                  <p style={{ fontSize: '15px', fontWeight: '600', marginBottom: '6px' }}>No referrals yet</p>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📢</div>
+                  <p style={{ fontSize: '16px', fontWeight: '600', marginBottom: '6px' }}>No referrals yet</p>
                   <p>Share your referral code to start earning commissions</p>
                 </div>
               </div>
