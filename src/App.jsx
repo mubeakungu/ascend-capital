@@ -357,6 +357,8 @@ function App() {
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
   const [weeklyData, setWeeklyData] = useState(null);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [referralStats, setReferralStats] = useState(null);
+  const [referralStatsLoading, setReferralStatsLoading] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -423,6 +425,8 @@ function App() {
           fetchAccountBalance();
           fetchTransactionHistory();
           fetchWeeklySalary();
+          fetchReferralCode();
+          fetchReferralStats();
         }
       })
       .catch((error) => {
@@ -496,9 +500,34 @@ function App() {
     }
   }
 
+  async function fetchReferralCode() {
+    if (!account) return;
+    try {
+      const result = await requestApi('/api/referrals/code');
+      setAccount((prev) => ({...prev, referralCode: result.code}));
+    } catch (error) {
+      console.error('Failed to fetch referral code:', error);
+    }
+  }
+
+  async function fetchReferralStats() {
+    if (!account) return;
+    setReferralStatsLoading(true);
+    try {
+      const result = await requestApi('/api/referrals/stats');
+      setReferralStats(result);
+    } catch (error) {
+      console.error('Failed to fetch referral stats:', error);
+      setReferralStats(null);
+    } finally {
+      setReferralStatsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (account) {
       fetchWeeklySalary();
+      fetchReferralStats();
     }
   }, [account]);
 
@@ -663,7 +692,8 @@ function App() {
           ...(register && referralCode ? { referralCode } : {}),
         }),
       });
-      setAccount(result.account);
+      const accountWithReferral = {...result.account};
+      setAccount(accountWithReferral);
       setAccountName(result.account.name);
       setAccountEmail(result.account.email);
       setAccountPhone(result.account.phone ?? '');
@@ -675,6 +705,8 @@ function App() {
         fetchAccountBalance();
         fetchTransactionHistory();
         fetchWeeklySalary();
+        fetchReferralCode();
+        fetchReferralStats();
       }
 
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
@@ -702,6 +734,7 @@ function App() {
       setReferralRewards(0);
       setDemoActivity([]);
       setWeeklyData(null);
+      setReferralStats(null);
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -838,6 +871,14 @@ function App() {
           .balance-grid {
             grid-template-columns: 1fr;
             gap: 16px;
+            margin: 20px 0;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .balance-grid {
+            gap: 12px;
+            margin: 16px 0;
           }
         }
 
@@ -852,12 +893,15 @@ function App() {
           .plans-grid {
             grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             gap: 12px;
+            margin: 20px 0;
           }
         }
 
         @media (max-width: 480px) {
           .plans-grid {
             grid-template-columns: 1fr;
+            gap: 10px;
+            margin: 16px 0;
           }
         }
 
@@ -871,6 +915,8 @@ function App() {
         @media (max-width: 768px) {
           .action-buttons {
             flex-direction: column;
+            gap: 10px;
+            margin-top: 16px;
           }
 
           .action-buttons .button {
@@ -879,6 +925,13 @@ function App() {
 
           .action-buttons a {
             width: 100% !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .action-buttons {
+            gap: 8px;
+            margin-top: 12px;
           }
         }
 
@@ -899,6 +952,7 @@ function App() {
           .section-heading {
             flex-direction: column;
             margin-bottom: 20px;
+            gap: 16px;
           }
 
           .section-heading > div {
@@ -910,6 +964,13 @@ function App() {
           }
         }
 
+        @media (max-width: 480px) {
+          .section-heading {
+            margin-bottom: 16px;
+            gap: 12px;
+          }
+        }
+
         .graph-stats {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -917,10 +978,19 @@ function App() {
           margin-top: 20px;
         }
 
+        @media (max-width: 768px) {
+          .graph-stats {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+          }
+        }
+
         @media (max-width: 480px) {
           .graph-stats {
             grid-template-columns: 1fr;
-            gap: 12px;
+            gap: 10px;
+            margin-top: 12px;
           }
         }
 
@@ -928,6 +998,7 @@ function App() {
           overflow-x: auto;
           border-radius: 8px;
           border: 2px solid rgba(212, 175, 55, 0.3);
+          margin: 20px 0;
         }
 
         .rank-table {
@@ -936,6 +1007,10 @@ function App() {
         }
 
         @media (max-width: 768px) {
+          .rank-table-wrap {
+            margin: 16px 0;
+          }
+
           .rank-table {
             font-size: 12px;
           }
@@ -950,12 +1025,17 @@ function App() {
         }
 
         @media (max-width: 480px) {
+          .rank-table-wrap {
+            margin: 12px 0;
+            border-radius: 4px;
+          }
+
           .rank-table {
-            font-size: 11px;
+            font-size: 10px;
           }
 
           .rank-table th, .rank-table td {
-            padding: 8px 4px;
+            padding: 6px 3px;
           }
 
           .reward-value {
@@ -1007,12 +1087,21 @@ function App() {
           padding: 12px 20px;
           border-radius: 6px;
           font-size: 14px;
+          transition: all 0.2s ease;
+        }
+
+        @media (max-width: 768px) {
+          .button {
+            padding: 11px 18px;
+            font-size: 13px;
+          }
         }
 
         @media (max-width: 480px) {
           .button {
-            padding: 10px 16px;
-            font-size: 13px;
+            padding: 10px 14px;
+            font-size: 12px;
+            border-radius: 4px;
           }
         }
 
@@ -1020,12 +1109,33 @@ function App() {
           max-width: 90vw;
           max-height: 90vh;
           overflow-y: auto;
+          padding: 0;
+          border-radius: 8px;
+        }
+
+        @media (max-width: 768px) {
+          .modal {
+            max-width: 92vw;
+            max-height: 92vh;
+            border-radius: 8px;
+          }
         }
 
         @media (max-width: 480px) {
           .modal {
-            max-width: 95vw;
-            max-height: 95vh;
+            max-width: 96vw;
+            max-height: 96vh;
+            border-radius: 6px;
+          }
+        }
+
+        .modal-icon {
+          margin-bottom: 16px;
+        }
+
+        @media (max-width: 480px) {
+          .modal-icon {
+            margin-bottom: 12px;
           }
         }
 
@@ -1104,11 +1214,39 @@ function App() {
           border-radius: 8px;
         }
 
+        @media (max-width: 768px) {
+          .standalone-card {
+            margin: 30px auto;
+            padding: 24px;
+            border-radius: 8px;
+          }
+        }
+
         @media (max-width: 480px) {
           .standalone-card {
-            margin: 20px auto;
-            padding: 20px;
+            margin: 16px auto;
+            padding: 16px;
             max-width: 100%;
+            border-radius: 6px;
+          }
+        }
+
+        .section-block {
+          margin: 30px 0;
+          padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .section-block {
+            margin: 20px 0;
+            padding: 16px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .section-block {
+            margin: 12px 0;
+            padding: 12px;
           }
         }
       `}</style>
@@ -1243,21 +1381,79 @@ function App() {
           <section className="referral-layout" id="referrals">
             <div className="section-block rank-section">
               <div className="section-heading">
-                <div><div className="eyebrow"><span className="eyebrow-line" /> REFERRAL INFORMATION</div><h2>Referral reward claims</h2><p className="section-subtitle">Unverified user-provided examples; no referral payouts are processed on this site.</p></div>
+                <div><div className="eyebrow"><span className="eyebrow-line" /> REFERRAL PROGRAM</div><h2>Earn rewards by referring friends</h2><p className="section-subtitle">Invite friends to join and earn commissions on their first deposit plus weekly tier salaries.</p></div>
               </div>
-              <div className="referral-banner">
+              <div className="referral-banner" style={{background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%)', border: '2px solid rgba(212, 175, 55, 0.4)'}}>
                 <div className="referral-banner-content">
                   <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
-                  <div className="referral-banner-title">User-described 5% first-deposit reward.</div>
-                  <p>This claim has not been independently verified. No bonus is tracked or paid here.</p>
+                  <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your code and earn 5% on first deposits</div>
+                  {account?.referralCode ? (
+                    <div style={{background: 'rgba(0, 0, 0, 0.5)', padding: '12px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '14px', fontWeight: '600', color: 'var(--gold)', marginBottom: '12px', wordBreak: 'break-all'}}>
+                      {`${window.location.origin}/?ref=${account.referralCode}`}
+                    </div>
+                  ) : (
+                    <p style={{color: '#aaa', fontSize: '13px', marginBottom: '12px'}}>Generate your referral code to start earning...</p>
+                  )}
                 </div>
-                <span className="copy-button referral-code-example"><Icon name="users" size={15} />No active referral code</span>
+                <button 
+                  className="copy-button referral-code-example" 
+                  style={{cursor: 'pointer', padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '12px'}}
+                  onClick={async () => {
+                    if (!account?.referralCode) {
+                      try {
+                        const result = await requestApi('/api/referrals/code');
+                        setAccount({...account, referralCode: result.code});
+                        setNotice(`Referral code created: ${result.code}`);
+                      } catch (error) {
+                        setNotice(`Error: ${error.message}`);
+                      }
+                    } else {
+                      const link = `${window.location.origin}/?ref=${account.referralCode}`;
+                      navigator.clipboard.writeText(link).then(() => {
+                        setNotice('Referral link copied to clipboard!');
+                      }).catch(() => {
+                        setNotice('Could not copy link. Select and copy manually.');
+                      });
+                    }
+                  }}
+                >
+                  <Icon name="copy" size={14} style={{marginRight: '6px'}} />{account?.referralCode ? 'Copy link' : 'Generate code'}
+                </button>
               </div>
+              {!referralStatsLoading && referralStats && (
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '30px'}}>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Your tier</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {referralStats.tier || 'Unranked'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Direct referrals</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.directReferrals === 'number' ? referralStats.directReferrals : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Commission rate</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.commissionRate === 'number' ? `${(referralStats.commissionRate * 100).toFixed(0)}%` : '0%'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      ${typeof referralStats.totalEarnings === 'number' ? referralStats.totalEarnings.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}
+                    </div>
+                  </article>
+                </div>
+              )}
+
               <div className="rank-table-wrap">
                 <table className="rank-table">
                   <thead><tr><th>RANK</th><th>DIRECT REFERRALS</th><th>TEAM TOTAL</th><th>REWARD</th><th>WEEKLY SALARY</th></tr></thead>
                   <tbody>{ranks.map((rank, index) => (
-                    <tr key={rank.name}>
+                    <tr key={rank.name} style={{background: referralStats?.tier === rank.name ? 'rgba(212, 175, 55, 0.1)' : 'transparent'}}>
                       <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
                       <td>{rank.direct} <span className="table-muted">direct</span></td>
                       <td>{rank.team === null ? <span className="table-dash">—</span> : rank.team}</td>
@@ -1267,7 +1463,7 @@ function App() {
                   ))}</tbody>
                 </table>
               </div>
-              <p className="team-note">Team total means the people referred by your direct referrals. Star 1 has no team-total requirement specified.</p>
+              <p className="team-note">Your current tier is highlighted above. Qualify for higher tiers by recruiting more direct referrals or building your team total.</p>
             </div>
 
             <aside className={`bonus-card ${!isPrimeHourActive ? 'prime-hour-card inactive' : 'prime-hour-card'}`} id="rewards">
