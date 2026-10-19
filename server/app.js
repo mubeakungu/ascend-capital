@@ -18,7 +18,7 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit'];
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
@@ -35,6 +35,19 @@ const REFERRAL_COMMISSION_RATES = [
   0.14,  // Star 7: 14%
   0.16,  // Star 8: 16%
   0.18,  // Crown Leader: 18%
+];
+
+// Weekly tier salaries
+const TIER_SALARIES = [
+  0,        // Star 1: $0 (no salary)
+  100,      // Star 2: $100/week
+  200,      // Star 3: $200/week
+  300,      // Star 4: $300/week
+  450,      // Star 5: $450/week
+  900,      // Star 6: $900/week
+  1500,     // Star 7: $1,500/week
+  2500,     // Star 8: $2,500/week
+  5000,     // Crown Leader: $5,000/week
 ];
 
 const TIER_NAMES = [
@@ -85,6 +98,7 @@ function transactionView(row, { admin = false } = {}) {
   const typeMap = {
     'tier_reward': 'Tier Reward',
     'trading_profit': 'Trading Profit',
+    'tier_salary': 'Weekly Salary',
   };
   
   const view = {
@@ -98,6 +112,7 @@ function transactionView(row, { admin = false } = {}) {
     reviewNote: row.review_note ?? '',
     isTierReward: row.type === 'tier_reward',
     isTradingProfit: row.type === 'trading_profit',
+    isTierSalary: row.type === 'tier_salary',
   };
   if (admin) {
     view.accountId = row.account_id;
@@ -300,7 +315,7 @@ export function createApp({ databasePath }) {
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -363,6 +378,21 @@ export function createApp({ databasePath }) {
     CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id);
     CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id);
     CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date);
+    CREATE TABLE IF NOT EXISTS weekly_salary_payments (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      tier_index INTEGER NOT NULL,
+      tier_name TEXT NOT NULL,
+      salary_cents INTEGER NOT NULL CHECK(salary_cents > 0),
+      payment_week TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'credited' CHECK(status IN ('pending', 'credited', 'held')),
+      credited_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS weekly_salary_payments_account_idx ON weekly_salary_payments(account_id);
+    CREATE INDEX IF NOT EXISTS weekly_salary_payments_week_idx ON weekly_salary_payments(payment_week);
+    CREATE UNIQUE INDEX IF NOT EXISTS weekly_salary_payments_unique_idx
+      ON weekly_salary_payments(account_id, payment_week);
   `);
 
   // Initialize tier rewards table
@@ -741,6 +771,91 @@ export function createApp({ databasePath }) {
     }
   }
 
+  // Apply weekly tier salaries (every Monday at 00:00 UTC)
+  function applyWeeklySalaries() {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const weekNumber = Math.ceil((now.getUTCDate() - now.getUTCDay() + 1) / 7);
+    const paymentWeek = `${year}-W${String(weekNumber).padStart(2, '0')}`;
+
+    // Get all members with their current tier
+    const members = db.prepare(`
+      SELECT DISTINCT
+        a.id,
+        a.email,
+        a.name
+      FROM accounts a
+      WHERE a.role = 'member' AND a.status = 'active'
+    `).all();
+
+    for (const member of members) {
+      // Check if already paid this week
+      const alreadyPaid = db.prepare(`
+        SELECT id FROM weekly_salary_payments
+        WHERE account_id = ? AND payment_week = ?
+      `).get(member.id, paymentWeek);
+
+      if (alreadyPaid) continue;
+
+      // Get member's current tier
+      const directCount = getDirectReferralCount(db, member.id);
+      const teamTotal = getTeamTotal(db, member.id);
+      const tier = getTierByProgress(directCount, teamTotal);
+
+      if (tier < 1) continue; // Only Star 2 and above get salary
+
+      const tierName = TIER_NAMES[tier];
+      const salaryCents = Math.round(TIER_SALARIES[tier] * 100);
+
+      if (salaryCents <= 0) continue;
+
+      const salaryId = randomBytes(16).toString('hex');
+      const txId = randomBytes(16).toString('hex');
+
+      try {
+        withTransaction(() => {
+          // Record salary payment
+          db.prepare(`
+            INSERT INTO weekly_salary_payments (id, account_id, tier_index, tier_name, salary_cents, payment_week, credited_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            salaryId,
+            member.id,
+            tier,
+            tierName,
+            salaryCents,
+            paymentWeek,
+            new Date().toISOString(),
+            new Date().toISOString(),
+          );
+
+          // Credit as approved transaction
+          db.prepare(`
+            INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+            VALUES (?, ?, 'tier_salary', ?, ?, 'approved', ?)
+          `).run(
+            txId,
+            member.id,
+            salaryCents,
+            `Weekly ${tierName} salary for ${paymentWeek}`,
+            new Date().toISOString(),
+          );
+
+          recordAudit({}, 'salary.weekly_credited', member.id, {
+            tierIndex: tier,
+            tierName,
+            amountUSD: salaryCents / 100,
+            paymentWeek,
+            directCount,
+            teamTotal,
+          });
+        });
+      } catch (error) {
+        console.error(`Failed to credit weekly salary for member ${member.id}:`, error);
+      }
+    }
+  }
+
   // Run daily trading profit calculations every day at midnight UTC
   function scheduleDailyTradingProfits() {
     const now = new Date();
@@ -759,7 +874,27 @@ export function createApp({ databasePath }) {
     }, timeUntilMidnight);
   }
 
+  // Schedule weekly salaries: Every Monday at 00:00 UTC
+  function scheduleWeeklySalaries() {
+    const now = new Date();
+    const daysUntilMonday = (1 - now.getUTCDay() + 7) % 7 || 7; // 0 = Sunday, 1 = Monday
+    const nextMonday = new Date(now);
+    nextMonday.setUTCDate(nextMonday.getUTCDate() + daysUntilMonday);
+    nextMonday.setUTCHours(0, 0, 0, 0);
+
+    const timeUntilMonday = nextMonday.getTime() - now.getTime();
+
+    setTimeout(() => {
+      applyWeeklySalaries();
+      // Run weekly after first execution
+      setInterval(() => {
+        applyWeeklySalaries();
+      }, 7 * 24 * 60 * 60 * 1000); // 7 days
+    }, timeUntilMonday);
+  }
+
   seedInitialAdmin();
+  scheduleWeeklySalaries();
   scheduleDailyTradingProfits();
 
   // =========================================================================
@@ -1120,6 +1255,49 @@ export function createApp({ databasePath }) {
         email: r.email,
         signedUpAt: r.signed_up_at,
         totalDeposits: r.total_deposits / 100,
+      })),
+    });
+  });
+
+  app.get('/api/referrals/weekly-salary', requireAccount, (request, response) => {
+    const directCount = getDirectReferralCount(db, request.account.id);
+    const teamTotal = getTeamTotal(db, request.account.id);
+    const tier = getTierByProgress(directCount, teamTotal);
+
+    if (tier < 1) {
+      return response.json({
+        tier: null,
+        weeklySalary: 0,
+        message: 'Star 2 tier and above receive weekly salaries.',
+        directCount,
+        teamTotal,
+      });
+    }
+
+    const tierName = TIER_NAMES[tier];
+    const weeklySalary = TIER_SALARIES[tier];
+
+    // Get recent salary payments
+    const payments = db.prepare(`
+      SELECT id, tier_name, salary_cents, payment_week, credited_at
+      FROM weekly_salary_payments
+      WHERE account_id = ?
+      ORDER BY payment_week DESC
+      LIMIT 12
+    `).all(request.account.id);
+
+    const totalEarned = payments.reduce((sum, p) => sum + (p.salary_cents / 100), 0);
+
+    return response.json({
+      tier: tierName,
+      weeklySalary,
+      directCount,
+      teamTotal,
+      totalEarned,
+      recentPayments: payments.map(p => ({
+        week: p.payment_week,
+        amount: p.salary_cents / 100,
+        creditedAt: p.credited_at,
       })),
     });
   });
@@ -1757,6 +1935,71 @@ export function createApp({ databasePath }) {
       applyDailyTradingProfits();
       recordAudit(request, 'admin.trading_profits_applied', null, {});
       return response.json({ ok: true, message: 'Daily trading profits applied.' });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/admin/salary/ledger', adminLimiter, requireAdminSession, (request, response) => {
+    const { accountId, tier } = request.query;
+    let sql = `
+      SELECT
+        wsp.id,
+        wsp.account_id,
+        wsp.tier_name,
+        wsp.salary_cents,
+        wsp.payment_week,
+        wsp.credited_at,
+        a.name AS account_name,
+        a.email AS account_email
+      FROM weekly_salary_payments wsp
+      JOIN accounts a ON a.id = wsp.account_id
+    `;
+    const params = [];
+    const conditions = [];
+
+    if (accountId) {
+      conditions.push('wsp.account_id = ?');
+      params.push(accountId);
+    }
+    if (tier !== undefined) {
+      const tierIndex = TIER_NAMES.indexOf(tier);
+      if (tierIndex >= 0) {
+        conditions.push('wsp.tier_index = ?');
+        params.push(tierIndex);
+      }
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY wsp.payment_week DESC LIMIT 500';
+
+    const rows = db.prepare(sql).all(...params);
+    const totalPaid = rows.reduce((sum, r) => sum + (r.salary_cents / 100), 0);
+
+    return response.json({
+      totalPaid,
+      count: rows.length,
+      payments: rows.map(r => ({
+        id: r.id,
+        accountId: r.account_id,
+        accountName: r.account_name,
+        accountEmail: r.account_email,
+        tier: r.tier_name,
+        amount: r.salary_cents / 100,
+        week: r.payment_week,
+        creditedAt: r.credited_at,
+      })),
+    });
+  });
+
+  app.post('/api/admin/salary/apply-now', adminLimiter, requireAdminSession, (request, response, next) => {
+    try {
+      applyWeeklySalaries();
+      recordAudit(request, 'admin.weekly_salaries_applied', null, {});
+      return response.json({ ok: true, message: 'Weekly salaries applied immediately.' });
     } catch (error) {
       return next(error);
     }
