@@ -13,7 +13,6 @@ const when = (iso) => {
     : date.toLocaleString();
 };
 
-// Admin API helper - uses same-origin credentials for ADMIN session cookie (separate from client)
 async function api(path, { method = 'GET', body } = {}) {
   const init = { method, credentials: 'same-origin' };
   if (method !== 'GET') {
@@ -151,7 +150,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
 
   return (
     <div className="ad-overlay" onClick={onClose}>
-      <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges} style={{ maxWidth: '500px' }}>
+      <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
         <h3>Account Details</h3>
         
         <div className="ad-detail-row">
@@ -189,7 +188,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
             <label>Email</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             <Notice notice={notice} />
-            <div className="ad-row end" style={{ marginTop: '16px' }}>
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
               <button type="button" className="ad-btn ghost" onClick={() => setEditMode(false)}>Cancel</button>
               <button className="ad-btn" disabled={busy}>{busy ? 'Saving…' : 'Save Changes'}</button>
             </div>
@@ -204,7 +203,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
               <span className="ad-detail-label">Email</span>
               <span className="ad-detail-value">{account.email}</span>
             </div>
-            <div className="ad-row end" style={{ marginTop: '16px' }}>
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
               <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>
               <button type="button" className="ad-btn" onClick={() => setEditMode(true)}>Edit</button>
             </div>
@@ -253,40 +252,79 @@ function AccountsManagement() {
 
       <Notice notice={notice} />
 
-      <div className="ad-scroll">
-        <table className="ad-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Balance</th>
-              <th>Role</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.map((a) => (
-              <tr key={a.id}>
-                <td>{a.name}</td>
-                <td>{a.email}</td>
-                <td><Badge value={a.status} /></td>
-                <td className="num">{money(a.balance)}</td>
-                <td><Badge value={a.role} /></td>
-                <td>{new Date(a.createdAt).toLocaleDateString()}</td>
-                <td>
-                  <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)} style={{ width: '100%' }}>View</button>
-                    {a.role !== 'admin' && (
-                      <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ width: '100%', marginTop: '4px' }}>Delete</button>
-                    )}
-                  </div>
-                </td>
+      {/* Mobile Card View */}
+      <div className="ad-accounts-mobile">
+        {accounts.map((a) => (
+          <div key={a.id} className="ad-account-card">
+            <div className="ad-account-card-header">
+              <span className="ad-account-name">{a.name}</span>
+              <Badge value={a.status} />
+            </div>
+            <div className="ad-account-card-body">
+              <div className="ad-account-card-row">
+                <span className="label">Email:</span>
+                <span className="value">{a.email}</span>
+              </div>
+              <div className="ad-account-card-row">
+                <span className="label">Balance:</span>
+                <span className="value">{money(a.balance)}</span>
+              </div>
+              <div className="ad-account-card-row">
+                <span className="label">Role:</span>
+                <Badge value={a.role} />
+              </div>
+              <div className="ad-account-card-row">
+                <span className="label">Created:</span>
+                <span className="value">{new Date(a.createdAt).toLocaleDateString()}</span>
+              </div>
+            </div>
+            <div className="ad-account-card-actions">
+              <button className="ad-btn sm" onClick={() => setSelectedId(a.id)} style={{ flex: 1 }}>View</button>
+              {a.role !== 'admin' && (
+                <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ flex: 1 }}>Delete</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="ad-accounts-desktop">
+        <div className="ad-scroll">
+          <table className="ad-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Balance</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {accounts.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.name}</td>
+                  <td>{a.email}</td>
+                  <td><Badge value={a.status} /></td>
+                  <td className="num">{money(a.balance)}</td>
+                  <td><Badge value={a.role} /></td>
+                  <td>{new Date(a.createdAt).toLocaleDateString()}</td>
+                  <td>
+                    <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)} style={{ width: '100%' }}>View</button>
+                      {a.role !== 'admin' && (
+                        <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ width: '100%', marginTop: '4px' }}>Delete</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {selectedId && (
@@ -353,13 +391,13 @@ function Dashboard() {
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
         <StatCard label="Held Accounts" value={acc.filter(a => a.status === 'held').length} />
-        <StatCard label="Total Deposits (All Time)" value={money(totalDeposits)} />
+        <StatCard label="Total Deposits" value={money(totalDeposits)} />
         <StatCard label="Active Deposits" value={money(activeDeposits)} />
-        <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} requests`} />
-        <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} requests`} />
+        <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} req`} />
+        <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} req`} />
         <StatCard label="Total Trades" value={totalTrades} />
-        <StatCard label="Total Trading Profit" value={money(totalTradeProfit)} />
-        <StatCard label="Pending Review" value={txns.length} subtext="deposits & withdrawals" />
+        <StatCard label="Trading Profit" value={money(totalTradeProfit)} />
+        <StatCard label="Pending Review" value={txns.length} subtext="txns" />
       </div>
     </section>
   );
@@ -380,12 +418,11 @@ function ReferralsManagement() {
   return (
     <section>
       <h2>Referral Management</h2>
-      <div className="ad-row" style={{ marginBottom: '16px' }}>
+      <div className="ad-row ad-search-row">
         <input 
           placeholder="Search by member ID" 
           value={searchId} 
           onChange={(e) => setSearchId(e.target.value)}
-          style={{ flex: 1, maxWidth: '300px' }}
         />
         <button className="ad-btn ghost" onClick={reload}>Search</button>
       </div>
@@ -401,20 +438,19 @@ function ReferralsManagement() {
             <StatCard label="Direct Referrals" value={data.directReferrals} />
             <StatCard label="Team Total" value={data.teamTotal} />
             <StatCard label="Current Tier" value={data.tier || 'None'} />
-            <StatCard label="Commissions Earned" value={data.commissions.length} />
+            <StatCard label="Commissions" value={data.commissions.length} />
             <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
           </div>
 
-          <h3>Referrals (Direct)</h3>
+          <h3>Direct Referrals</h3>
           <div className="ad-scroll">
             <table className="ad-table">
               <thead>
                 <tr>
-                  <th>Member Name</th>
+                  <th>Member</th>
                   <th>Email</th>
-                  <th>Commission Rate</th>
+                  <th>Rate</th>
                   <th>Earned</th>
-                  <th>Transaction</th>
                 </tr>
               </thead>
               <tbody>
@@ -422,9 +458,8 @@ function ReferralsManagement() {
                   <tr key={c.id}>
                     <td>{c.referredName}</td>
                     <td>{c.referredEmail}</td>
-                    <td>{(c.commissionRate * 100).toFixed(1)}%</td>
+                    <td>{(c.commissionRate * 100).toFixed(0)}%</td>
                     <td className="num">{money(c.commissionEarned)}</td>
-                    <td>{c.transactionType} {money(c.transactionAmount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -432,7 +467,7 @@ function ReferralsManagement() {
           </div>
         </div>
       ) : searchId ? (
-        <p className="ad-empty">Enter a member ID to view referral data</p>
+        <p className="ad-empty">No referral data found</p>
       ) : (
         <p className="ad-empty">Enter a member ID to search</p>
       )}
@@ -469,8 +504,8 @@ function TradingManagement() {
       <div style={{ marginBottom: '16px' }}>
         <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
         <div className="ad-row">
-          <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-          <button className="ad-btn" onClick={applyProfits} style={{ marginLeft: 'auto' }}>Apply Profits</button>
+          <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
+          <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
         </div>
       </div>
 
@@ -478,32 +513,27 @@ function TradingManagement() {
 
       <div className="ad-grid">
         <StatCard label="Total Trades" value={trades.length} />
-        <StatCard label="Total Profit Generated" value={money(totalProfit)} />
+        <StatCard label="Total Profit" value={money(totalProfit)} />
       </div>
 
-      <h3>Recent Trading Activity</h3>
+      <h3>Recent Activity</h3>
       <div className="ad-scroll">
         <table className="ad-table">
           <thead>
             <tr>
               <th>Date</th>
               <th>Member</th>
-              <th>Deposit Amount</th>
-              <th>Daily Profit</th>
-              <th>Credited</th>
+              <th>Deposit</th>
+              <th>Profit</th>
             </tr>
           </thead>
           <tbody>
             {trades.map((t) => (
               <tr key={t.id}>
                 <td>{t.profitDate}</td>
-                <td>
-                  {t.accountName}
-                  <small>{t.accountEmail}</small>
-                </td>
+                <td>{t.accountName}</td>
                 <td className="num">{money(t.depositAmount)}</td>
                 <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
-                <td>{when(t.creditedAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -558,7 +588,7 @@ function BalanceManagement() {
   return (
     <section>
       <h2>Adjust Member Balance</h2>
-      <form className="ad-form" onSubmit={submit} style={{ maxWidth: '500px' }}>
+      <form className="ad-form" onSubmit={submit}>
         <label>Member ID</label>
         <input 
           type="text" 
@@ -595,7 +625,7 @@ function BalanceManagement() {
         />
 
         <Notice notice={notice} />
-        <button className="ad-btn" disabled={busy}>
+        <button className="ad-btn" disabled={busy} style={{ width: '100%' }}>
           {busy ? 'Processing…' : `${action.charAt(0).toUpperCase() + action.slice(1)} Balance`}
         </button>
       </form>
@@ -668,25 +698,20 @@ function TransactionApproval() {
                 <tr>
                   <th>Member</th>
                   <th>Amount</th>
-                  <th>Reference</th>
-                  <th>Requested</th>
+                  <th>Ref</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {deposits.map((t) => (
                   <tr key={t.id}>
-                    <td>
-                      {t.accountName}
-                      <small>{t.accountEmail}</small>
-                    </td>
+                    <td>{t.accountName}</td>
                     <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '11px', color: 'var(--muted)' }}>{t.reference || '—'}</code></td>
-                    <td>{new Date(t.createdAt).toLocaleString()}</td>
+                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.reference?.slice(0, 8) || '—'}</code></td>
                     <td>
-                      <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }} style={{ width: '100%' }}>Approve</button>
-                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }} style={{ width: '100%' }}>Reject</button>
+                      <div className="ad-actions-compact">
+                        <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
+                        <button className="ad-btn ghost xs danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>✕</button>
                       </div>
                     </td>
                   </tr>
@@ -706,25 +731,20 @@ function TransactionApproval() {
                 <tr>
                   <th>Member</th>
                   <th>Amount</th>
-                  <th>Destination</th>
-                  <th>Requested</th>
+                  <th>Dest</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {withdrawals.map((t) => (
                   <tr key={t.id}>
-                    <td>
-                      {t.accountName}
-                      <small>{t.accountEmail}</small>
-                    </td>
+                    <td>{t.accountName}</td>
                     <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '11px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.destination || '—'}</code></td>
-                    <td>{new Date(t.createdAt).toLocaleString()}</td>
+                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.destination?.slice(0, 8) || '—'}</code></td>
                     <td>
-                      <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }} style={{ width: '100%' }}>Approve</button>
-                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }} style={{ width: '100%' }}>Reject</button>
+                      <div className="ad-actions-compact">
+                        <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
+                        <button className="ad-btn ghost xs danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>✕</button>
                       </div>
                     </td>
                   </tr>
@@ -751,17 +771,11 @@ function TransactionApproval() {
                   rows={3}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Explain why this transaction is being rejected..."
+                  placeholder="Explain why..."
                   required
                 />
               </>
             )}
-
-            <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '12px' }}>
-              {actionType === 'approve' 
-                ? 'This transaction will be approved and processed immediately.' 
-                : 'The user will be notified of the rejection.'}
-            </p>
 
             <div className="ad-row end" style={{ marginTop: '16px' }}>
               <button type="button" className="ad-btn ghost" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>Cancel</button>
@@ -777,7 +791,7 @@ function TransactionApproval() {
 }
 
 // ============================================================================
-// SETTINGS / PASSWORD CHANGE - FIXED
+// SETTINGS / PASSWORD CHANGE - FIXED & MOBILE OPTIMIZED
 // ============================================================================
 
 function SettingsManagement({ account }) {
@@ -835,7 +849,7 @@ function SettingsManagement({ account }) {
     <section>
       <h2>Settings</h2>
 
-      <div className="ad-card" style={{ maxWidth: '500px', marginTop: '20px' }}>
+      <div className="ad-card">
         <h3>Administrator Account</h3>
         <div className="ad-detail-row" style={{ borderBottom: '1px solid var(--line)', paddingBottom: '12px', marginBottom: '12px' }}>
           <span className="ad-detail-label">Email</span>
@@ -872,19 +886,20 @@ function SettingsManagement({ account }) {
             required
           />
 
-          <div style={{ marginTop: '8px', marginBottom: '16px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'normal', margin: 0 }}>
-              <input
-                type="checkbox"
-                checked={showPassword}
-                onChange={(e) => setShowPassword(e.target.checked)}
-              />
+          <div style={{ marginTop: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="checkbox"
+              id="show-pwd"
+              checked={showPassword}
+              onChange={(e) => setShowPassword(e.target.checked)}
+            />
+            <label htmlFor="show-pwd" style={{ margin: 0, fontWeight: 'normal', color: 'var(--text)', fontSize: '14px' }}>
               Show passwords
             </label>
           </div>
 
           <Notice notice={notice} />
-          <button className="ad-btn" disabled={busy} style={{ marginTop: '16px', width: '100%' }}>
+          <button className="ad-btn" disabled={busy} style={{ width: '100%', padding: '12px' }}>
             {busy ? 'Updating…' : 'Change Password'}
           </button>
         </form>
@@ -905,7 +920,6 @@ function Login({ onLogin }) {
   const [logo, setLogo] = useState(null);
 
   useEffect(() => {
-    // Try to load logo
     fetch('/api/public/logo')
       .then(r => r.ok && r.blob())
       .then(blob => blob && setLogo(URL.createObjectURL(blob)))
@@ -936,7 +950,7 @@ function Login({ onLogin }) {
         <label>Password</label>
         <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {error && <p className="ad-error">{error}</p>}
-        <button className="ad-btn" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <button className="ad-btn" disabled={busy} style={{ width: '100%', padding: '12px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
     </div>
   );
@@ -946,11 +960,10 @@ export default function AdminDashboard() {
   const [account, setAccount] = useState(undefined);
   const [tab, setTab] = useState('dashboard');
   const [logo, setLogo] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    // Check admin auth session (separate from client session)
     api('/admin/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
-    // Load logo
     fetch('/api/public/logo')
       .then(r => r.ok && r.blob())
       .then(blob => blob && setLogo(URL.createObjectURL(blob)))
@@ -981,7 +994,7 @@ export default function AdminDashboard() {
         <div className="ad-card ad-form">
           <h2>Administrator access required</h2>
           <p className="ad-muted">{account.email} is not an administrator account.</p>
-          <button className="ad-btn" onClick={signOut}>Sign out</button>
+          <button className="ad-btn" onClick={signOut} style={{ width: '100%', padding: '12px' }}>Sign out</button>
         </div>
       </div>
     );
@@ -989,18 +1002,25 @@ export default function AdminDashboard() {
     body = (
       <>
         <header className="ad-top">
+          <button className="ad-hamburger" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>☰</button>
           <div className="ad-brand">
             {logo && <img src={logo} alt="Logo" style={{ height: '28px', marginRight: '6px', verticalAlign: 'middle' }} />}
-            <b>ascend</b> <span style={{ display: { xs: 'none', sm: 'inline' } }}>capital</span> <span>Admin</span>
+            <b>ascend</b> <span className="ad-brand-full">capital</span> <span>Admin</span>
           </div>
-          <nav>
+          <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
             {tabs.map(([key, label]) => (
-              <button key={key} className={tab === key ? 'on' : ''} onClick={() => setTab(key)} title={label}>{label}</button>
+              <button 
+                key={key} 
+                className={tab === key ? 'on' : ''} 
+                onClick={() => { setTab(key); setMobileMenuOpen(false); }}
+              >
+                {label}
+              </button>
             ))}
           </nav>
           <div className="ad-who">
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{account.email}</span>
-            <button className="ad-btn ghost sm" onClick={signOut} style={{ whiteSpace: 'nowrap' }}>Sign out</button>
+            <span>{account.email}</span>
+            <button className="ad-btn ghost sm" onClick={signOut}>Sign out</button>
           </div>
         </header>
         <main className="ad-main">
@@ -1026,23 +1046,29 @@ export default function AdminDashboard() {
 
 const CSS = `
 .ad{--bg:#0b100e;--card:#111815;--line:#1f2a24;--text:#e8efe9;--muted:#8a9a90;--accent:#b5ee6a;--bad:#ff8a7a;--warn:#f2c46d;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.45 'DM Sans',system-ui,sans-serif}
-.ad *{box-sizing:border-box}
+.ad *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .ad h2,.ad h3{font-family:Manrope,'DM Sans',sans-serif;margin:0}
 .ad h2{font-size:20px}.ad h3{font-size:15px;margin:18px 0 8px}
 .ad-logo{max-height:40px;width:auto;object-fit:contain}
-.ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card)}
-.ad-brand{font:600 18px Manrope,sans-serif;display:flex;align-items:center}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
-.ad-top nav{display:flex;gap:4px;flex:1;flex-wrap:wrap;min-width:100%}
-.ad-top nav button{background:none;border:0;color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer;font:600 12px inherit;white-space:nowrap}
-.ad-top nav button.on{background:#1a241f;color:var(--text)}
-.ad-who{display:flex;align-items:center;gap:8px;color:var(--muted);width:100%;font-size:12px}
+.ad-hamburger{display:none;background:none;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:8px;margin:-8px}
+.ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card);position:relative}
+.ad-brand{font:600 18px Manrope,sans-serif;display:flex;align-items:center;white-space:nowrap}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
+.ad-brand-full{display:inline}
+.ad-nav{display:flex;gap:4px;flex:1;flex-wrap:wrap;min-width:100%}
+.ad-nav button{background:none;border:0;color:var(--muted);padding:8px 12px;border-radius:6px;cursor:pointer;font:600 12px inherit;white-space:nowrap;min-height:44px}
+.ad-nav button.on{background:#1a241f;color:var(--text)}
+.ad-who{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
 .ad-main{max-width:1200px;margin:0 auto;padding:16px}
 .ad-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.ad-row.grow{flex:1;margin:0}.ad-row.end{justify-content:flex-end}
-.ad input,.ad select,.ad textarea{background:#0e1512;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:inherit;width:100%}
+.ad-search-row{gap:8px}
+.ad-search-row input{flex:1;min-width:150px}
+.ad-search-row button{flex:0}
+.ad input,.ad select,.ad textarea{background:#0e1512;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;font:inherit;width:100%;min-height:44px}
 .ad-row input,.ad-row select{width:auto}
 .ad label{display:block;margin:12px 0 6px;color:var(--muted);font-size:12px;font-weight:500}
-.ad-btn{background:var(--accent);color:#0b100e;border:0;border-radius:6px;padding:9px 14px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
-.ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:5px 10px;font-size:11px}
+.ad-btn{background:var(--accent);color:#0b100e;border:0;border-radius:6px;padding:9px 14px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+.ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:8px 12px;min-height:40px;font-size:11px}
+.ad-btn.xs{padding:4px 6px;min-height:32px;font-size:10px}
 .ad-btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 .ad-btn.danger{background:var(--bad)}
 .ad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:16px 0}
@@ -1057,6 +1083,18 @@ const CSS = `
 .ad-table tr:last-child td{border-bottom:0}
 .ad-table small{display:block;color:var(--muted);margin-top:2px;font-size:11px}
 .ad-table .num{white-space:nowrap;font-variant-numeric:tabular-nums}
+.ad-account-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.ad-account-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.ad-account-name{font:600 15px 'DM Sans',sans-serif}
+.ad-account-card-body{margin-bottom:12px}
+.ad-account-card-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px}
+.ad-account-card-row .label{color:var(--muted);font-weight:500}
+.ad-account-card-row .value{text-align:right}
+.ad-account-card-actions{display:flex;gap:8px}
+.ad-account-card-actions .ad-btn{flex:1;min-height:40px}
+.ad-accounts-desktop{display:block}
+.ad-accounts-mobile{display:none}
+.ad-actions-compact{display:flex;gap:4px}
 .ad-empty{color:var(--muted);padding:20px;text-align:center;font-size:13px}
 .ad-muted{color:var(--muted)}
 .ad-error{color:var(--bad);margin:8px 0;font-size:13px}
@@ -1078,82 +1116,97 @@ const CSS = `
 .ad-badge.member{background:#1a3a1a;color:#90ee90}
 
 @media (max-width:768px){
+  .ad-hamburger{display:block}
+  .ad-brand-full{display:none}
   .ad-top{gap:12px;padding:10px 12px}
-  .ad-brand{font-size:16px}
-  .ad-brand span{font-size:10px}
+  .ad-top nav{display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border-bottom:1px solid var(--line);flex-direction:column;padding:8px;gap:0;min-width:unset}
+  .ad-top nav.open{display:flex}
+  .ad-who{font-size:11px;gap:6px;order:3;width:100%}
+  .ad-brand{font-size:16px;order:2;flex:1}
+  .ad-nav button{width:100%;text-align:left;padding:10px 8px}
   .ad-main{padding:12px}
-  .ad-top nav{gap:2px}
-  .ad-top nav button{padding:5px 8px;font-size:11px}
-  .ad-who{font-size:11px;gap:6px}
   .ad h2{font-size:18px}
   .ad h3{font-size:14px;margin:16px 0 6px}
-  .ad-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .ad-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0}
   .ad-stat-card{padding:12px}
   .ad-stat-value{font-size:18px}
+  .ad-stat-label{font-size:10px}
   .ad-row{gap:8px;margin-bottom:12px}
-  .ad input,.ad select,.ad textarea{padding:9px;font-size:16px}
-  .ad-btn{padding:8px 12px;font-size:12px}
-  .ad-form{max-width:100%}
+  .ad input,.ad select,.ad textarea{padding:12px;font-size:16px;min-height:48px}
+  .ad-btn{padding:10px 14px;min-height:48px;font-size:12px}
+  .ad-btn.sm{min-height:40px;padding:8px 10px;font-size:11px}
+  .ad-accounts-desktop{display:none}
+  .ad-accounts-mobile{display:block}
   .ad-card{padding:16px}
-  .ad-detail-row{grid-template-columns:100px 1fr;gap:10px;padding:8px 0}
-  .ad-notice{padding:8px;font-size:12px}
-  .ad-error{font-size:12px}
+  .ad-detail-row{grid-template-columns:90px 1fr;gap:10px;padding:8px 0}
+  .ad-detail-label{font-size:10px}
+  .ad-detail-value{font-size:12px}
+  .ad-notice{padding:10px;font-size:12px;margin:8px 0}
+  .ad-error{font-size:12px;margin:6px 0}
   .ad-empty{padding:16px;font-size:12px}
-  .ad-table th{padding:8px 6px;font-size:10px}
-  .ad-table td{padding:8px 6px;font-size:12px}
-  .ad-table small{font-size:10px}
+  .ad-scroll{margin:10px 0}
+  .ad-modal{width:95vw;padding:16px}
+  .ad-modal h3{font-size:15px;margin:0 0 6px}
   .ad-actions{gap:4px}
   .ad-badge{padding:2px 6px;font-size:9px}
+  label{margin:12px 0 6px !important}
 }
 
 @media (max-width:480px){
-  .ad-top{flex-direction:column;gap:8px;padding:8px}
-  .ad-brand{font-size:14px;width:100%}
-  .ad-top nav{gap:2px;order:3;width:100%}
-  .ad-top nav button{flex:1;padding:6px 4px;font-size:10px;text-align:center}
-  .ad-who{order:2;width:100%;font-size:10px;justify-content:space-between}
+  .ad-hamburger{font-size:20px;padding:6px}
+  .ad-top{padding:8px}
+  .ad-brand{font-size:14px;order:2;margin-left:auto;margin-right:auto;flex:1}
+  .ad-who{order:3;width:100%;font-size:10px;justify-content:space-between}
   .ad-main{padding:10px}
-  .ad h2{font-size:16px}
+  .ad h2{font-size:16px;margin-bottom:12px}
   .ad h3{font-size:13px;margin:12px 0 6px}
   .ad-grid{grid-template-columns:1fr;gap:8px}
   .ad-stat-card{padding:10px}
-  .ad-stat-label{font-size:10px}
   .ad-stat-value{font-size:16px}
-  .ad-stat-sub{font-size:10px}
-  .ad-row{gap:6px}
-  .ad input,.ad select,.ad textarea{padding:8px;font-size:16px;border-radius:6px}
-  .ad-btn{padding:7px 10px;font-size:11px}
-  .ad-btn.sm{padding:4px 8px;font-size:10px}
+  .ad-stat-label{font-size:9px}
+  .ad-row{gap:6px;margin-bottom:10px}
+  .ad-row.ad-search-row input{min-width:0}
+  .ad input,.ad select,.ad textarea{padding:10px;font-size:16px;min-height:44px}
+  .ad-btn{padding:8px 10px;min-height:44px;font-size:11px}
+  .ad-btn.sm{min-height:36px;padding:6px 8px;font-size:10px}
+  .ad-btn.xs{min-height:28px;padding:3px 5px;font-size:9px}
   .ad-form{max-width:100%}
-  .ad-form .ad-btn{margin-top:12px}
-  .ad-card{padding:14px;border-radius:10px}
+  .ad-card{padding:12px;border-radius:8px}
+  .ad-account-card{padding:12px}
+  .ad-account-card-header{margin-bottom:10px;padding-bottom:10px}
+  .ad-account-name{font-size:13px}
+  .ad-account-card-body{margin-bottom:10px}
+  .ad-account-card-row{font-size:12px;padding:4px 0}
+  .ad-account-card-actions{gap:6px}
+  .ad-account-card-actions .ad-btn{min-height:36px;font-size:10px}
   .ad-login{padding:12px}
-  .ad-modal{width:95vw;padding:16px}
-  .ad-modal h3{font-size:15px;margin:0 0 6px}
-  .ad-detail-row{grid-template-columns:90px 1fr;gap:8px;padding:6px 0}
-  .ad-detail-label{font-size:10px}
-  .ad-detail-value{font-size:12px}
-  .ad-scroll{border-radius:8px;margin:10px 0}
-  .ad-table{min-width:400px}
-  .ad-table th{padding:6px 4px;font-size:9px}
-  .ad-table td{padding:6px 4px;font-size:11px}
-  .ad-table small{font-size:9px}
-  .ad-actions{gap:3px}
-  .ad-badge{padding:2px 5px;font-size:8px}
-  .ad-notice{padding:8px;margin:8px 0;font-size:11px}
-  .ad-error{font-size:11px;margin:6px 0}
-  .ad-empty{padding:12px;font-size:11px}
-  .ad-muted{font-size:12px}
-  label{margin:10px 0 4px!important}
+  .ad-modal{width:95vw;padding:14px;border-radius:8px}
+  .ad-modal h3{font-size:14px;margin:0 0 6px}
+  .ad-detail-row{grid-template-columns:70px 1fr;gap:8px;padding:6px 0;font-size:11px}
+  .ad-detail-label{font-size:9px}
+  .ad-detail-value{font-size:11px}
+  .ad-table{font-size:10px}
+  .ad-table th{padding:6px 4px;font-size:8px}
+  .ad-table td{padding:6px 4px;font-size:10px}
+  .ad-table small{font-size:8px}
+  .ad-notice{padding:8px;margin:6px 0;font-size:11px}
+  .ad-error{font-size:11px;margin:4px 0}
+  .ad-empty{padding:12px;font-size:10px}
+  .ad-muted{font-size:11px}
+  label{margin:10px 0 4px !important;font-size:12px}
   section{padding:0}
 }
 
 @media (max-width:360px){
-  .ad-top nav button{padding:4px 2px;font-size:9px}
-  .ad h2{font-size:15px}
+  .ad-hamburger{font-size:18px}
+  .ad-brand{font-size:12px}
+  .ad-brand span{font-size:8px}
+  .ad h2{font-size:14px}
   .ad h3{font-size:12px}
-  .ad-stat-value{font-size:15px}
-  .ad-table{min-width:350px;font-size:10px}
-  .ad-btn{padding:6px 10px;font-size:10px}
+  .ad-stat-value{font-size:14px}
+  .ad-stat-label{font-size:8px}
+  .ad-btn{padding:6px 8px;min-height:40px;font-size:10px}
+  .ad-nav button{font-size:11px;padding:8px 6px;min-height:40px}
+  .ad input,.ad select,.ad textarea{padding:8px;min-height:40px;font-size:15px}
 }
 `;
