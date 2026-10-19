@@ -393,7 +393,7 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    requestApi('/api/public/config')
+    requestApi('/api/public-config')
       .then(({ binanceWalletAddress: address }) => {
         if (!cancelled) setBinanceWalletAddress(typeof address === 'string' ? address.trim() : '');
       })
@@ -469,9 +469,28 @@ function App() {
     setWeeklyLoading(true);
     try {
       const result = await requestApi('/api/referrals/weekly-salary');
-      setWeeklyData(result);
+      // Ensure result has expected structure
+      setWeeklyData({
+        tier: result?.tier || null,
+        weeklySalary: typeof result?.weeklySalary === 'number' ? result.weeklySalary : 0,
+        directCount: typeof result?.directCount === 'number' ? result.directCount : 0,
+        teamTotal: typeof result?.teamTotal === 'number' ? result.teamTotal : 0,
+        totalEarned: typeof result?.totalEarned === 'number' ? result.totalEarned : 0,
+        recentPayments: Array.isArray(result?.recentPayments) ? result.recentPayments : [],
+        message: result?.message || null,
+      });
     } catch (error) {
       console.error('Failed to fetch weekly salary:', error);
+      // Set default structure on error
+      setWeeklyData({
+        tier: null,
+        weeklySalary: 0,
+        directCount: 0,
+        teamTotal: 0,
+        totalEarned: 0,
+        recentPayments: [],
+        message: 'Unable to load salary information.',
+      });
     } finally {
       setWeeklyLoading(false);
     }
@@ -561,18 +580,22 @@ function App() {
         ...(modal === 'withdraw' && { destination: destination.trim() }),
       };
 
-      const endpoint = modal === 'withdraw' ? '/api/transactions/withdraw' : '/api/transactions/deposit';
-      const result = await requestApi(endpoint, {
+      const result = await requestApi('/api/transactions', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          type: modal === 'withdraw' ? 'withdrawal' : 'deposit',
+          amount: value,
+          reference: modal === 'withdraw' ? destination.trim() : `Deposit-${Date.now()}`,
+        }),
       });
 
+      const txData = result.transaction || {};
       const entry = {
-        id: result.transaction?.id || `${Date.now()}-${Math.random()}`,
+        id: txData.id || `${Date.now()}-${Math.random()}`,
         type: modal === 'withdraw' ? 'Withdrawal' : 'Deposit',
         amount: value,
         createdAt: new Date().toLocaleTimeString(),
-        status: result.transaction?.status || 'pending',
+        status: txData.status || 'pending',
       };
 
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
@@ -1267,57 +1290,79 @@ function App() {
             </aside>
           </section>
 
-          <section className="weekly-salary-section" style={{marginTop: '40px', padding: '20px', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', border: '2px solid rgba(212, 175, 55, 0.2)'}}>
-            <div className="section-heading">
-              <div>
-                <div className="eyebrow"><span className="eyebrow-line" /> TIER BENEFITS</div>
-                <h2>Weekly tier salary</h2>
-                <p className="section-subtitle">Automatic weekly salary based on your current tier. Star 2 and above earn weekly.</p>
-              </div>
-            </div>
-
-            {weeklyLoading ? (
-              <p style={{textAlign: 'center', color: 'var(--text-light)'}}>Loading salary information...</p>
-            ) : weeklyData ? (
-              <>
-                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '20px'}}>
-                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
-                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current tier</span>
-                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>{weeklyData.tier || 'Not qualified'}</div>
-                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Direct: {weeklyData.directCount} · Team: {weeklyData.teamTotal}</span>
-                  </article>
-                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
-                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
-                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
-                      {weeklyData.weeklySalary > 0 ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}` : 'None'}
-                    </div>
-                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
-                  </article>
-                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
-                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
-                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
-                      ${weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                    </div>
-                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>All-time salaries</span>
-                  </article>
+          {account && (
+            <section className="weekly-salary-section" style={{marginTop: '40px', padding: '20px', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', border: '2px solid rgba(212, 175, 55, 0.2)'}}>
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow"><span className="eyebrow-line" /> TIER BENEFITS</div>
+                  <h2>Weekly tier salary</h2>
+                  <p className="section-subtitle">Automatic weekly salary based on your current tier. Star 2 and above earn weekly.</p>
                 </div>
+              </div>
 
-                {weeklyData.recentPayments && weeklyData.recentPayments.length > 0 && (
-                  <div style={{marginTop: '20px'}}>
-                    <h3 style={{fontSize: '16px', marginBottom: '12px', color: 'var(--text-light)'}}>Recent payments</h3>
-                    <div style={{display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto'}}>
-                      {weeklyData.recentPayments.map((payment, idx) => (
-                        <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
-                          <span>{payment.week}</span>
-                          <span style={{color: 'var(--gold)', fontWeight: '600'}}>+${payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                        </div>
-                      ))}
-                    </div>
+              {weeklyLoading ? (
+                <p style={{textAlign: 'center', color: 'var(--text-light)'}}>Loading salary information...</p>
+              ) : weeklyData ? (
+                <>
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '20px'}}>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current tier</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {weeklyData.tier ? weeklyData.tier : 'Not qualified'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>
+                        Direct: {typeof weeklyData.directCount === 'number' ? weeklyData.directCount : 0} · Team: {typeof weeklyData.teamTotal === 'number' ? weeklyData.teamTotal : 0}
+                      </span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {typeof weeklyData.weeklySalary === 'number' && weeklyData.weeklySalary > 0 
+                          ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}` 
+                          : 'None'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        ${typeof weeklyData.totalEarned === 'number' 
+                          ? weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                          : '0.00'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>All-time salaries</span>
+                    </article>
                   </div>
-                )}
-              </>
-            ) : null}
-          </section>
+
+                  {Array.isArray(weeklyData.recentPayments) && weeklyData.recentPayments.length > 0 && (
+                    <div style={{marginTop: '20px'}}>
+                      <h3 style={{fontSize: '16px', marginBottom: '12px', color: 'var(--text-light)'}}>Recent payments</h3>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto'}}>
+                        {weeklyData.recentPayments.map((payment, idx) => (
+                          <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
+                            <span>{String(payment.week || 'Week')}</span>
+                            <span style={{color: 'var(--gold)', fontWeight: '600'}}>
+                              +${typeof payment.amount === 'number' 
+                                ? payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                                : '0.00'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!weeklyData.tier && (
+                    <div style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', border: '1px solid rgba(212, 175, 55, 0.3)', marginTop: '20px', color: '#aaa', fontSize: '13px'}}>
+                      {weeklyData.message || 'You need to reach Star 2 tier (7 direct referrals or 13 team members) to earn weekly salary.'}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p style={{textAlign: 'center', color: '#666', padding: '20px'}}>Unable to load salary information.</p>
+              )}
+            </section>
+          )}
 
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
