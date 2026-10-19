@@ -1365,20 +1365,6 @@ function App() {
               <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome}</div>
               <div className="balance-bottom"><span className="balance-caption">Estimated daily earnings</span><button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button></div>
             </article>
-            <article className="balance-card">
-              <div className="card-topline">
-                <span className="balance-label">Referral bonus earned</span>
-                <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
-              </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings}</div>
-              <div className="balance-bottom">
-                <span className="balance-caption">5% of referred friends' first deposits</span>
-                <div style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
-                  <button className="text-link" onClick={() => fetchReferralStats()} style={{fontSize: '12px'}}>Sync <Icon name="arrow" size={13} style={{width: '10px', height: '10px'}} /></button>
-                  <button className="text-link" onClick={() => { fetchReferralStats(); navigate('referrals'); }}>Share link <Icon name="arrow" size={13} /></button>
-                </div>
-              </div>
-            </article>
           </section>
 
           {account && totalDeposits > 0 && (
