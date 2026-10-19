@@ -555,7 +555,11 @@ function App() {
   useEffect(() => {
     if (account) {
       fetchWeeklySalary();
-      fetchReferralStats();
+      // Fetch referral stats after a brief delay to ensure sync
+      const timer = setTimeout(() => {
+        fetchReferralStats();
+      }, 300);
+      return () => clearTimeout(timer);
     }
   }, [account]);
 
@@ -783,13 +787,6 @@ function App() {
       setMobileMenu(false);
       setAccountError('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      // Refresh referral stats when navigating between pages
-      if ((id === '/referrals' || id === '/') && account) {
-        setTimeout(() => {
-          if (id === '/referrals') fetchReferralStats();
-          if (id === '/') fetchReferralStats(); // Also refresh on overview to sync
-        }, 100);
-      }
       return;
     }
     setActiveNav(id);
@@ -1374,7 +1371,13 @@ function App() {
                 <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
               </div>
               <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings}</div>
-              <div className="balance-bottom"><span className="balance-caption">5% of referred friends' first deposits</span><button className="text-link" onClick={() => navigate('referrals')}>Share link <Icon name="arrow" size={13} /></button></div>
+              <div className="balance-bottom">
+                <span className="balance-caption">5% of referred friends' first deposits</span>
+                <div style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
+                  <button className="text-link" onClick={() => fetchReferralStats()} style={{fontSize: '12px'}}>Sync <Icon name="arrow" size={13} style={{width: '10px', height: '10px'}} /></button>
+                  <button className="text-link" onClick={() => { fetchReferralStats(); navigate('referrals'); }}>Share link <Icon name="arrow" size={13} /></button>
+                </div>
+              </div>
             </article>
           </section>
 
