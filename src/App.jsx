@@ -454,18 +454,6 @@ function App() {
       const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
       const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
       setDailyIncome(dailyIncomeValue);
-      
-      // Fetch referral earnings (5% commission from referred users' first deposits)
-      try {
-        const referralResult = await requestApi('/api/referrals/earnings');
-        // Calculate 5% from referral deposits
-        const referralBonusAmount = typeof referralResult.totalReferralDeposits === 'number' 
-          ? Math.floor(referralResult.totalReferralDeposits * 0.05)
-          : (typeof referralResult.totalEarnings === 'number' ? referralResult.totalEarnings : 0);
-        setReferralEarnings(referralBonusAmount);
-      } catch {
-        setReferralEarnings(0);
-      }
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -535,9 +523,24 @@ function App() {
     try {
       const result = await requestApi('/api/referrals/stats');
       setReferralStats(result);
+      
+      // Calculate 5% referral bonus from total referral deposits
+      // Backend should return one of: totalReferralDeposits, referralDepositsTotal, totalDepositsFromReferrals
+      // Example response: { directReferrals: 2, totalReferralDeposits: 4000, commissionRate: 0.05 }
+      // In that case: 5% of $4000 = $200
+      const totalReferralDeposits = 
+        result.totalReferralDeposits || 
+        result.referralDepositsTotal || 
+        result.totalDepositsFromReferrals ||
+        result.totalDeposits ||
+        0;
+      
+      const bonusAmount = Math.floor(totalReferralDeposits * 0.05);
+      setReferralEarnings(bonusAmount);
     } catch (error) {
       console.error('Failed to fetch referral stats:', error);
       setReferralStats(null);
+      setReferralEarnings(0);
     } finally {
       setReferralStatsLoading(false);
     }
@@ -666,6 +669,7 @@ function App() {
 
       if (account) {
         await fetchAccountBalance();
+        await fetchReferralStats();
       }
     } catch (error) {
       setNotice(`Transaction failed: ${error.message}`);
@@ -725,11 +729,11 @@ function App() {
       setAccountDialog(false);
       
       if (result.account) {
-        fetchAccountBalance();
-        fetchTransactionHistory();
-        fetchWeeklySalary();
-        fetchReferralCode();
-        fetchReferralStats();
+        await fetchAccountBalance();
+        await fetchTransactionHistory();
+        await fetchWeeklySalary();
+        await fetchReferralCode();
+        await fetchReferralStats();
       }
 
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
@@ -1414,7 +1418,11 @@ function App() {
                 <div className="referral-banner-content">
                   <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
                   <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your link and earn 5% from each friend's first deposit</div>
-                  <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>Example: Friend deposits $2000 → You earn $100 (5%)</div>
+                  <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>
+                    {referralEarnings > 0 
+                      ? `You've earned $${referralEarnings} from referral bonuses`
+                      : 'Example: Friend deposits $2000 → You earn $100 (5%)'}
+                  </div>
                   {account?.referralCode ? (
                     <div style={{background: 'rgba(0, 0, 0, 0.5)', padding: '12px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '14px', fontWeight: '600', color: 'var(--gold)', marginBottom: '12px', wordBreak: 'break-all'}}>
                       {`${window.location.origin}/?ref=${account.referralCode}`}
