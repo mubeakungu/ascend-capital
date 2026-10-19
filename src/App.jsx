@@ -29,7 +29,7 @@ function Icon({ name, size = 18 }) {
     star: <><polygon points="12 2 15.09 10.26 23.77 10.5 17.88 16.46 20.49 25.13 12 20.35 3.51 25.13 6.12 16.46 0.23 10.5 8.91 10.26" /></>,
     trending: <><path d="M3 3v18h18" /><polyline points="7 14 11 10 15 14 19 8" /></>,
     gift: <><polygon points="12 2 14 6 18 6 15 9 16 13 12 10 8 13 9 9 6 6 10 6" /></>,
-    eye: <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>,
+    menu: <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>,
   };
 
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
@@ -60,7 +60,6 @@ async function requestApi(path, options = {}) {
 function LoginPage({ onNavigate, onLoginSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -92,7 +91,6 @@ function LoginPage({ onNavigate, onLoginSuccess }) {
     <div style={styles.authContainer}>
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         :root {
           --gold: #D4AF37;
           --dark-blue: #001a33;
@@ -106,11 +104,10 @@ function LoginPage({ onNavigate, onLoginSuccess }) {
         <div style={styles.brandSection}>
           <img src="/ascend-logo.jpg" alt="Ascend Capital" style={styles.brandLogo} />
           <h1 style={styles.brandTitle}>ascend<span style={{ color: '#D4AF37' }}>capital</span></h1>
-          <p style={styles.brandTagline}>INVEST · GROW · ASCEND</p>
         </div>
 
         <h2 style={styles.formTitle}>Sign In</h2>
-        <p style={styles.formSubtitle}>Access your trading account</p>
+        <p style={styles.formSubtitle}>Access your trading dashboard and referral program</p>
 
         <form onSubmit={handleLogin} style={styles.form}>
           {error && <div style={styles.errorBox}>{error}</div>}
@@ -121,7 +118,7 @@ function LoginPage({ onNavigate, onLoginSuccess }) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="john@example.com"
+              placeholder="you@example.com"
               style={styles.input}
               disabled={loading}
             />
@@ -129,27 +126,18 @@ function LoginPage({ onNavigate, onLoginSuccess }) {
 
           <div style={styles.formGroup}>
             <label style={styles.label}>Password</label>
-            <div style={styles.inputWrapper}>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min. 8 characters"
-                style={styles.input}
-                disabled={loading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={styles.eyeButton}
-              >
-                <Icon name="eye" size={18} />
-              </button>
-            </div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              style={styles.input}
+              disabled={loading}
+            />
           </div>
 
           <button type="submit" style={styles.primaryButton} disabled={loading}>
-            {loading ? 'Signing in…' : 'SIGN IN'}
+            {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
 
@@ -159,7 +147,7 @@ function LoginPage({ onNavigate, onLoginSuccess }) {
           <p style={styles.ctaText}>Don't have an account?</p>
           <button
             onClick={() => onNavigate('/register')}
-            style={styles.linkButton}
+            style={styles.secondaryButton}
             disabled={loading}
           >
             Create Account
@@ -178,15 +166,13 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
     phone: '',
     password: '',
     confirmPassword: '',
-    pin: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [referralCode, setReferralCode] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
+    // Extract referral code from URL query parameter
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if (ref) {
@@ -197,7 +183,7 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
   async function handleRegister(e) {
     e.preventDefault();
     
-    if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone || !formData.password || !formData.pin) {
+    if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone || !formData.password) {
       setError('All fields are required');
       return;
     }
@@ -209,11 +195,6 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters');
-      return;
-    }
-
-    if (formData.pin.length !== 6 || !/^\d+$/.test(formData.pin)) {
-      setError('PIN must be exactly 6 digits');
       return;
     }
 
@@ -229,8 +210,7 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
           email: formData.email,
           phone: formData.phone,
           password: formData.password,
-          pin: formData.pin,
-          referralCode: referralCode || undefined,
+          referralCode: referralCode || undefined, // Include referral code if present
         }),
       });
 
@@ -248,11 +228,10 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
         <div style={styles.brandSection}>
           <img src="/ascend-logo.jpg" alt="Ascend Capital" style={styles.brandLogo} />
           <h1 style={styles.brandTitle}>ascend<span style={{ color: '#D4AF37' }}>capital</span></h1>
-          <p style={styles.brandTagline}>TRADE GLOBAL · INVEST SMART · GROW WITH CONFIDENCE</p>
         </div>
 
-        <h2 style={styles.formTitle}>Create your account</h2>
-        <p style={styles.formSubtitle}>Get started in seconds</p>
+        <h2 style={styles.formTitle}>Create Account</h2>
+        <p style={styles.formSubtitle}>Start your trading journey and earn with referrals</p>
 
         {referralCode && (
           <div style={styles.referralBanner}>
@@ -263,23 +242,30 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
         <form onSubmit={handleRegister} style={styles.form}>
           {error && <div style={styles.errorBox}>{error}</div>}
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Full Name</label>
-            <input
-              type="text"
-              value={`${formData.firstName} ${formData.lastName}`.trim()}
-              onChange={(e) => {
-                const parts = e.target.value.split(' ');
-                setFormData({
-                  ...formData,
-                  firstName: parts[0] || '',
-                  lastName: parts.slice(1).join(' ') || '',
-                });
-              }}
-              placeholder="John Doe"
-              style={styles.input}
-              disabled={loading}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>First Name</label>
+              <input
+                type="text"
+                value={formData.firstName}
+                onChange={(e) => setFormData({...formData, firstName: e.target.value})}
+                placeholder="John"
+                style={styles.input}
+                disabled={loading}
+              />
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Last Name</label>
+              <input
+                type="text"
+                value={formData.lastName}
+                onChange={(e) => setFormData({...formData, lastName: e.target.value})}
+                placeholder="Doe"
+                style={styles.input}
+                disabled={loading}
+              />
+            </div>
           </div>
 
           <div style={styles.formGroup}>
@@ -288,7 +274,19 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({...formData, email: e.target.value})}
-              placeholder="john@example.com"
+              placeholder="you@example.com"
+              style={styles.input}
+              disabled={loading}
+            />
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Phone Number</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({...formData, phone: e.target.value})}
+              placeholder="+1 (555) 123-4567"
               style={styles.input}
               disabled={loading}
             />
@@ -296,84 +294,34 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Phone</label>
+              <label style={styles.label}>Password</label>
               <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                placeholder="+254 712 345678"
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                placeholder="••••••••"
                 style={styles.input}
                 disabled={loading}
               />
             </div>
 
             <div style={styles.formGroup}>
-              <label style={styles.label}>PIN (6 Digits)</label>
+              <label style={styles.label}>Confirm Password</label>
               <input
                 type="password"
-                value={formData.pin}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                  setFormData({...formData, pin: val});
-                }}
-                placeholder="••••••"
-                style={styles.input}
-                disabled={loading}
-                maxLength="6"
-              />
-            </div>
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Password</label>
-            <div style={styles.inputWrapper}>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                placeholder="Min. 8 characters"
-                style={styles.input}
-                disabled={loading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={styles.eyeButton}
-              >
-                <Icon name="eye" size={18} />
-              </button>
-            </div>
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Confirm Password</label>
-            <div style={styles.inputWrapper}>
-              <input
-                type={showConfirmPassword ? 'text' : 'password'}
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
-                placeholder="Confirm your password"
+                placeholder="••••••••"
                 style={styles.input}
                 disabled={loading}
               />
-              <button
-                type="button"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                style={styles.eyeButton}
-              >
-                <Icon name="eye" size={18} />
-              </button>
             </div>
           </div>
 
           <button type="submit" style={styles.primaryButton} disabled={loading}>
-            {loading ? 'Creating account…' : 'CREATE ACCOUNT'}
+            {loading ? 'Creating account…' : 'Create Account'}
           </button>
         </form>
-
-        <div style={styles.termsText}>
-          By creating an account, you agree to our <span style={styles.link}>Terms</span> and <span style={styles.link}>Privacy Policy</span>
-        </div>
 
         <div style={styles.divider}></div>
 
@@ -381,10 +329,10 @@ function RegisterPage({ onNavigate, onLoginSuccess }) {
           <p style={styles.ctaText}>Already have an account?</p>
           <button
             onClick={() => onNavigate('/login')}
-            style={styles.linkButton}
+            style={styles.secondaryButton}
             disabled={loading}
           >
-            Sign in
+            Sign In
           </button>
         </div>
       </div>
@@ -403,123 +351,90 @@ const styles = {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   authCard: {
-    background: 'rgba(0, 26, 51, 0.7)',
+    background: 'rgba(0, 26, 51, 0.6)',
     border: '1px solid rgba(212, 175, 55, 0.3)',
     borderRadius: '16px',
-    padding: '48px 40px',
+    padding: '40px',
     backdropFilter: 'blur(10px)',
     width: '100%',
-    maxWidth: '500px',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+    maxWidth: '480px',
   },
   brandSection: {
     textAlign: 'center',
-    marginBottom: '40px',
+    marginBottom: '32px',
   },
   brandLogo: {
-    width: '60px',
-    height: '60px',
+    width: '50px',
+    height: '50px',
     borderRadius: '50%',
-    marginBottom: '16px',
-    border: '2px solid #D4AF37',
+    marginBottom: '12px',
   },
   brandTitle: {
-    fontSize: '32px',
-    fontWeight: '700',
-    color: '#D4AF37',
-    marginBottom: '8px',
-  },
-  brandTagline: {
-    fontSize: '11px',
-    letterSpacing: '1.5px',
-    color: '#aaa',
-    textTransform: 'uppercase',
-  },
-  formTitle: {
     fontSize: '24px',
     fontWeight: '700',
     color: '#f5f5f5',
+  },
+  formTitle: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#f5f5f5',
     marginBottom: '8px',
-    textAlign: 'center',
   },
   formSubtitle: {
     fontSize: '13px',
     color: '#aaa',
-    marginBottom: '28px',
-    textAlign: 'center',
+    marginBottom: '24px',
   },
   form: {
     width: '100%',
-    marginBottom: '24px',
   },
   formGroup: {
-    marginBottom: '18px',
+    marginBottom: '16px',
   },
   label: {
     display: 'block',
-    fontSize: '11px',
+    fontSize: '12px',
     fontWeight: '600',
     color: '#D4AF37',
     marginBottom: '8px',
     textTransform: 'uppercase',
     letterSpacing: '0.8px',
   },
-  inputWrapper: {
-    position: 'relative',
-    display: 'flex',
-  },
   input: {
     width: '100%',
     padding: '12px 16px',
-    background: 'rgba(0, 0, 0, 0.4)',
-    border: '1px solid rgba(212, 175, 55, 0.25)',
+    background: 'rgba(0, 0, 0, 0.3)',
+    border: '1px solid rgba(212, 175, 55, 0.2)',
     borderRadius: '8px',
     color: '#f5f5f5',
     fontSize: '14px',
     fontFamily: 'inherit',
     transition: 'all 0.2s',
   },
-  eyeButton: {
-    position: 'absolute',
-    right: '12px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    background: 'transparent',
-    border: 'none',
-    color: '#D4AF37',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '8px',
-  },
   primaryButton: {
     width: '100%',
-    padding: '14px',
+    padding: '12px',
     background: '#D4AF37',
     color: '#001a33',
     border: 'none',
     borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: '700',
-    letterSpacing: '0.8px',
+    fontSize: '14px',
+    fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s',
     marginTop: '8px',
-    textTransform: 'uppercase',
   },
-  linkButton: {
+  secondaryButton: {
     width: '100%',
-    padding: '14px',
+    padding: '12px',
     background: 'transparent',
     color: '#D4AF37',
     border: '1px solid #D4AF37',
     borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: '700',
+    fontSize: '14px',
+    fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s',
-    textTransform: 'uppercase',
   },
   errorBox: {
     background: 'rgba(231, 76, 60, 0.1)',
@@ -528,7 +443,7 @@ const styles = {
     padding: '12px',
     color: '#ff6b6b',
     fontSize: '13px',
-    marginBottom: '20px',
+    marginBottom: '16px',
   },
   referralBanner: {
     background: 'rgba(212, 175, 55, 0.15)',
@@ -540,21 +455,10 @@ const styles = {
     marginBottom: '20px',
     textAlign: 'center',
   },
-  termsText: {
-    fontSize: '11px',
-    color: '#aaa',
-    textAlign: 'center',
-    marginBottom: '20px',
-  },
-  link: {
-    color: '#D4AF37',
-    cursor: 'pointer',
-    textDecoration: 'underline',
-  },
   divider: {
     height: '1px',
     background: 'rgba(212, 175, 55, 0.2)',
-    margin: '20px 0',
+    margin: '24px 0',
   },
   callToAction: {
     textAlign: 'center',
@@ -572,6 +476,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check if user is already logged in on app load
     async function checkAuth() {
       try {
         const result = await requestApi('/api/auth/me');
@@ -579,9 +484,11 @@ export default function App() {
           setAccount(result);
           setCurrentPage('/');
         } else {
+          // Not authenticated, redirect to login
           setCurrentPage('/login');
         }
       } catch (err) {
+        // Not authenticated
         setCurrentPage('/login');
       } finally {
         setLoading(false);
@@ -622,6 +529,7 @@ export default function App() {
     );
   }
 
+  // If not authenticated, show login/register pages
   if (!account) {
     if (currentPage === '/register') {
       return <RegisterPage onNavigate={handleNavigate} onLoginSuccess={handleLoginSuccess} />;
@@ -629,10 +537,12 @@ export default function App() {
     return <LoginPage onNavigate={handleNavigate} onLoginSuccess={handleLoginSuccess} />;
   }
 
+  // If authenticated and on referral page
   if (currentPage === '/referral') {
     return <ReferralPage account={account} onNavigate={handleNavigate} />;
   }
 
+  // Main dashboard (placeholder - integrate with your existing dashboard)
   return (
     <div style={{
       minHeight: '100vh',
@@ -641,6 +551,12 @@ export default function App() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       padding: '20px',
     }}>
+      <style>{`
+        @media (max-width: 640px) {
+          body { margin: 0; }
+        }
+      `}</style>
+      
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{
           display: 'flex',
