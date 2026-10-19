@@ -17,15 +17,15 @@ const plans = [
 ];
 
 const ranks = [
-  { name: 'Star 1', direct: 5, team: null, reward: '$80' },
-  { name: 'Star 2', direct: 7, team: 13, reward: '$150' },
-  { name: 'Star 3', direct: 8, team: 25, reward: '$250' },
-  { name: 'Star 4', direct: 9, team: 40, reward: '$400' },
-  { name: 'Star 5', direct: 10, team: 70, reward: '$700' },
-  { name: 'Star 6', direct: 11, team: 150, reward: '$1,000' },
-  { name: 'Star 7', direct: 12, team: 400, reward: '$2,500 + house' },
-  { name: 'Star 8', direct: 13, team: 700, reward: '$4,500 + Mazda CX-5' },
-  { name: 'Crown Leader', direct: 14, team: 100, reward: '$7,000 + Mercedes-Benz E300' },
+  { name: 'Star 1', direct: 5, team: null, reward: '$80', weeklySalary: null },
+  { name: 'Star 2', direct: 7, team: 13, reward: '$150', weeklySalary: '$100' },
+  { name: 'Star 3', direct: 8, team: 25, reward: '$250', weeklySalary: '$200' },
+  { name: 'Star 4', direct: 9, team: 40, reward: '$400', weeklySalary: '$300' },
+  { name: 'Star 5', direct: 10, team: 70, reward: '$700', weeklySalary: '$450' },
+  { name: 'Star 6', direct: 11, team: 150, reward: '$1,000', weeklySalary: '$900' },
+  { name: 'Star 7', direct: 12, team: 400, reward: '$2,500 + house', weeklySalary: '$1,500' },
+  { name: 'Star 8', direct: 13, team: 700, reward: '$4,500 + Mazda CX-5', weeklySalary: '$2,500' },
+  { name: 'Crown Leader', direct: 14, team: 1000, reward: '$7,000 + Mercedes-Benz E300', weeklySalary: '$5,000' },
 ];
 
 const navItems = [
@@ -1185,13 +1185,14 @@ function App() {
               </div>
               <div className="rank-table-wrap">
                 <table className="rank-table">
-                  <thead><tr><th>RANK</th><th>DIRECT REFERRALS</th><th>TEAM TOTAL</th><th>REWARD</th></tr></thead>
+                  <thead><tr><th>RANK</th><th>DIRECT REFERRALS</th><th>TEAM TOTAL</th><th>REWARD</th><th>WEEKLY SALARY</th></tr></thead>
                   <tbody>{ranks.map((rank, index) => (
                     <tr key={rank.name}>
                       <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
                       <td>{rank.direct} <span className="table-muted">direct</span></td>
                       <td>{rank.team === null ? <span className="table-dash">—</span> : rank.team}</td>
                       <td className="reward-cell">{rank.reward}{rank.name === 'Star 8' && <span className="reward-value"> · $27,000 value</span>}{rank.name === 'Crown Leader' && <span className="reward-value"> · $46,000 value</span>}{rank.name === 'Star 7' && <span className="reward-value"> · $80,000 house</span>}</td>
+                      <td className="salary-cell" style={{color: 'var(--gold)', fontWeight: '600'}}>{rank.weeklySalary ? rank.weeklySalary : '—'}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -1212,7 +1213,7 @@ function App() {
                     <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
                     <div><span>Withdrawal minimum</span><strong>$50</strong></div>
                   </div>
-                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>Requires one referral who has deposited and traded on Ascend for three days.</span></div>
+                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>You should have traded in Ascend for at least 3 days and invite at least 1 person who has invested in Ascend.</span></div>
                   <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Make a Prime hour deposit' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
                 </>
               )}
