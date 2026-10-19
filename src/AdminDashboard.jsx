@@ -786,6 +786,7 @@ function SettingsManagement({ account }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handlePasswordChange(e) {
     e.preventDefault();
@@ -796,8 +797,8 @@ function SettingsManagement({ account }) {
       return;
     }
 
-    if (newPassword.length < 12) {
-      setNotice({ text: 'New password must be at least 12 characters', bad: true });
+    if (newPassword.length < 6 || newPassword.length > 128) {
+      setNotice({ text: 'New password must be between 6 and 128 characters', bad: true });
       return;
     }
 
@@ -817,14 +818,17 @@ function SettingsManagement({ account }) {
         method: 'POST',
         body: { currentPassword, newPassword },
       });
-      setNotice({ text: 'Password changed successfully' });
+      setNotice({ text: 'Password changed successfully. Redirecting...', bad: false });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      setTimeout(() => {
+        window.location.href = '/admin';
+      }, 2000);
     } catch (err) {
       setNotice({ text: err.message, bad: true });
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
@@ -842,7 +846,7 @@ function SettingsManagement({ account }) {
         <form onSubmit={handlePasswordChange}>
           <label>Current Password</label>
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             autoComplete="current-password"
@@ -851,22 +855,33 @@ function SettingsManagement({ account }) {
 
           <label>New Password</label>
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
-            placeholder="At least 12 characters"
+            placeholder="At least 6 characters"
             required
           />
 
           <label>Confirm New Password</label>
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             autoComplete="new-password"
             required
           />
+
+          <div style={{ marginTop: '8px', marginBottom: '16px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'normal', margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+              />
+              Show passwords
+            </label>
+          </div>
 
           <Notice notice={notice} />
           <button className="ad-btn" disabled={busy} style={{ marginTop: '16px', width: '100%' }}>
