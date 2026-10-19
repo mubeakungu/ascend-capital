@@ -1,29 +1,25 @@
 import { createServer } from 'node:http';
-import { mkdirSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const databasePath = process.env.DATABASE_PATH ?? resolve(root, 'data', 'accounts.sqlite');
-if (databasePath !== ':memory:') mkdirSync(dirname(resolve(databasePath)), { recursive: true });
 
-const { app, close } = createApp({ databasePath });
+const { app, close } = await createApp();
 const server = createServer(app);
 let vite;
 
 if (process.env.NODE_ENV === 'production') {
   const { default: express } = await import('express');
-  const expressApp = app;
   
   // Serve static files from dist
-  expressApp.use(express.static(resolve(root, 'dist')));
+  app.use(express.static(resolve(root, 'dist')));
   
   // Android app download endpoint
-  expressApp.get('/download/android-app', (_request, response, next) => {
+  app.get('/download/android-app', (_request, response, next) => {
     const apkPath = resolve(root, 'dist', 'ascend-capital.apk');
     
-    // Check if APK exists
     if (!existsSync(apkPath)) {
       return response.status(404).json({ 
         error: 'Android app is not available for download yet. Please try again later.' 
@@ -36,14 +32,14 @@ if (process.env.NODE_ENV === 'production') {
   });
   
   // iOS app download endpoint (future)
-  expressApp.get('/download/ios-app', (_request, response) => {
+  app.get('/download/ios-app', (_request, response) => {
     response.status(501).json({ 
       error: 'iOS app is not yet available. Check back soon.' 
     });
   });
   
   // App download info endpoint
-  expressApp.get('/api/app-downloads', (_request, response) => {
+  app.get('/api/app-downloads', (_request, response) => {
     const androidAvailable = existsSync(resolve(root, 'dist', 'ascend-capital.apk'));
     const iosAvailable = existsSync(resolve(root, 'dist', 'ascend-capital.ipa'));
     
@@ -64,7 +60,7 @@ if (process.env.NODE_ENV === 'production') {
   
   // SPA routing fallback - MUST come AFTER all other routes
   // This middleware explicitly checks the path and only serves index.html for non-API routes
-  expressApp.use((_request, response, next) => {
+  app.use((_request, response, next) => {
     // If the path starts with /api or /download, skip this middleware
     if (_request.path.startsWith('/api') || _request.path.startsWith('/download')) {
       return next();
