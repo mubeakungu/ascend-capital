@@ -75,6 +75,11 @@ function getTimeGreeting() {
   }
 }
 
+function maskAddress(address) {
+  if (!address || address.length < 12) return address;
+  return address.slice(0, 4) + '•'.repeat(address.length - 8) + address.slice(-4);
+}
+
 function Icon({ name, size = 18 }) {
   const paths = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -1293,7 +1298,7 @@ function App() {
               <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
               <div className="header-wallet">
                 <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
-                <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress || 'Not configured in Render'}</code>
+                <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
                 <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy prime wallet address">
                   <Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy'}
                 </button>
@@ -1592,7 +1597,7 @@ function App() {
               ) : (
                 <div className="deposit-wallet-card">
                   <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
-                  <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress || 'Not configured in Render'}</code>
+                  <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
                   {binanceWalletAddress
                     ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
                     : <span className="wallet-config-hint">{walletAddressError ? 'Could not load the Render wallet configuration.' : walletAddressLoading ? 'Loading wallet configuration…' : 'Set BINANCE_WALLET_ADDRESS in Render.'}</span>}
