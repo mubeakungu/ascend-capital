@@ -114,7 +114,7 @@ async function requestApi(path, options = {}) {
   return result;
 }
 
-function AuthPage({ mode, name, email, password, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onSubmit, onNavigate }) {
+function AuthPage({ mode, name, email, password, phone, pin, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onPhoneChange, onPinChange, onSubmit, onNavigate }) {
   const registering = mode === 'register';
 
   return (
@@ -140,6 +140,14 @@ function AuthPage({ mode, name, email, password, error, storageMode, referralCod
         <form onSubmit={onSubmit}>
           {registering && <label className="account-field">Full name<input type="text" autoComplete="name" minLength={2} maxLength={80} value={name} onChange={(event) => onNameChange(event.target.value)} required /></label>}
           <label className="account-field">Email address<input type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => onEmailChange(event.target.value)} required /></label>
+          {registering && (
+            <>
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px'}}>
+                <label className="account-field">Phone<input type="tel" autoComplete="tel" placeholder="+254 7XX XXX XXX" value={phone} onChange={(event) => onPhoneChange(event.target.value)} /></label>
+                <label className="account-field">PIN (6 digits)<input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={pin} onChange={(event) => onPinChange(event.target.value)} /></label>
+              </div>
+            </>
+          )}
           <label className="account-field">Password<input type="password" autoComplete={registering ? 'new-password' : 'current-password'} minLength={12} maxLength={128} value={password} onChange={(event) => onPasswordChange(event.target.value)} required />{registering && <span className="field-hint">Use at least 12 characters.</span>}</label>
           {error && <div className="modal-message" role="alert">{error}</div>}
           <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
@@ -335,6 +343,8 @@ function App() {
   const [accountName, setAccountName] = useState('');
   const [accountEmail, setAccountEmail] = useState('');
   const [accountPassword, setAccountPassword] = useState('');
+  const [accountPhone, setAccountPhone] = useState('');
+  const [accountPin, setAccountPin] = useState('');
   const [accountError, setAccountError] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
   const [referralCode, setReferralCode] = useState('');
@@ -345,6 +355,8 @@ function App() {
   const [transactionLoading, setTransactionLoading] = useState(false);
   const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
+  const [weeklyData, setWeeklyData] = useState(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -406,9 +418,11 @@ function App() {
         setAccount(currentAccount);
         setAccountName(currentAccount?.name ?? '');
         setAccountEmail(currentAccount?.email ?? '');
+        setAccountPhone(currentAccount?.phone ?? '');
         if (currentAccount) {
           fetchAccountBalance();
           fetchTransactionHistory();
+          fetchWeeklySalary();
         }
       })
       .catch((error) => {
@@ -449,6 +463,25 @@ function App() {
       console.error('Failed to fetch transaction history:', error);
     }
   }
+
+  async function fetchWeeklySalary() {
+    if (!account) return;
+    setWeeklyLoading(true);
+    try {
+      const result = await requestApi('/api/referrals/weekly-salary');
+      setWeeklyData(result);
+    } catch (error) {
+      console.error('Failed to fetch weekly salary:', error);
+    } finally {
+      setWeeklyLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (account) {
+      fetchWeeklySalary();
+    }
+  }, [account]);
 
   useEffect(() => {
     function syncRoute() {
@@ -571,6 +604,8 @@ function App() {
     setAccountName(account?.name ?? '');
     setAccountEmail(account?.email ?? '');
     setAccountPassword('');
+    setAccountPhone(account?.phone ?? '');
+    setAccountPin('');
     setAccountError('');
     setAccountMessage('');
     setAccountDialog(true);
@@ -600,18 +635,23 @@ function App() {
           ...(register ? { name: accountName } : {}),
           email: accountEmail,
           password: accountPassword,
+          ...(register && accountPhone ? { phone: accountPhone } : {}),
+          ...(register && accountPin ? { pin: accountPin } : {}),
           ...(register && referralCode ? { referralCode } : {}),
         }),
       });
       setAccount(result.account);
       setAccountName(result.account.name);
       setAccountEmail(result.account.email);
+      setAccountPhone(result.account.phone ?? '');
       setAccountPassword('');
+      setAccountPin('');
       setAccountDialog(false);
       
       if (result.account) {
         fetchAccountBalance();
         fetchTransactionHistory();
+        fetchWeeklySalary();
       }
 
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
@@ -627,7 +667,9 @@ function App() {
       setAccount(null);
       setAccountName('');
       setAccountEmail('');
+      setAccountPhone('');
       setAccountPassword('');
+      setAccountPin('');
       setAccountMode('login');
       setAccountMessage('');
       setAccountDialog(false);
@@ -636,6 +678,7 @@ function App() {
       setDailyIncome(0);
       setReferralRewards(0);
       setDemoActivity([]);
+      setWeeklyData(null);
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -673,12 +716,16 @@ function App() {
       name={accountName}
       email={accountEmail}
       password={accountPassword}
+      phone={accountPhone}
+      pin={accountPin}
       error={accountError}
       storageMode={storageMode}
       referralCode={referralCode}
       onNameChange={setAccountName}
       onEmailChange={setAccountEmail}
       onPasswordChange={setAccountPassword}
+      onPhoneChange={setAccountPhone}
+      onPinChange={setAccountPin}
       onSubmit={submitAccount}
       onNavigate={navigate}
     />;
@@ -1220,6 +1267,58 @@ function App() {
             </aside>
           </section>
 
+          <section className="weekly-salary-section" style={{marginTop: '40px', padding: '20px', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', border: '2px solid rgba(212, 175, 55, 0.2)'}}>
+            <div className="section-heading">
+              <div>
+                <div className="eyebrow"><span className="eyebrow-line" /> TIER BENEFITS</div>
+                <h2>Weekly tier salary</h2>
+                <p className="section-subtitle">Automatic weekly salary based on your current tier. Star 2 and above earn weekly.</p>
+              </div>
+            </div>
+
+            {weeklyLoading ? (
+              <p style={{textAlign: 'center', color: 'var(--text-light)'}}>Loading salary information...</p>
+            ) : weeklyData ? (
+              <>
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '20px'}}>
+                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current tier</span>
+                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>{weeklyData.tier || 'Not qualified'}</div>
+                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Direct: {weeklyData.directCount} · Team: {weeklyData.teamTotal}</span>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
+                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                      {weeklyData.weeklySalary > 0 ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}` : 'None'}
+                    </div>
+                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                    <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                      ${weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </div>
+                    <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>All-time salaries</span>
+                  </article>
+                </div>
+
+                {weeklyData.recentPayments && weeklyData.recentPayments.length > 0 && (
+                  <div style={{marginTop: '20px'}}>
+                    <h3 style={{fontSize: '16px', marginBottom: '12px', color: 'var(--text-light)'}}>Recent payments</h3>
+                    <div style={{display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto'}}>
+                      {weeklyData.recentPayments.map((payment, idx) => (
+                        <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
+                          <span>{payment.week}</span>
+                          <span style={{color: 'var(--gold)', fontWeight: '600'}}>+${payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </section>
+
           <section className="bottom-notice">
             <span className="notice-icon"><Icon name="wallet" size={16} /></span>
             <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Daily income is calculated and compounded automatically.</p></div>
@@ -1284,6 +1383,16 @@ function App() {
                 <label className="account-field">Full name
                   <input type="text" autoComplete="name" minLength={2} maxLength={80} value={accountName} onChange={(event) => setAccountName(event.target.value)} required />
                 </label>
+              )}
+              {accountMode === 'register' && (
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px'}}>
+                  <label className="account-field">Phone number
+                    <input type="tel" placeholder="+254 7XX XXX XXX" value={accountPhone} onChange={(event) => setAccountPhone(event.target.value)} />
+                  </label>
+                  <label className="account-field">PIN (6 digits)
+                    <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={accountPin} onChange={(event) => setAccountPin(event.target.value)} />
+                  </label>
+                </div>
               )}
               {accountMode !== 'profile' && (
                 <label className="account-field">Email address
