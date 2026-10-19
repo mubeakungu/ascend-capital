@@ -4,7 +4,14 @@ const CURRENCY = 'USD';
 
 const money = (n) =>
   `${CURRENCY} ${Number(n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
+const when = (iso) => {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  return isMobile 
+    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : date.toLocaleString();
+};
 
 // Admin API helper - uses same-origin credentials for ADMIN session cookie (separate from client)
 async function api(path, { method = 'GET', body } = {}) {
@@ -239,9 +246,9 @@ function AccountsManagement() {
 
   return (
     <section>
-      <div className="ad-row">
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
         <h2>Account Management</h2>
-        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
 
       <Notice notice={notice} />
@@ -269,10 +276,10 @@ function AccountsManagement() {
                 <td><Badge value={a.role} /></td>
                 <td>{new Date(a.createdAt).toLocaleDateString()}</td>
                 <td>
-                  <div className="ad-actions">
-                    <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)}>View</button>
+                  <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)} style={{ width: '100%' }}>View</button>
                     {a.role !== 'admin' && (
-                      <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)}>Delete</button>
+                      <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ width: '100%', marginTop: '4px' }}>Delete</button>
                     )}
                   </div>
                 </td>
@@ -337,8 +344,10 @@ function Dashboard() {
 
   return (
     <section>
-      <h2>System Overview</h2>
-      <button className="ad-btn ghost" onClick={reload} style={{ marginBottom: '16px' }}>Refresh</button>
+      <div className="ad-row" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
+        <h2>System Overview</h2>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+      </div>
       
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
@@ -457,10 +466,12 @@ function TradingManagement() {
 
   return (
     <section>
-      <div className="ad-row">
-        <h2>Trading & Profit Ledger</h2>
-        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
-        <button className="ad-btn" onClick={applyProfits}>Apply Daily Profits</button>
+      <div style={{ marginBottom: '16px' }}>
+        <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
+        <div className="ad-row">
+          <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+          <button className="ad-btn" onClick={applyProfits} style={{ marginLeft: 'auto' }}>Apply Profits</button>
+        </div>
       </div>
 
       <Notice notice={notice} />
@@ -636,9 +647,9 @@ function TransactionApproval() {
 
   return (
     <section>
-      <div className="ad-row">
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
         <h2>Transaction Approvals</h2>
-        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
 
       <Notice notice={notice} />
@@ -673,9 +684,9 @@ function TransactionApproval() {
                     <td><code style={{ fontSize: '11px', color: 'var(--muted)' }}>{t.reference || '—'}</code></td>
                     <td>{new Date(t.createdAt).toLocaleString()}</td>
                     <td>
-                      <div className="ad-actions">
-                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }}>Approve</button>
-                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>Reject</button>
+                      <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }} style={{ width: '100%' }}>Approve</button>
+                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }} style={{ width: '100%' }}>Reject</button>
                       </div>
                     </td>
                   </tr>
@@ -711,9 +722,9 @@ function TransactionApproval() {
                     <td><code style={{ fontSize: '11px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.destination || '—'}</code></td>
                     <td>{new Date(t.createdAt).toLocaleString()}</td>
                     <td>
-                      <div className="ad-actions">
-                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }}>Approve</button>
-                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>Reject</button>
+                      <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }} style={{ width: '100%' }}>Approve</button>
+                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }} style={{ width: '100%' }}>Reject</button>
                       </div>
                     </td>
                   </tr>
@@ -766,7 +777,7 @@ function TransactionApproval() {
 }
 
 // ============================================================================
-// SETTINGS / PASSWORD CHANGE
+// SETTINGS / PASSWORD CHANGE - FIXED
 // ============================================================================
 
 function SettingsManagement({ account }) {
@@ -802,7 +813,7 @@ function SettingsManagement({ account }) {
 
     setBusy(true);
     try {
-      await api('/admin/auth/change-password', {
+      await api('/admin/auth/password', {
         method: 'POST',
         body: { currentPassword, newPassword },
       });
@@ -964,15 +975,18 @@ export default function AdminDashboard() {
       <>
         <header className="ad-top">
           <div className="ad-brand">
-            {logo && <img src={logo} alt="Logo" style={{ height: '32px', marginRight: '8px', verticalAlign: 'middle' }} />}
-            <b>ascend</b> capital <span>Admin</span>
+            {logo && <img src={logo} alt="Logo" style={{ height: '28px', marginRight: '6px', verticalAlign: 'middle' }} />}
+            <b>ascend</b> <span style={{ display: { xs: 'none', sm: 'inline' } }}>capital</span> <span>Admin</span>
           </div>
           <nav>
             {tabs.map(([key, label]) => (
-              <button key={key} className={tab === key ? 'on' : ''} onClick={() => setTab(key)}>{label}</button>
+              <button key={key} className={tab === key ? 'on' : ''} onClick={() => setTab(key)} title={label}>{label}</button>
             ))}
           </nav>
-          <div className="ad-who">{account.email}<button className="ad-btn ghost sm" onClick={signOut}>Sign out</button></div>
+          <div className="ad-who">
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{account.email}</span>
+            <button className="ad-btn ghost sm" onClick={signOut} style={{ whiteSpace: 'nowrap' }}>Sign out</button>
+          </div>
         </header>
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
@@ -1001,50 +1015,130 @@ const CSS = `
 .ad h2,.ad h3{font-family:Manrope,'DM Sans',sans-serif;margin:0}
 .ad h2{font-size:20px}.ad h3{font-size:15px;margin:18px 0 8px}
 .ad-logo{max-height:40px;width:auto;object-fit:contain}
-.ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+.ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card)}
 .ad-brand{font:600 18px Manrope,sans-serif;display:flex;align-items:center}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
-.ad-top nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
-.ad-top nav button{background:none;border:0;color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit}
+.ad-top nav{display:flex;gap:4px;flex:1;flex-wrap:wrap;min-width:100%}
+.ad-top nav button{background:none;border:0;color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer;font:600 12px inherit;white-space:nowrap}
 .ad-top nav button.on{background:#1a241f;color:var(--text)}
-.ad-who{display:flex;align-items:center;gap:10px;color:var(--muted)}
-.ad-main{max-width:1200px;margin:0 auto;padding:24px}
+.ad-who{display:flex;align-items:center;gap:8px;color:var(--muted);width:100%;font-size:12px}
+.ad-main{max-width:1200px;margin:0 auto;padding:16px}
 .ad-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.ad-row.grow{flex:1;margin:0}.ad-row.end{justify-content:flex-end}
-.ad input,.ad select,.ad textarea{background:#0e1512;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font:inherit;width:100%}
+.ad input,.ad select,.ad textarea{background:#0e1512;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:inherit;width:100%}
 .ad-row input,.ad-row select{width:auto}
-.ad label{display:block;margin:12px 0 5px;color:var(--muted);font-size:12px}
-.ad-btn{background:var(--accent);color:#0b100e;border:0;border-radius:8px;padding:9px 16px;font:600 13px 'DM Sans',sans-serif;cursor:pointer}
-.ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:5px 10px;font-size:12px}
+.ad label{display:block;margin:12px 0 6px;color:var(--muted);font-size:12px;font-weight:500}
+.ad-btn{background:var(--accent);color:#0b100e;border:0;border-radius:6px;padding:9px 14px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:5px 10px;font-size:11px}
 .ad-btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 .ad-btn.danger{background:var(--bad)}
-.ad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0}
-.ad-stat-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-.ad-stat-label{color:var(--muted);font-size:12px;margin:0 0 4px}
-.ad-stat-value{font:700 24px Manrope,sans-serif;margin:0;color:var(--accent)}
-.ad-stat-sub{color:var(--muted);font-size:12px;margin:4px 0 0}
-.ad-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card);margin:12px 0}
-.ad-table{width:100%;border-collapse:collapse;min-width:640px}
-.ad-table th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
-.ad-table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.ad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:16px 0}
+.ad-stat-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.ad-stat-label{color:var(--muted);font-size:11px;margin:0 0 4px;text-transform:uppercase}
+.ad-stat-value{font:700 20px Manrope,sans-serif;margin:0;color:var(--accent)}
+.ad-stat-sub{color:var(--muted);font-size:11px;margin:4px 0 0}
+.ad-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);margin:12px 0;-webkit-overflow-scrolling:touch}
+.ad-table{width:100%;border-collapse:collapse;min-width:500px}
+.ad-table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;padding:10px 8px;border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.5px}
+.ad-table td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
 .ad-table tr:last-child td{border-bottom:0}
-.ad-table small{display:block;color:var(--muted);margin-top:2px}
+.ad-table small{display:block;color:var(--muted);margin-top:2px;font-size:11px}
 .ad-table .num{white-space:nowrap;font-variant-numeric:tabular-nums}
-.ad-empty{color:var(--muted);padding:24px;text-align:center}
+.ad-empty{color:var(--muted);padding:20px;text-align:center;font-size:13px}
 .ad-muted{color:var(--muted)}
-.ad-error{color:var(--bad);margin:8px 0}
-.ad-notice{background:#16221b;border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:10px 0}.ad-notice.bad{color:var(--bad);border-color:#4a2a26;background:#201513}
-.ad-login{min-height:100vh;display:grid;place-items:center;padding:20px}
-.ad-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px}
-.ad-form{max-width:420px;width:100%}.ad-form .ad-btn{margin-top:16px;width:100%}.ad-form h2{margin:14px 0 4px}
-.ad-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;justify-content:flex-end;align-items:center;z-index:50}
-.ad-modal{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(440px,92vw);margin:auto}
-.ad-modal h3{margin:0 0 6px}.ad-modal .ad-row{margin:14px 0 0}
-.ad-detail-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);align-items:center}
-.ad-detail-label{color:var(--muted);font-size:12px;font-weight:500}
-.ad-detail-value{color:var(--text)}
-.ad-actions{display:flex;gap:6px}
-.ad-badge{display:inline-block;background:var(--line);color:var(--text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase}
+.ad-error{color:var(--bad);margin:8px 0;font-size:13px}
+.ad-notice{background:#16221b;border:1px solid var(--line);border-radius:8px;padding:10px;margin:10px 0;font-size:13px}.ad-notice.bad{color:var(--bad);border-color:#4a2a26;background:#201513}
+.ad-login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.ad-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
+.ad-form{max-width:420px;width:100%}.ad-form .ad-btn{margin-top:16px;width:100%}.ad-form h2{margin:12px 0 8px;font-size:18px}
+.ad-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;justify-content:center;align-items:center;z-index:50;padding:16px;overflow-y:auto}
+.ad-modal{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(440px,95vw);margin:auto}
+.ad-modal h3{margin:0 0 8px;font-size:16px}.ad-modal .ad-row{margin:12px 0 0}
+.ad-detail-row{display:grid;grid-template-columns:120px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.ad-detail-label{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.ad-detail-value{color:var(--text);font-size:13px}
+.ad-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ad-badge{display:inline-block;background:var(--line);color:var(--text);padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase}
 .ad-badge.active{background:#1a3a2e;color:var(--accent)}
 .ad-badge.held{background:#3a2a20;color:var(--bad)}
 .ad-badge.admin{background:#1a2a3a;color:#5bc0ff}
 .ad-badge.member{background:#1a3a1a;color:#90ee90}
+
+@media (max-width:768px){
+  .ad-top{gap:12px;padding:10px 12px}
+  .ad-brand{font-size:16px}
+  .ad-brand span{font-size:10px}
+  .ad-main{padding:12px}
+  .ad-top nav{gap:2px}
+  .ad-top nav button{padding:5px 8px;font-size:11px}
+  .ad-who{font-size:11px;gap:6px}
+  .ad h2{font-size:18px}
+  .ad h3{font-size:14px;margin:16px 0 6px}
+  .ad-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .ad-stat-card{padding:12px}
+  .ad-stat-value{font-size:18px}
+  .ad-row{gap:8px;margin-bottom:12px}
+  .ad input,.ad select,.ad textarea{padding:9px;font-size:16px}
+  .ad-btn{padding:8px 12px;font-size:12px}
+  .ad-form{max-width:100%}
+  .ad-card{padding:16px}
+  .ad-detail-row{grid-template-columns:100px 1fr;gap:10px;padding:8px 0}
+  .ad-notice{padding:8px;font-size:12px}
+  .ad-error{font-size:12px}
+  .ad-empty{padding:16px;font-size:12px}
+  .ad-table th{padding:8px 6px;font-size:10px}
+  .ad-table td{padding:8px 6px;font-size:12px}
+  .ad-table small{font-size:10px}
+  .ad-actions{gap:4px}
+  .ad-badge{padding:2px 6px;font-size:9px}
+}
+
+@media (max-width:480px){
+  .ad-top{flex-direction:column;gap:8px;padding:8px}
+  .ad-brand{font-size:14px;width:100%}
+  .ad-top nav{gap:2px;order:3;width:100%}
+  .ad-top nav button{flex:1;padding:6px 4px;font-size:10px;text-align:center}
+  .ad-who{order:2;width:100%;font-size:10px;justify-content:space-between}
+  .ad-main{padding:10px}
+  .ad h2{font-size:16px}
+  .ad h3{font-size:13px;margin:12px 0 6px}
+  .ad-grid{grid-template-columns:1fr;gap:8px}
+  .ad-stat-card{padding:10px}
+  .ad-stat-label{font-size:10px}
+  .ad-stat-value{font-size:16px}
+  .ad-stat-sub{font-size:10px}
+  .ad-row{gap:6px}
+  .ad input,.ad select,.ad textarea{padding:8px;font-size:16px;border-radius:6px}
+  .ad-btn{padding:7px 10px;font-size:11px}
+  .ad-btn.sm{padding:4px 8px;font-size:10px}
+  .ad-form{max-width:100%}
+  .ad-form .ad-btn{margin-top:12px}
+  .ad-card{padding:14px;border-radius:10px}
+  .ad-login{padding:12px}
+  .ad-modal{width:95vw;padding:16px}
+  .ad-modal h3{font-size:15px;margin:0 0 6px}
+  .ad-detail-row{grid-template-columns:90px 1fr;gap:8px;padding:6px 0}
+  .ad-detail-label{font-size:10px}
+  .ad-detail-value{font-size:12px}
+  .ad-scroll{border-radius:8px;margin:10px 0}
+  .ad-table{min-width:400px}
+  .ad-table th{padding:6px 4px;font-size:9px}
+  .ad-table td{padding:6px 4px;font-size:11px}
+  .ad-table small{font-size:9px}
+  .ad-actions{gap:3px}
+  .ad-badge{padding:2px 5px;font-size:8px}
+  .ad-notice{padding:8px;margin:8px 0;font-size:11px}
+  .ad-error{font-size:11px;margin:6px 0}
+  .ad-empty{padding:12px;font-size:11px}
+  .ad-muted{font-size:12px}
+  label{margin:10px 0 4px!important}
+  section{padding:0}
+}
+
+@media (max-width:360px){
+  .ad-top nav button{padding:4px 2px;font-size:9px}
+  .ad h2{font-size:15px}
+  .ad h3{font-size:12px}
+  .ad-stat-value{font-size:15px}
+  .ad-table{min-width:350px;font-size:10px}
+  .ad-btn{padding:6px 10px;font-size:10px}
+}
 `;
