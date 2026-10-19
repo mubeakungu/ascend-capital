@@ -593,6 +593,179 @@ function BalanceManagement() {
 }
 
 // ============================================================================
+// TRANSACTION APPROVAL
+// ============================================================================
+
+function TransactionApproval() {
+  const [{ data, error, loading }, reload] = useLoad(
+    () => api('/admin/transactions?status=pending'),
+    []
+  );
+  const [notice, setNotice] = useState(null);
+  const [actionId, setActionId] = useState(null);
+  const [actionType, setActionType] = useState(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const transactions = data?.transactions || [];
+
+  async function handleAction() {
+    if (!actionId || !actionType) return;
+    setBusy(true);
+    try {
+      await api(`/admin/transactions/${actionId}/${actionType}`, {
+        method: 'POST',
+        body: { reason: actionType === 'reject' ? reason : undefined },
+      });
+      setNotice({ text: `Transaction ${actionType}ed successfully` });
+      setActionId(null);
+      setActionType(null);
+      setReason('');
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const deposits = transactions.filter(t => t.type === 'deposit');
+  const withdrawals = transactions.filter(t => t.type === 'withdrawal');
+
+  return (
+    <section>
+      <div className="ad-row">
+        <h2>Transaction Approvals</h2>
+        <button className="ad-btn ghost" onClick={reload} style={{ marginLeft: 'auto' }}>Refresh</button>
+      </div>
+
+      <Notice notice={notice} />
+
+      <div className="ad-grid">
+        <StatCard label="Pending Deposits" value={deposits.length} subtext={`${money(deposits.reduce((sum, t) => sum + t.amount, 0))}`} />
+        <StatCard label="Pending Withdrawals" value={withdrawals.length} subtext={`${money(withdrawals.reduce((sum, t) => sum + t.amount, 0))}`} />
+      </div>
+
+      {deposits.length > 0 && (
+        <>
+          <h3>Pending Deposits</h3>
+          <div className="ad-scroll">
+            <table className="ad-table">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Amount</th>
+                  <th>Reference</th>
+                  <th>Requested</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deposits.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      {t.accountName}
+                      <small>{t.accountEmail}</small>
+                    </td>
+                    <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.amount)}</td>
+                    <td><code style={{ fontSize: '11px', color: 'var(--muted)' }}>{t.reference || '—'}</code></td>
+                    <td>{new Date(t.createdAt).toLocaleString()}</td>
+                    <td>
+                      <div className="ad-actions">
+                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }}>Approve</button>
+                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>Reject</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {withdrawals.length > 0 && (
+        <>
+          <h3>Pending Withdrawals</h3>
+          <div className="ad-scroll">
+            <table className="ad-table">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Amount</th>
+                  <th>Destination</th>
+                  <th>Requested</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {withdrawals.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      {t.accountName}
+                      <small>{t.accountEmail}</small>
+                    </td>
+                    <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
+                    <td><code style={{ fontSize: '11px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.destination || '—'}</code></td>
+                    <td>{new Date(t.createdAt).toLocaleString()}</td>
+                    <td>
+                      <div className="ad-actions">
+                        <button className="ad-btn ghost sm" onClick={() => { setActionId(t.id); setActionType('approve'); }}>Approve</button>
+                        <button className="ad-btn ghost sm danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>Reject</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {transactions.length === 0 && (
+        <p className="ad-empty">No pending transactions</p>
+      )}
+
+      {actionId && (
+        <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
+          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
+            <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
+            
+            {actionType === 'reject' && (
+              <>
+                <label>Reason for rejection</label>
+                <textarea
+                  rows={3}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Explain why this transaction is being rejected..."
+                  required
+                />
+              </>
+            )}
+
+            <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '12px' }}>
+              {actionType === 'approve' 
+                ? 'This transaction will be approved and processed immediately.' 
+                : 'The user will be notified of the rejection.'}
+            </p>
+
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>Cancel</button>
+              <button className={`ad-btn ${actionType === 'reject' ? 'danger' : ''}`} disabled={busy}>
+                {busy ? 'Processing…' : actionType === 'approve' ? 'Approve' : 'Reject'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
 // SETTINGS / PASSWORD CHANGE
 // ============================================================================
 
@@ -766,6 +939,7 @@ export default function AdminDashboard() {
   const tabs = [
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
+    ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
     ['balance', 'Balances'],
@@ -803,6 +977,7 @@ export default function AdminDashboard() {
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
+          {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'balance' && <BalanceManagement />}
