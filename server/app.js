@@ -779,8 +779,10 @@ export function createApp({ databasePath }) {
   }
 
   // Apply daily trading profits to all active deposits
+  // KEY CHANGE: Profits only start accruing the day AFTER deposit, at EARNINGS_ACTIVATION_HOUR
   function applyDailyTradingProfits() {
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const now = new Date();
     
     const activeDeposits = db.prepare(`
       SELECT t.id, t.account_id, t.amount_cents, t.created_at
@@ -797,6 +799,32 @@ export function createApp({ databasePath }) {
       `).get(deposit.id, today);
 
       if (alreadyCredited) continue;
+
+      // ========== NEW: Check if deposit is old enough ==========
+      // Deposit must be from YESTERDAY or earlier, AND we must be past the activation time
+      
+      const depositDate = new Date(deposit.created_at);
+      const depositDay = depositDate.toISOString().split('T')[0];  // YYYY-MM-DD of deposit
+      
+      // RULE 1: Only apply profits if deposit was made BEFORE today
+      // Example: If deposit on Monday, start profits Tuesday
+      if (depositDay === today) {
+        // Deposit was made today - skip it
+        // Earnings will start TOMORROW at 10:00 AM
+        continue;
+      }
+      
+      // RULE 2: Check if we're past the activation hour TODAY
+      // Example: If activation is 10:00 AM, only apply if current time is >= 10:00 AM
+      const currentMinutesOfDay = now.getHours() * 60 + now.getMinutes();
+      const activationMinutesOfDay = EARNINGS_ACTIVATION_HOUR * 60 + EARNINGS_ACTIVATION_MINUTE;
+      
+      if (currentMinutesOfDay < activationMinutesOfDay) {
+        // We haven't reached the activation time yet today
+        // The scheduler will try again after 10:00 AM
+        continue;
+      }
+      // ========== END NEW CHECK ==========
 
       // Calculate daily profit based on plan
       const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
