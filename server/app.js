@@ -1,6 +1,6 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { DatabaseSync } from 'node:sqlite';
+import postgres from 'postgres';
 import express from 'express';
 import {
   initializeTierRewardsTable,
@@ -18,11 +18,17 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit'];
+const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
+const PIN_PATTERN = /^\d{6}$/;
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
 const DEFAULT_INITIAL_ADMIN_PASSWORD = 'Admin@123';
+
+// Earnings activation settings
+const EARNINGS_ACTIVATION_HOUR = parseInt(process.env.EARNINGS_ACTIVATION_HOUR ?? '10', 10);
+const EARNINGS_ACTIVATION_MINUTE = parseInt(process.env.EARNINGS_ACTIVATION_MINUTE ?? '0', 10);
 
 // Referral tier commission rates
 const REFERRAL_COMMISSION_RATES = [
@@ -35,6 +41,19 @@ const REFERRAL_COMMISSION_RATES = [
   0.14,  // Star 7: 14%
   0.16,  // Star 8: 16%
   0.18,  // Crown Leader: 18%
+];
+
+// Weekly tier salaries
+const TIER_SALARIES = [
+  0,        // Star 1: $0 (no salary)
+  100,      // Star 2: $100/week
+  200,      // Star 3: $200/week
+  300,      // Star 4: $300/week
+  450,      // Star 5: $450/week
+  900,      // Star 6: $900/week
+  1500,     // Star 7: $1,500/week
+  2500,     // Star 8: $2,500/week
+  5000,     // Crown Leader: $5,000/week
 ];
 
 const TIER_NAMES = [
@@ -56,7 +75,6 @@ const DEPOSIT_PLANS = [
   { deposit: 35000, dailyProfit: 1400 },
 ];
 
-// Tier requirements: qualify by EITHER direct referrals OR team total (whichever is met first)
 const TIER_REQUIREMENTS_DETAILED = [
   { direct: 5, team: null },        // Star 1: 5 direct (no team req)
   { direct: 7, team: 13 },          // Star 2: 7 direct OR 13 team
@@ -66,7 +84,7 @@ const TIER_REQUIREMENTS_DETAILED = [
   { direct: 11, team: 150 },        // Star 6: 11 direct OR 150 team
   { direct: 12, team: 400 },        // Star 7: 12 direct OR 400 team
   { direct: 13, team: 700 },        // Star 8: 13 direct OR 700 team
-  { direct: 14, team: 100 },        // Crown Leader: 14 direct OR 100 team
+  { direct: 14, team: 1000 },       // Crown Leader: 14 direct OR 1,000 team
 ];
 
 function accountView(row) {
@@ -74,6 +92,7 @@ function accountView(row) {
     id: row.id,
     name: row.name,
     email: row.email,
+    phone: row.phone ?? null,
     role: row.role ?? 'member',
     status: row.status ?? 'active',
     mustChangePassword: Boolean(row.must_change_password),
@@ -85,6 +104,7 @@ function transactionView(row, { admin = false } = {}) {
   const typeMap = {
     'tier_reward': 'Tier Reward',
     'trading_profit': 'Trading Profit',
+    'tier_salary': 'Weekly Salary',
   };
   
   const view = {
@@ -98,6 +118,7 @@ function transactionView(row, { admin = false } = {}) {
     reviewNote: row.review_note ?? '',
     isTierReward: row.type === 'tier_reward',
     isTradingProfit: row.type === 'trading_profit',
+    isTierSalary: row.type === 'tier_salary',
   };
   if (admin) {
     view.accountId = row.account_id;
@@ -138,18 +159,24 @@ function hashToken(token) {
 }
 
 function passwordError(password) {
-  if (typeof password !== 'string' || password.length < 12 || password.length > 128) {
-    return 'Password must be between 12 and 128 characters.';
+  if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+    return 'Password must be between 6 and 128 characters.';
   }
   return null;
 }
 
-function validationMessage({ name, email, password }, requireName) {
+function validationMessage({ name, email, password, phone, pin }, requireName) {
   if (requireName && (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80)) {
     return 'Name must be between 2 and 80 characters.';
   }
   if (typeof email !== 'string' || email.length > 254 || !EMAIL_PATTERN.test(email.trim())) {
     return 'Enter a valid email address.';
+  }
+  if (phone && (typeof phone !== 'string' || !PHONE_PATTERN.test(phone.trim()))) {
+    return 'Enter a valid phone number.';
+  }
+  if (pin && (typeof pin !== 'string' || !PIN_PATTERN.test(pin))) {
+    return 'PIN must be exactly 6 digits.';
   }
   return passwordError(password);
 }
@@ -212,6 +239,37 @@ function createRateLimiter({ limit, windowMs }) {
   };
 }
 
+// EARNINGS HELPER FUNCTIONS
+function calculateEarningsStatus(lastDepositTime) {
+  if (!lastDepositTime) {
+    return {
+      earningsActive: false,
+      earningsStartTime: null,
+    };
+  }
+
+  const depositDate = new Date(lastDepositTime);
+  const nextDay = new Date(depositDate);
+  nextDay.setDate(nextDay.getDate() + 1);
+  nextDay.setHours(EARNINGS_ACTIVATION_HOUR, EARNINGS_ACTIVATION_MINUTE, 0, 0);
+
+  const now = new Date();
+  const isActive = now >= nextDay;
+
+  const timeStr = isActive ? null : nextDay.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  return {
+    earningsActive: isActive,
+    earningsStartTime: timeStr,
+  };
+}
+
 // Referral helper functions
 function generateReferralCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -235,20 +293,17 @@ function getTierByDirectReferrals(directCount) {
   return 8;
 }
 
-// Get tier based on EITHER direct referrals OR team total (automatic qualification)
 function getTierByProgress(directCount, teamTotal) {
   for (let i = TIER_REQUIREMENTS_DETAILED.length - 1; i >= 0; i--) {
     const req = TIER_REQUIREMENTS_DETAILED[i];
     const directMet = directCount >= req.direct;
     const teamMet = req.team === null || teamTotal >= req.team;
     
-    // Qualify if direct count is met AND (no team req OR team total is met)
     if (directMet && teamMet) return i;
   }
   return -1;
 }
 
-// Get daily profit amount for a deposit
 function getDailyProfitForDeposit(depositCents) {
   const depositAmount = depositCents / 100;
   for (let i = DEPOSIT_PLANS.length - 1; i >= 0; i--) {
@@ -259,48 +314,44 @@ function getDailyProfitForDeposit(depositCents) {
   return 0;
 }
 
-export function createApp({ databasePath }) {
-  const db = new DatabaseSync(databasePath);
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    PRAGMA journal_mode = WAL;
+export async function createApp() {
+  const sql = postgres(process.env.DATABASE_URL);
+
+  // Initialize tables
+  await sql`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      email TEXT NOT NULL UNIQUE,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))
+      phone TEXT,
+      pin TEXT,
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
+      hold_reason TEXT,
+      held_at TEXT,
+      must_change_password INTEGER NOT NULL DEFAULT 0,
+      last_deposit_time TEXT,
+      created_at TEXT NOT NULL
     );
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      expires_at INTEGER NOT NULL
+      expires_at BIGINT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
-  `);
-  const accountColumns = db.prepare('PRAGMA table_info(accounts)').all();
-  if (!accountColumns.some((column) => column.name === 'role')) {
-    db.exec("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin'))");
-  }
-  if (!accountColumns.some((column) => column.name === 'status')) {
-    db.exec("ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held'))");
-  }
-  if (!accountColumns.some((column) => column.name === 'hold_reason')) {
-    db.exec('ALTER TABLE accounts ADD COLUMN hold_reason TEXT');
-  }
-  if (!accountColumns.some((column) => column.name === 'held_at')) {
-    db.exec('ALTER TABLE accounts ADD COLUMN held_at TEXT');
-  }
-  if (!accountColumns.some((column) => column.name === 'must_change_password')) {
-    db.exec('ALTER TABLE accounts ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
-  }
-  db.exec(`
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -309,13 +360,14 @@ export function createApp({ databasePath }) {
       reviewed_at TEXT,
       review_note TEXT
     );
-    CREATE INDEX IF NOT EXISTS transactions_account_idx ON transactions(account_id, created_at);
-    CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions(status, created_at);
-    CREATE UNIQUE INDEX IF NOT EXISTS transactions_deposit_reference_idx
-      ON transactions(reference COLLATE NOCASE)
-      WHERE type = 'deposit' AND status IN ('pending', 'approved');
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS transactions_account_idx ON transactions(account_id, created_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions(status, created_at)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS audit_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       actor_id TEXT,
       actor_email TEXT,
       action TEXT NOT NULL,
@@ -324,14 +376,22 @@ export function createApp({ databasePath }) {
       ip TEXT,
       created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at);
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS referral_codes (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      code TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id);
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS referral_signups (
       id TEXT PRIMARY KEY,
       referrer_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
@@ -339,8 +399,12 @@ export function createApp({ databasePath }) {
       referred_account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
       signed_up_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id);
-    CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id);
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS referral_commissions (
       id TEXT PRIMARY KEY,
       referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -350,8 +414,12 @@ export function createApp({ databasePath }) {
       commission_rate REAL NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id);
-    CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id);
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS trading_ledger (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -360,13 +428,31 @@ export function createApp({ databasePath }) {
       profit_date TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id);
-    CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id);
-    CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date);
-  `);
+  `;
 
-  // Initialize tier rewards table
-  initializeTierRewardsTable(db);
+  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date)`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS weekly_salary_payments (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      tier_index INTEGER NOT NULL,
+      tier_name TEXT NOT NULL,
+      salary_cents INTEGER NOT NULL CHECK(salary_cents > 0),
+      payment_week TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'credited' CHECK(status IN ('pending', 'credited', 'held')),
+      credited_at TEXT,
+      created_at TEXT NOT NULL
+    );
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_account_idx ON weekly_salary_payments(account_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_week_idx ON weekly_salary_payments(payment_week)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS weekly_salary_payments_unique_idx ON weekly_salary_payments(account_id, payment_week)`;
+
+  await initializeTierRewardsTable(sql);
 
   const app = express();
   const secureCookie = process.env.NODE_ENV === 'production';
@@ -401,58 +487,39 @@ export function createApp({ databasePath }) {
   });
   app.use(express.json({ limit: '10kb', strict: true }));
 
-  function withTransaction(work) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const result = work();
-      db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-  }
-
   function recordAudit(request, action, targetId, detail = {}) {
-    db.prepare(`
+    return sql`
       INSERT INTO audit_log (actor_id, actor_email, action, target_id, detail, ip, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      request.account?.id ?? null,
-      request.account?.email ?? null,
-      action,
-      targetId ?? null,
-      JSON.stringify(detail),
-      request.ip ?? null,
-      new Date().toISOString(),
-    );
+      VALUES (${request.account?.id ?? null}, ${request.account?.email ?? null}, ${action}, ${targetId ?? null}, ${JSON.stringify(detail)}, ${request.ip ?? null}, ${new Date().toISOString()})
+    `;
   }
 
-  function approvedBalanceCents(accountId) {
-    const row = db.prepare(`
+  async function approvedBalanceCents(accountId) {
+    const row = await sql`
       SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE -amount_cents END), 0) AS balance
       FROM transactions
-      WHERE account_id = ? AND status = 'approved'
-    `).get(accountId);
-    return row.balance;
+      WHERE account_id = ${accountId} AND status = 'approved'
+    `;
+    return row[0]?.balance || 0;
   }
 
-  function pendingWithdrawalsCents(accountId) {
-    const row = db.prepare(`
+  async function pendingWithdrawalsCents(accountId) {
+    const row = await sql`
       SELECT COALESCE(SUM(amount_cents), 0) AS total
       FROM transactions
-      WHERE account_id = ? AND type = 'withdrawal' AND status = 'pending'
-    `).get(accountId);
-    return row.total;
+      WHERE account_id = ${accountId} AND type = 'withdrawal' AND status = 'pending'
+    `;
+    return row[0]?.total || 0;
   }
 
-  function getTransaction(id) {
-    return db.prepare(`
+  async function getTransaction(id) {
+    const row = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id
-      WHERE t.id = ?
-    `).get(id);
+      WHERE t.id = ${id}
+    `;
+    return row[0];
   }
 
   function currentAccount(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
@@ -461,22 +528,37 @@ export function createApp({ databasePath }) {
 
     const tokenHash = hashToken(token);
     const now = Date.now();
-    db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now);
-    const row = db.prepare(`
-      SELECT accounts.id, accounts.name, accounts.email, accounts.created_at, accounts.role, accounts.status,
+    
+    // Note: This is intentionally synchronous because it's called from middleware
+    // We'll handle async in the actual route handlers
+    return { token, tokenHash, now, requireAdminRole };
+  }
+
+  async function getCurrentAccountAsync(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
+    const token = readCookie(request, cookieName);
+    if (!token) return null;
+
+    const tokenHash = hashToken(token);
+    const now = Date.now();
+    
+    await sql`DELETE FROM sessions WHERE expires_at <= ${now}`;
+    
+    const rows = await sql`
+      SELECT accounts.id, accounts.name, accounts.email, accounts.phone, accounts.created_at, accounts.role, accounts.status,
         accounts.must_change_password
       FROM sessions
       JOIN accounts ON accounts.id = sessions.account_id
-      WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND accounts.status = 'active'
-    `).get(tokenHash, now);
+      WHERE sessions.token_hash = ${tokenHash} AND sessions.expires_at > ${now} AND accounts.status = 'active'
+    `;
     
-    if (!row) return null;
+    if (rows.length === 0) return null;
+    const row = rows[0];
     if (requireAdminRole && row.role !== 'admin') return null;
     return row;
   }
 
-  function requireAccount(request, response, next) {
-    const account = currentAccount(request);
+  async function requireAccount(request, response, next) {
+    const account = await getCurrentAccountAsync(request);
     if (!account) return response.status(401).json({ error: 'Sign in to continue.' });
     request.account = account;
     return next();
@@ -495,11 +577,11 @@ export function createApp({ databasePath }) {
     return next();
   }
 
-  function requireAdminSession(request, response, next) {
-    const account = currentAccount(request, ADMIN_SESSION_COOKIE, true);
+  async function requireAdminSession(request, response, next) {
+    const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
     if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
     request.account = account;
-    if (account.mustChangePassword) {
+    if (account.must_change_password) {
       return response.status(403).json({
         error: 'Change your temporary password to continue.',
         code: 'PASSWORD_CHANGE_REQUIRED',
@@ -508,71 +590,67 @@ export function createApp({ databasePath }) {
     return next();
   }
 
-  function seedInitialAdmin() {
+  async function seedInitialAdmin() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
     if (password.length > 128) throw new Error('INITIAL_ADMIN_PASSWORD must be at most 128 characters.');
 
     const resetRequested = process.env.RESET_ADMIN_PASSWORD === 'true';
-    const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(ADMIN_USERNAME);
-    if (existing && !resetRequested) {
-      db.prepare("UPDATE accounts SET role = 'admin' WHERE id = ?").run(existing.id);
+    const existing = await sql`SELECT id FROM accounts WHERE email = ${ADMIN_USERNAME}`;
+    
+    if (existing.length > 0 && !resetRequested) {
+      await sql`UPDATE accounts SET role = 'admin' WHERE id = ${existing[0].id}`;
       return;
     }
 
     const salt = randomBytes(16);
     const passwordHash = scryptSync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
 
-    if (existing) {
-      withTransaction(() => {
-        db.prepare(`
-          UPDATE accounts
-          SET role = 'admin', status = 'active', password_salt = ?, password_hash = ?, must_change_password = 1
-          WHERE id = ?
-        `).run(salt.toString('hex'), passwordHash.toString('hex'), existing.id);
-        db.prepare('DELETE FROM sessions WHERE account_id = ?').run(existing.id);
-        recordAudit({}, 'admin.password_reset_switch', existing.id, {});
-      });
+    if (existing.length > 0) {
+      await sql`
+        UPDATE accounts
+        SET role = 'admin', status = 'active', password_salt = ${salt.toString('hex')}, password_hash = ${passwordHash.toString('hex')}, must_change_password = 1
+        WHERE id = ${existing[0].id}
+      `;
+      await sql`DELETE FROM sessions WHERE account_id = ${existing[0].id}`;
+      await recordAudit({}, 'admin.password_reset_switch', existing[0].id, {});
       return;
     }
 
     const id = randomBytes(16).toString('hex');
-    db.prepare(`
+    await sql`
       INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role, must_change_password)
-      VALUES (?, 'Administrator', ?, ?, ?, ?, 'admin', 1)
-    `).run(id, ADMIN_USERNAME, salt.toString('hex'), passwordHash.toString('hex'), new Date().toISOString());
+      VALUES (${id}, 'Administrator', ${ADMIN_USERNAME}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${new Date().toISOString()}, 'admin', 1)
+    `;
   }
 
   async function createAccountSession(accountId, response) {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
-    db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)')
-      .run(hashToken(token), accountId, expiresAt);
+    await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${accountId}, ${expiresAt})`;
     setSessionCookie(response, token, secureCookie);
   }
 
-  function trackReferralSignup(accountId, referralCode) {
+  async function trackReferralSignup(accountId, referralCode) {
     if (!referralCode || typeof referralCode !== 'string') return;
-    const codeRecord = db.prepare('SELECT account_id FROM referral_codes WHERE code = ? COLLATE NOCASE')
-      .get(referralCode);
+    const codeRecord = await sql`SELECT account_id FROM referral_codes WHERE code = ${referralCode}`;
 
-    if (!codeRecord) return;
+    if (codeRecord.length === 0) return;
 
     const id = randomBytes(16).toString('hex');
     try {
-      db.prepare(`
+      await sql`
         INSERT INTO referral_signups (id, referrer_id, referral_code, referred_account_id, signed_up_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(id, codeRecord.account_id, referralCode.toUpperCase(), accountId, new Date().toISOString());
+        VALUES (${id}, ${codeRecord[0].account_id}, ${referralCode.toUpperCase()}, ${accountId}, ${new Date().toISOString()})
+      `;
 
-      // Check tier reward for the person who provided the code - now uses both direct + team totals
-      const directCount = getDirectReferralCount(db, codeRecord.account_id);
-      const teamTotal = getTeamTotal(db, codeRecord.account_id);
+      const directCount = await getDirectReferralCount(sql, codeRecord[0].account_id);
+      const teamTotal = await getTeamTotal(sql, codeRecord[0].account_id);
       const tier = getTierByProgress(directCount, teamTotal);
       
       if (tier >= 0) {
-        const tierReward = checkAndCreditTierReward(db, codeRecord.account_id);
+        const tierReward = await checkAndCreditTierReward(sql, codeRecord[0].account_id);
         if (tierReward) {
-          recordAudit({}, 'referral.tier_reward_credited', codeRecord.account_id, {
+          await recordAudit({}, 'referral.tier_reward_credited', codeRecord[0].account_id, {
             tierIndex: tierReward.tierId,
             tierName: tierReward.tierName,
             amountUSD: tierReward.amountCents / 100,
@@ -582,20 +660,19 @@ export function createApp({ databasePath }) {
         }
       }
 
-      // Also check tier rewards for the direct referrer of this person's referrer
-      const directReferrerOf = db.prepare(`
-        SELECT referrer_id FROM referral_signups WHERE referred_account_id = ?
-      `).get(codeRecord.account_id);
+      const directReferrerOf = await sql`
+        SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${codeRecord[0].account_id}
+      `;
       
-      if (directReferrerOf?.referrer_id) {
-        const grandDirect = getDirectReferralCount(db, directReferrerOf.referrer_id);
-        const grandTeam = getTeamTotal(db, directReferrerOf.referrer_id);
+      if (directReferrerOf.length > 0 && directReferrerOf[0].referrer_id) {
+        const grandDirect = await getDirectReferralCount(sql, directReferrerOf[0].referrer_id);
+        const grandTeam = await getTeamTotal(sql, directReferrerOf[0].referrer_id);
         const grandTier = getTierByProgress(grandDirect, grandTeam);
         
         if (grandTier >= 0) {
-          const grandParentTierReward = checkAndCreditTierReward(db, directReferrerOf.referrer_id);
+          const grandParentTierReward = await checkAndCreditTierReward(sql, directReferrerOf[0].referrer_id);
           if (grandParentTierReward) {
-            recordAudit({}, 'referral.tier_reward_credited', directReferrerOf.referrer_id, {
+            await recordAudit({}, 'referral.tier_reward_credited', directReferrerOf[0].referrer_id, {
               tierIndex: grandParentTierReward.tierId,
               tierName: grandParentTierReward.tierName,
               amountUSD: grandParentTierReward.amountCents / 100,
@@ -610,29 +687,31 @@ export function createApp({ databasePath }) {
     }
   }
 
-  function applyReferralCommission(transactionId) {
-    const tx = db.prepare(`
+  async function applyReferralCommission(transactionId) {
+    const txRows = await sql`
       SELECT t.*, a.id AS account_id
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id
-      WHERE t.id = ?
-    `).get(transactionId);
+      WHERE t.id = ${transactionId}
+    `;
 
-    if (!tx || tx.type !== 'deposit' || tx.status !== 'approved') return null;
+    if (txRows.length === 0) return null;
+    const tx = txRows[0];
 
-    // Check if this is the first approved deposit from the member
-    const previousDeposits = db.prepare(`
+    if (tx.type !== 'deposit' || tx.status !== 'approved') return null;
+
+    const previousDeposits = await sql`
       SELECT COUNT(*) AS cnt FROM transactions
-      WHERE account_id = ? AND type = 'deposit' AND status = 'approved' AND created_at < ?
-    `).get(tx.account_id, tx.created_at).cnt;
+      WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved' AND created_at < ${tx.created_at}
+    `;
 
-    const isFirstDeposit = previousDeposits === 0;
+    const isFirstDeposit = previousDeposits[0].cnt === 0;
 
-    const referralSignup = db.prepare(`
-      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
-    `).get(tx.account_id);
+    const referralSignup = await sql`
+      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${tx.account_id} LIMIT 1
+    `;
 
-    const referrerId = referralSignup?.referrer_id;
+    const referrerId = referralSignup[0]?.referrer_id;
     
     let commissionCents;
     let commissionRate;
@@ -641,33 +720,29 @@ export function createApp({ databasePath }) {
     
     if (isFirstDeposit) {
       if (referrerId) {
-        // 5% of first deposit amount goes to referrer (referral bonus)
         commissionRate = 0.05;
         commissionCents = Math.round(tx.amount_cents * commissionRate);
         bonusType = 'referral_bonus_5%';
       } else {
-        // Non-referred member: 2.5% of first deposit to themselves
         commissionRate = 0.025;
         commissionCents = Math.round(tx.amount_cents * commissionRate);
         beneficiaryId = tx.account_id;
         bonusType = 'first_deposit_bonus_2.5%';
       }
     } else {
-      // Recharge deposit - subsequent deposits
-      const firstDeposit = db.prepare(`
+      const firstDeposit = await sql`
         SELECT amount_cents FROM transactions
-        WHERE account_id = ? AND type = 'deposit' AND status = 'approved'
+        WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved'
         ORDER BY created_at ASC
         LIMIT 1
-      `).get(tx.account_id);
+      `;
       
-      if (!firstDeposit) return null;
+      if (firstDeposit.length === 0) return null;
       
       commissionRate = 0.025;
-      commissionCents = Math.round(firstDeposit.amount_cents * commissionRate);
+      commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
       bonusType = 'recharge_bonus_2.5%';
       
-      // If no referrer, the member gets the 2.5% recharge bonus themselves
       if (!referrerId) {
         beneficiaryId = tx.account_id;
       }
@@ -675,45 +750,49 @@ export function createApp({ databasePath }) {
 
     const commissionId = randomBytes(16).toString('hex');
     try {
-      db.prepare(`
+      await sql`
         INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        commissionId,
-        beneficiaryId,
-        transactionId,
-        tx.account_id,
-        commissionCents,
-        commissionRate,
-        new Date().toISOString(),
-      );
+        VALUES (${commissionId}, ${beneficiaryId}, ${transactionId}, ${tx.account_id}, ${commissionCents}, ${commissionRate}, ${new Date().toISOString()})
+      `;
       return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId };
     } catch (error) {
       return null;
     }
   }
 
-  // Apply daily trading profits to all active deposits
-  function applyDailyTradingProfits() {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  async function applyDailyTradingProfits() {
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
     
-    const activeDeposits = db.prepare(`
+    const activeDeposits = await sql`
       SELECT t.id, t.account_id, t.amount_cents, t.created_at
       FROM transactions t
       WHERE t.type = 'deposit' AND t.status = 'approved'
       ORDER BY t.account_id
-    `).all();
+    `;
 
     for (const deposit of activeDeposits) {
-      // Check if profit already credited today
-      const alreadyCredited = db.prepare(`
+      const alreadyCredited = await sql`
         SELECT id FROM trading_ledger
-        WHERE deposit_transaction_id = ? AND profit_date = ?
-      `).get(deposit.id, today);
+        WHERE deposit_transaction_id = ${deposit.id} AND profit_date = ${today}
+      `;
 
-      if (alreadyCredited) continue;
+      if (alreadyCredited.length > 0) continue;
 
-      // Calculate daily profit based on plan
+      const depositDate = new Date(deposit.created_at);
+      const depositDay = depositDate.toISOString().split('T')[0];
+      
+      if (depositDay === today) {
+        continue;
+      }
+      
+      const currentMinutesOfDay = now.getHours() * 60 + now.getMinutes();
+      const activationMinutesOfDay = EARNINGS_ACTIVATION_HOUR * 60 + EARNINGS_ACTIVATION_MINUTE;
+      
+      if (currentMinutesOfDay < activationMinutesOfDay) {
+        continue;
+      }
+
       const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
       if (dailyProfit <= 0) continue;
 
@@ -721,27 +800,88 @@ export function createApp({ databasePath }) {
       const ledgerId = randomBytes(16).toString('hex');
 
       try {
-        withTransaction(() => {
-          // Record in trading ledger
-          db.prepare(`
-            INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `).run(ledgerId, deposit.account_id, deposit.id, profitCents, today, new Date().toISOString());
+        const ledgerInsert = sql`
+          INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
+          VALUES (${ledgerId}, ${deposit.account_id}, ${deposit.id}, ${profitCents}, ${today}, ${new Date().toISOString()})
+        `;
 
-          // Credit profit as approved transaction (no admin review needed)
-          const txId = randomBytes(16).toString('hex');
-          db.prepare(`
-            INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-            VALUES (?, ?, 'trading_profit', ?, ?, 'approved', ?)
-          `).run(txId, deposit.account_id, profitCents, `Trading profit from ${today}`, new Date().toISOString());
-        });
+        const txId = randomBytes(16).toString('hex');
+        const txInsert = sql`
+          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+          VALUES (${txId}, ${deposit.account_id}, 'trading_profit', ${profitCents}, ${`Trading profit from ${today}`}, 'approved', ${new Date().toISOString()})
+        `;
+
+        await Promise.all([ledgerInsert, txInsert]);
       } catch (error) {
         console.error(`Failed to credit profit for deposit ${deposit.id}:`, error);
       }
     }
   }
 
-  // Run daily trading profit calculations every day at midnight UTC
+  async function applyWeeklySalaries() {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const weekNumber = Math.ceil((now.getUTCDate() - now.getUTCDay() + 1) / 7);
+    const paymentWeek = `${year}-W${String(weekNumber).padStart(2, '0')}`;
+
+    const members = await sql`
+      SELECT DISTINCT
+        a.id,
+        a.email,
+        a.name
+      FROM accounts a
+      WHERE a.role = 'member' AND a.status = 'active'
+    `;
+
+    for (const member of members) {
+      const alreadyPaid = await sql`
+        SELECT id FROM weekly_salary_payments
+        WHERE account_id = ${member.id} AND payment_week = ${paymentWeek}
+      `;
+
+      if (alreadyPaid.length > 0) continue;
+
+      const directCount = await getDirectReferralCount(sql, member.id);
+      const teamTotal = await getTeamTotal(sql, member.id);
+      const tier = getTierByProgress(directCount, teamTotal);
+
+      if (tier < 1) continue;
+
+      const tierName = TIER_NAMES[tier];
+      const salaryCents = Math.round(TIER_SALARIES[tier] * 100);
+
+      if (salaryCents <= 0) continue;
+
+      const salaryId = randomBytes(16).toString('hex');
+      const txId = randomBytes(16).toString('hex');
+
+      try {
+        const salaryInsert = sql`
+          INSERT INTO weekly_salary_payments (id, account_id, tier_index, tier_name, salary_cents, payment_week, credited_at, created_at)
+          VALUES (${salaryId}, ${member.id}, ${tier}, ${tierName}, ${salaryCents}, ${paymentWeek}, ${new Date().toISOString()}, ${new Date().toISOString()})
+        `;
+
+        const txInsert = sql`
+          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+          VALUES (${txId}, ${member.id}, 'tier_salary', ${salaryCents}, ${`Weekly ${tierName} salary for ${paymentWeek}`}, 'approved', ${new Date().toISOString()})
+        `;
+
+        await Promise.all([salaryInsert, txInsert]);
+
+        await recordAudit({}, 'salary.weekly_credited', member.id, {
+          tierIndex: tier,
+          tierName,
+          amountUSD: salaryCents / 100,
+          paymentWeek,
+          directCount,
+          teamTotal,
+        });
+      } catch (error) {
+        console.error(`Failed to credit weekly salary for member ${member.id}:`, error);
+      }
+    }
+  }
+
   function scheduleDailyTradingProfits() {
     const now = new Date();
     const tomorrow = new Date(now);
@@ -752,14 +892,31 @@ export function createApp({ databasePath }) {
     
     setTimeout(() => {
       applyDailyTradingProfits();
-      // Run daily after first execution
       setInterval(() => {
         applyDailyTradingProfits();
-      }, 24 * 60 * 60 * 1000); // 24 hours
+      }, 24 * 60 * 60 * 1000);
     }, timeUntilMidnight);
   }
 
-  seedInitialAdmin();
+  function scheduleWeeklySalaries() {
+    const now = new Date();
+    const daysUntilMonday = (1 - now.getUTCDay() + 7) % 7 || 7;
+    const nextMonday = new Date(now);
+    nextMonday.setUTCDate(nextMonday.getUTCDate() + daysUntilMonday);
+    nextMonday.setUTCHours(0, 0, 0, 0);
+
+    const timeUntilMonday = nextMonday.getTime() - now.getTime();
+
+    setTimeout(() => {
+      applyWeeklySalaries();
+      setInterval(() => {
+        applyWeeklySalaries();
+      }, 7 * 24 * 60 * 60 * 1000);
+    }, timeUntilMonday);
+  }
+
+  await seedInitialAdmin();
+  scheduleWeeklySalaries();
   scheduleDailyTradingProfits();
 
   // =========================================================================
@@ -768,7 +925,7 @@ export function createApp({ databasePath }) {
 
   app.get('/api/health', (_request, response) => response.json({
     status: 'ok',
-    accountStorage: process.env.ACCOUNT_STORAGE_MODE ?? 'local',
+    accountStorage: 'postgresql',
   }));
 
   app.get('/api/public-config', (_request, response) => response.json({
@@ -822,27 +979,27 @@ export function createApp({ databasePath }) {
       if (error) return response.status(400).json({ error });
 
       const email = input.email.trim().toLowerCase();
-      const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(email);
-      if (existing) return response.status(409).json({ error: 'An account with this email already exists.' });
+      const existing = await sql`SELECT id FROM accounts WHERE email = ${email}`;
+      if (existing.length > 0) return response.status(409).json({ error: 'An account with this email already exists.' });
 
       const salt = randomBytes(16);
       const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
       const id = randomBytes(16).toString('hex');
       const createdAt = new Date().toISOString();
-      db.prepare(`
-        INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, input.name.trim(), email, salt.toString('hex'), passwordHash.toString('hex'), createdAt);
+      
+      await sql`
+        INSERT INTO accounts (id, name, email, password_salt, password_hash, phone, pin, created_at)
+        VALUES (${id}, ${input.name.trim()}, ${email}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${input.phone?.trim() || null}, ${input.pin || null}, ${createdAt})
+      `;
 
-      // Track referral if provided
       const referralCode = input.referralCode?.trim().toUpperCase();
       if (referralCode) {
-        trackReferralSignup(id, referralCode);
+        await trackReferralSignup(id, referralCode);
       }
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(id);
+      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${id}`;
       await createAccountSession(id, response);
-      return response.status(201).json({ account: accountView(account) });
+      return response.status(201).json({ account: accountView(account[0]) });
     } catch (error) {
       return next(error);
     }
@@ -855,11 +1012,12 @@ export function createApp({ databasePath }) {
       if (error) return response.status(400).json({ error });
 
       const email = input.email.trim().toLowerCase();
-      const row = db.prepare(`
-        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
-        FROM accounts WHERE email = ?
-      `).get(email);
+      const rows = await sql`
+        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
+        FROM accounts WHERE email = ${email}
+      `;
 
+      const row = rows[0];
       const salt = row ? Buffer.from(row.password_salt, 'hex') : Buffer.alloc(16);
       const storedHash = row ? Buffer.from(row.password_hash, 'hex') : Buffer.alloc(PASSWORD_BYTES);
       const candidate = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
@@ -871,7 +1029,7 @@ export function createApp({ databasePath }) {
         return response.status(403).json({ error: 'This account is on hold. Please contact support.' });
       }
 
-      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(row.id);
+      await sql`DELETE FROM sessions WHERE account_id = ${row.id}`;
       await createAccountSession(row.id, response);
       return response.json({ account: accountView(row) });
     } catch (error) {
@@ -879,20 +1037,19 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.get('/api/auth/me', (request, response) => {
-    const account = currentAccount(request, SESSION_COOKIE);
+  app.get('/api/auth/me', async (request, response) => {
+    const account = await getCurrentAccountAsync(request, SESSION_COOKIE);
     return response.json({ account: account ? accountView(account) : null });
   });
 
-  app.patch('/api/auth/profile', updateRateLimit, requireAccount, (request, response) => {
+  app.patch('/api/auth/profile', updateRateLimit, requireAccount, async (request, response) => {
     const name = request.body?.name;
     if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
       return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
     }
-    db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), request.account.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
-      .get(request.account.id);
-    return response.json({ account: accountView(account) });
+    await sql`UPDATE accounts SET name = ${name.trim()} WHERE id = ${request.account.id}`;
+    const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${request.account.id}`;
+    return response.json({ account: accountView(account[0]) });
   });
 
   app.post('/api/auth/password', passwordRateLimit, requireAccount, async (request, response, next) => {
@@ -907,24 +1064,17 @@ export function createApp({ databasePath }) {
         return response.status(400).json({ error: 'New password must be different from the current password.' });
       }
 
-      const row = db.prepare('SELECT password_salt, password_hash FROM accounts WHERE id = ?').get(request.account.id);
-      const candidate = await scryptAsync(
-        currentPassword,
-        Buffer.from(row.password_salt, 'hex'),
-        PASSWORD_BYTES,
-        PASSWORD_OPTIONS,
-      );
+      const rows = await sql`SELECT password_salt, password_hash FROM accounts WHERE id = ${request.account.id}`;
+      const row = rows[0];
+      const candidate = await scryptAsync(currentPassword, Buffer.from(row.password_salt, 'hex'), PASSWORD_BYTES, PASSWORD_OPTIONS);
       if (!timingSafeEqual(candidate, Buffer.from(row.password_hash, 'hex'))) {
         return response.status(401).json({ error: 'Current password is incorrect.' });
       }
 
       const hashed = await hashPassword(newPassword);
-      withTransaction(() => {
-        db.prepare('UPDATE accounts SET password_salt = ?, password_hash = ?, must_change_password = 0 WHERE id = ?')
-          .run(hashed.salt, hashed.hash, request.account.id);
-        db.prepare('DELETE FROM sessions WHERE account_id = ?').run(request.account.id);
-        recordAudit(request, 'password.change_self', request.account.id, { role: request.account.role });
-      });
+      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash}, must_change_password = 0 WHERE id = ${request.account.id}`;
+      await sql`DELETE FROM sessions WHERE account_id = ${request.account.id}`;
+      await recordAudit(request, 'password.change_self', request.account.id, { role: request.account.role });
       await createAccountSession(request.account.id, response);
       return response.json({ ok: true });
     } catch (error) {
@@ -932,10 +1082,10 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.post('/api/auth/logout', (request, response, next) => {
+  app.post('/api/auth/logout', async (request, response, next) => {
     try {
       const token = readCookie(request, SESSION_COOKIE);
-      if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+      if (token) await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
       clearSessionCookie(response, secureCookie);
       return response.status(204).end();
     } catch (error) {
@@ -954,11 +1104,12 @@ export function createApp({ databasePath }) {
       if (error) return response.status(400).json({ error });
 
       const email = input.email.trim().toLowerCase();
-      const row = db.prepare(`
-        SELECT id, name, email, password_salt, password_hash, created_at, role, status, must_change_password
-        FROM accounts WHERE email = ? AND role = 'admin'
-      `).get(email);
+      const rows = await sql`
+        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
+        FROM accounts WHERE email = ${email} AND role = 'admin'
+      `;
 
+      const row = rows[0];
       const salt = row ? Buffer.from(row.password_salt, 'hex') : Buffer.alloc(16);
       const storedHash = row ? Buffer.from(row.password_hash, 'hex') : Buffer.alloc(PASSWORD_BYTES);
       const candidate = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
@@ -970,31 +1121,29 @@ export function createApp({ databasePath }) {
         return response.status(403).json({ error: 'This admin account is on hold.' });
       }
 
-      db.prepare('DELETE FROM sessions WHERE account_id = ? AND token_hash IN (SELECT token_hash FROM sessions WHERE account_id = ?)')
-        .run(row.id, row.id);
+      await sql`DELETE FROM sessions WHERE account_id = ${row.id}`;
       
       const token = randomBytes(32).toString('base64url');
       const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
-      db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)')
-        .run(hashToken(token), row.id, expiresAt);
+      await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${row.id}, ${expiresAt})`;
       setSessionCookie(response, token, secureCookie, ADMIN_SESSION_COOKIE);
       
-      recordAudit({ ip: request.ip }, 'admin.login', row.id, { email });
+      await recordAudit({ ip: request.ip }, 'admin.login', row.id, { email });
       return response.json({ account: accountView(row) });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.get('/api/admin/auth/me', (request, response) => {
-    const account = currentAccount(request, ADMIN_SESSION_COOKIE, true);
+  app.get('/api/admin/auth/me', async (request, response) => {
+    const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
     return response.json({ account: account ? accountView(account) : null });
   });
 
-  app.post('/api/admin/auth/logout', (request, response, next) => {
+  app.post('/api/admin/auth/logout', async (request, response, next) => {
     try {
       const token = readCookie(request, ADMIN_SESSION_COOKIE);
-      if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+      if (token) await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
       clearSessionCookie(response, secureCookie, ADMIN_SESSION_COOKIE);
       return response.status(204).end();
     } catch (error) {
@@ -1006,43 +1155,46 @@ export function createApp({ databasePath }) {
   // REFERRAL ENDPOINTS
   // =========================================================================
 
-  app.get('/api/referrals/code', requireAccount, (request, response) => {
-    const existing = db.prepare('SELECT code FROM referral_codes WHERE account_id = ? LIMIT 1')
-      .get(request.account.id);
+  app.get('/api/referrals/code', requireAccount, async (request, response) => {
+    const existing = await sql`SELECT code FROM referral_codes WHERE account_id = ${request.account.id} LIMIT 1`;
 
-    if (existing) {
-      return response.json({ code: existing.code });
+    if (existing.length > 0) {
+      return response.json({ code: existing[0].code });
     }
 
     const code = generateReferralCode();
     const id = randomBytes(16).toString('hex');
-    db.prepare(`
+    await sql`
       INSERT INTO referral_codes (id, account_id, code, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(id, request.account.id, code, new Date().toISOString());
+      VALUES (${id}, ${request.account.id}, ${code}, ${new Date().toISOString()})
+    `;
 
     return response.status(201).json({ code });
   });
 
-  app.get('/api/referrals/tier-progression', requireAccount, (request, response) => {
-    const progression = getTierProgression(db, request.account.id);
+  app.get('/api/referrals/tier-progression', requireAccount, async (request, response) => {
+    const progression = await getTierProgression(sql, request.account.id);
     return response.json(progression);
   });
 
-  app.get('/api/referrals/earned-rewards', requireAccount, (request, response) => {
-    const rewards = db.prepare(`
+  app.get('/api/referrals/earned-rewards', requireAccount, async (request, response) => {
+    const rewards = await sql`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
         physical_reward_value_cents, direct_referrals_at_award, 
         team_total_at_award, credited_at
       FROM referral_tier_rewards
-      WHERE referrer_id = ?
+      WHERE referrer_id = ${request.account.id}
       ORDER BY tier_index ASC
-    `).all(request.account.id);
+    `;
+
+    const directCount = await getDirectReferralCount(sql, request.account.id);
+    const teamTotal = await getTeamTotal(sql, request.account.id);
+    const totalRewardsUSD = rewards.reduce((sum, r) => sum + r.reward_cents / 100, 0);
 
     return response.json({
-      directReferrals: getDirectReferralCount(db, request.account.id),
-      teamTotal: getTeamTotal(db, request.account.id),
-      totalRewardsUSD: rewards.reduce((sum, r) => sum + r.reward_cents / 100, 0),
+      directReferrals: directCount,
+      teamTotal,
+      totalRewardsUSD,
       rewards: rewards.map(r => ({
         tierIndex: r.tier_index,
         tierName: r.tier_name,
@@ -1055,38 +1207,40 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/referrals/stats', requireAccount, (request, response) => {
+  app.get('/api/referrals/stats', requireAccount, async (request, response) => {
     try {
-      const directStats = db.prepare(`
+      const directStats = await sql`
         SELECT COUNT(*) AS direct_count,
           COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
         FROM referral_signups rs
         LEFT JOIN accounts a ON a.id = rs.referred_account_id
         LEFT JOIN transactions t ON t.account_id = a.id
-        WHERE rs.referrer_id = ?
-      `).get(request.account.id);
+        WHERE rs.referrer_id = ${request.account.id}
+      `;
 
-      const commissionStats = db.prepare(`
+      const commissionStats = await sql`
         SELECT COUNT(*) AS commission_count,
           COALESCE(SUM(commission_cents), 0) AS total_commission_cents
         FROM referral_commissions
-        WHERE referrer_id = ?
-      `).get(request.account.id);
+        WHERE referrer_id = ${request.account.id}
+      `;
 
-      const directCount = directStats?.direct_count || 0;
-      const teamTotal = getTeamTotal(db, request.account.id) || 0;
+      const directCount = directStats[0]?.direct_count || 0;
+      const teamTotal = await getTeamTotal(sql, request.account.id);
       const tier = getTierByProgress(directCount, teamTotal);
       const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
       const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
 
+      const referralCode = await sql`SELECT code FROM referral_codes WHERE account_id = ${request.account.id}`;
+
       return response.json({
-        referralCode: db.prepare('SELECT code FROM referral_codes WHERE account_id = ?').get(request.account.id)?.code || null,
+        referralCode: referralCode[0]?.code || null,
         tier: tierName,
         commissionRate: commissionRate,
         directReferrals: directCount,
-        directVolume: (directStats?.direct_volume || 0) / 100,
-        commissionsEarned: commissionStats?.commission_count || 0,
-        totalEarnings: (commissionStats?.total_commission_cents || 0) / 100,
+        directVolume: (directStats[0]?.direct_volume || 0) / 100,
+        commissionsEarned: commissionStats[0]?.commission_count || 0,
+        totalEarnings: (commissionStats[0]?.total_commission_cents || 0) / 100,
         teamTotal: teamTotal,
       });
     } catch (error) {
@@ -1095,8 +1249,8 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.get('/api/referrals/list', requireAccount, (request, response) => {
-    const referrals = db.prepare(`
+  app.get('/api/referrals/list', requireAccount, async (request, response) => {
+    const referrals = await sql`
       SELECT
         rs.id,
         a.id AS account_id,
@@ -1107,11 +1261,11 @@ export function createApp({ databasePath }) {
       FROM referral_signups rs
       JOIN accounts a ON a.id = rs.referred_account_id
       LEFT JOIN transactions t ON t.account_id = a.id
-      WHERE rs.referrer_id = ?
-      GROUP BY a.id
+      WHERE rs.referrer_id = ${request.account.id}
+      GROUP BY a.id, rs.id, rs.signed_up_at
       ORDER BY rs.signed_up_at DESC
       LIMIT 100
-    `).all(request.account.id);
+    `;
 
     return response.json({
       referrals: referrals.map(r => ({
@@ -1124,12 +1278,54 @@ export function createApp({ databasePath }) {
     });
   });
 
+  app.get('/api/referrals/weekly-salary', requireAccount, async (request, response) => {
+    const directCount = await getDirectReferralCount(sql, request.account.id);
+    const teamTotal = await getTeamTotal(sql, request.account.id);
+    const tier = getTierByProgress(directCount, teamTotal);
+
+    if (tier < 1) {
+      return response.json({
+        tier: null,
+        weeklySalary: 0,
+        message: 'Star 2 tier and above receive weekly salaries.',
+        directCount,
+        teamTotal,
+      });
+    }
+
+    const tierName = TIER_NAMES[tier];
+    const weeklySalary = TIER_SALARIES[tier];
+
+    const payments = await sql`
+      SELECT id, tier_name, salary_cents, payment_week, credited_at
+      FROM weekly_salary_payments
+      WHERE account_id = ${request.account.id}
+      ORDER BY payment_week DESC
+      LIMIT 12
+    `;
+
+    const totalEarned = payments.reduce((sum, p) => sum + (p.salary_cents / 100), 0);
+
+    return response.json({
+      tier: tierName,
+      weeklySalary,
+      directCount,
+      teamTotal,
+      totalEarned,
+      recentPayments: payments.map(p => ({
+        week: p.payment_week,
+        amount: p.salary_cents / 100,
+        creditedAt: p.credited_at,
+      })),
+    });
+  });
+
   // =========================================================================
   // TRADING ENDPOINTS
   // =========================================================================
 
-  app.get('/api/trading/history', requireAccount, (request, response) => {
-    const profits = db.prepare(`
+  app.get('/api/trading/history', requireAccount, async (request, response) => {
+    const profits = await sql`
       SELECT
         tl.id,
         tl.profit_cents,
@@ -1139,10 +1335,10 @@ export function createApp({ databasePath }) {
         t.created_at AS deposit_date
       FROM trading_ledger tl
       JOIN transactions t ON t.id = tl.deposit_transaction_id
-      WHERE tl.account_id = ?
+      WHERE tl.account_id = ${request.account.id}
       ORDER BY tl.profit_date DESC
       LIMIT 365
-    `).all(request.account.id);
+    `;
 
     const totalProfit = profits.reduce((sum, p) => sum + (p.profit_cents / 100), 0);
     const totalProfitDays = new Set(profits.map(p => p.profit_date)).size;
@@ -1164,7 +1360,7 @@ export function createApp({ databasePath }) {
   // TRANSACTION ENDPOINTS
   // =========================================================================
 
-  app.post('/api/transactions', updateRateLimit, requireAccount, (request, response, next) => {
+  app.post('/api/transactions', updateRateLimit, requireAccount, async (request, response, next) => {
     try {
       if (request.account.role === 'admin') {
         return response.status(403).json({ error: 'Administrator accounts cannot request transactions.' });
@@ -1187,56 +1383,79 @@ export function createApp({ databasePath }) {
       }
 
       if (input.type === 'withdrawal') {
-        const available = approvedBalanceCents(request.account.id) - pendingWithdrawalsCents(request.account.id);
+        const available = await approvedBalanceCents(request.account.id) - await pendingWithdrawalsCents(request.account.id);
         if (amountCents > available) {
           return response.status(409).json({ error: 'Withdrawal exceeds your available balance.' });
         }
       } else {
-        const duplicate = db.prepare(`
+        const duplicate = await sql`
           SELECT id FROM transactions
-          WHERE type = 'deposit' AND reference = ? COLLATE NOCASE AND status IN ('pending', 'approved')
-        `).get(reference);
-        if (duplicate) {
+          WHERE type = 'deposit' AND reference = ${reference} AND status IN ('pending', 'approved')
+        `;
+        if (duplicate.length > 0) {
           return response.status(409).json({ error: 'A deposit with this reference was already submitted.' });
         }
       }
 
       const id = randomBytes(16).toString('hex');
-      db.prepare(`
+      const now = new Date().toISOString();
+      
+      await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?)
-      `).run(id, request.account.id, input.type, amountCents, reference, new Date().toISOString());
+        VALUES (${id}, ${request.account.id}, ${input.type}, ${amountCents}, ${reference}, 'pending', ${now})
+      `;
 
-      return response.status(201).json({ transaction: transactionView(getTransaction(id)) });
+      if (input.type === 'deposit') {
+        await sql`UPDATE accounts SET last_deposit_time = ${now} WHERE id = ${request.account.id}`;
+      }
+
+      const transaction = await getTransaction(id);
+      return response.status(201).json({ transaction: transactionView(transaction) });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.get('/api/transactions', requireAccount, (request, response) => {
-    const rows = db.prepare(`
+  app.get('/api/transactions', requireAccount, async (request, response) => {
+    const rows = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id
-      WHERE t.account_id = ?
+      WHERE t.account_id = ${request.account.id}
       ORDER BY t.created_at DESC
       LIMIT 100
-    `).all(request.account.id);
+    `;
+
+    const accountRow = await sql`SELECT last_deposit_time FROM accounts WHERE id = ${request.account.id}`;
+    const lastDepositTime = accountRow[0]?.last_deposit_time || null;
+    const earningsStatus = calculateEarningsStatus(lastDepositTime);
+
+    let dailyIncome = 0;
+    if (earningsStatus.earningsActive && lastDepositTime) {
+      const balance = await approvedBalanceCents(request.account.id) / 100;
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === balance);
+      dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
+    }
+
     return response.json({
-      balance: approvedBalanceCents(request.account.id) / 100,
-      pendingWithdrawals: pendingWithdrawalsCents(request.account.id) / 100,
+      balance: await approvedBalanceCents(request.account.id) / 100,
+      pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
       transactions: rows.map((row) => transactionView(row)),
+      lastDepositTime,
+      earningsActive: earningsStatus.earningsActive,
+      earningsStartTime: earningsStatus.earningsStartTime,
+      dailyIncome,
     });
   });
 
   // =========================================================================
-  // ADMIN ENDPOINTS
+  // ADMIN ENDPOINTS (Converted to async)
   // =========================================================================
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
-  app.get('/api/admin/accounts', adminLimiter, requireAdminSession, (request, response) => {
-    const accounts = db.prepare(`
+  app.get('/api/admin/accounts', adminLimiter, requireAdminSession, async (request, response) => {
+    const accounts = await sql`
       SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
         COALESCE((
           SELECT SUM(CASE WHEN t.type = 'deposit' THEN t.amount_cents ELSE -t.amount_cents END)
@@ -1247,80 +1466,83 @@ export function createApp({ databasePath }) {
       FROM accounts a
       ORDER BY a.created_at DESC
       LIMIT 100
-    `).all().map((row) => ({
-      ...accountView(row),
-      holdReason: row.hold_reason ?? null,
-      heldAt: row.held_at ?? null,
-      balance: row.balance_cents / 100,
-      pendingTransactions: row.pending_count,
-    }));
-    return response.json({ accounts });
+    `;
+
+    return response.json({ 
+      accounts: accounts.map((row) => ({
+        ...accountView(row),
+        holdReason: row.hold_reason ?? null,
+        heldAt: row.held_at ?? null,
+        balance: row.balance_cents / 100,
+        pendingTransactions: row.pending_count,
+      }))
+    });
   });
 
-  app.patch('/api/admin/accounts/:id/profile', adminLimiter, requireAdminSession, (request, response) => {
+  app.patch('/api/admin/accounts/:id/profile', adminLimiter, requireAdminSession, async (request, response) => {
     const name = request.body?.name;
     if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
       return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
     }
 
-    const target = db.prepare('SELECT id, role FROM accounts WHERE id = ?').get(request.params.id);
-    if (!target) return response.status(404).json({ error: 'Member account not found.' });
-    if (target.role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
+    const target = await sql`SELECT id, role FROM accounts WHERE id = ${request.params.id}`;
+    if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+    if (target[0].role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
 
-    db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(name.trim(), target.id);
-    const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
-    return response.json({ account: accountView(account) });
+    await sql`UPDATE accounts SET name = ${name.trim()} WHERE id = ${target[0].id}`;
+    const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
+    return response.json({ account: accountView(account[0]) });
   });
 
-  app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAdminSession, (request, response) => {
-    const account = db.prepare(`
+  app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await sql`
       SELECT id, name, email, created_at, role, status, hold_reason, held_at
-      FROM accounts WHERE id = ?
-    `).get(request.params.id);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
+      FROM accounts WHERE id = ${request.params.id}
+    `;
+    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
 
-    const totals = db.prepare(`
+    const totals = await sql`
       SELECT
         COALESCE(SUM(CASE WHEN status = 'approved' AND type = 'deposit' THEN amount_cents END), 0) AS deposited,
         COALESCE(SUM(CASE WHEN status = 'approved' AND type = 'withdrawal' THEN amount_cents END), 0) AS withdrawn,
         COALESCE(SUM(CASE WHEN status = 'pending' AND type = 'deposit' THEN amount_cents END), 0) AS pending_deposits,
         COALESCE(SUM(CASE WHEN status = 'pending' AND type = 'withdrawal' THEN amount_cents END), 0) AS pending_withdrawals,
         COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 END), 0) AS rejected_count
-      FROM transactions WHERE account_id = ?
-    `).get(account.id);
+      FROM transactions WHERE account_id = ${request.params.id}
+    `;
 
-    const recent = db.prepare(`
+    const recent = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id
-      WHERE t.account_id = ?
+      WHERE t.account_id = ${request.params.id}
       ORDER BY t.created_at DESC
       LIMIT 50
-    `).all(account.id);
+    `;
 
     return response.json({
       account: {
-        ...accountView(account),
-        holdReason: account.hold_reason ?? null,
-        heldAt: account.held_at ?? null,
+        ...accountView(account[0]),
+        holdReason: account[0].hold_reason ?? null,
+        heldAt: account[0].held_at ?? null,
       },
       summary: {
-        balance: (totals.deposited - totals.withdrawn) / 100,
-        totalDeposited: totals.deposited / 100,
-        totalWithdrawn: totals.withdrawn / 100,
-        pendingDeposits: totals.pending_deposits / 100,
-        pendingWithdrawals: totals.pending_withdrawals / 100,
-        rejectedCount: totals.rejected_count,
+        balance: (totals[0].deposited - totals[0].withdrawn) / 100,
+        totalDeposited: totals[0].deposited / 100,
+        totalWithdrawn: totals[0].withdrawn / 100,
+        pendingDeposits: totals[0].pending_deposits / 100,
+        pendingWithdrawals: totals[0].pending_withdrawals / 100,
+        rejectedCount: totals[0].rejected_count,
       },
       transactions: recent.map((row) => transactionView(row, { admin: true })),
     });
   });
 
-  app.patch('/api/admin/accounts/:id', adminLimiter, requireAdminSession, (request, response, next) => {
+  app.patch('/api/admin/accounts/:id', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
-      const target = db.prepare('SELECT id, name, email, role, status FROM accounts WHERE id = ?').get(request.params.id);
-      if (!target) return response.status(404).json({ error: 'Account not found.' });
-      if (target.role === 'admin') return response.status(403).json({ error: 'Cannot edit administrator accounts.' });
+      const target = await sql`SELECT id, name, email, role, status FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Account not found.' });
+      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot edit administrator accounts.' });
 
       const name = request.body?.name;
       const email = request.body?.email;
@@ -1334,46 +1556,38 @@ export function createApp({ databasePath }) {
         return response.status(400).json({ error: 'Enter a valid email address.' });
       }
 
-      // Check if new email is already in use
-      if (cleanEmail !== target.email) {
-        const existing = db.prepare('SELECT id FROM accounts WHERE email = ? AND id != ?').get(cleanEmail, target.id);
-        if (existing) return response.status(409).json({ error: 'This email is already in use.' });
+      if (cleanEmail !== target[0].email) {
+        const existing = await sql`SELECT id FROM accounts WHERE email = ${cleanEmail} AND id != ${target[0].id}`;
+        if (existing.length > 0) return response.status(409).json({ error: 'This email is already in use.' });
       }
 
-      withTransaction(() => {
-        db.prepare('UPDATE accounts SET name = ?, email = ? WHERE id = ?')
-          .run(name.trim(), cleanEmail, target.id);
-        recordAudit(request, 'account.edit', target.id, {
-          email: target.email,
-          newName: name.trim(),
-          newEmail: cleanEmail,
-        });
+      await sql`UPDATE accounts SET name = ${name.trim()}, email = ${cleanEmail} WHERE id = ${target[0].id}`;
+      await recordAudit(request, 'account.edit', target[0].id, {
+        email: target[0].email,
+        newName: name.trim(),
+        newEmail: cleanEmail,
       });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?')
-        .get(target.id);
-      return response.json({ account: accountView(account) });
+      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
+      return response.json({ account: accountView(account[0]) });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.delete('/api/admin/accounts/:id', adminLimiter, requireAdminSession, (request, response, next) => {
+  app.delete('/api/admin/accounts/:id', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const confirm = request.body?.confirm;
       if (confirm !== 'DELETE') {
         return response.status(400).json({ error: 'Confirmation required to delete account.' });
       }
 
-      const target = db.prepare('SELECT id, email, role FROM accounts WHERE id = ?').get(request.params.id);
-      if (!target) return response.status(404).json({ error: 'Account not found.' });
-      if (target.role === 'admin') return response.status(403).json({ error: 'Cannot delete administrator accounts.' });
+      const target = await sql`SELECT id, email, role FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Account not found.' });
+      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot delete administrator accounts.' });
 
-      withTransaction(() => {
-        // Cascade deletes are handled by foreign keys
-        db.prepare('DELETE FROM accounts WHERE id = ?').run(target.id);
-        recordAudit(request, 'account.delete', target.id, { email: target.email });
-      });
+      await sql`DELETE FROM accounts WHERE id = ${target[0].id}`;
+      await recordAudit(request, 'account.delete', target[0].id, { email: target[0].email });
 
       return response.status(204).end();
     } catch (error) {
@@ -1381,42 +1595,36 @@ export function createApp({ databasePath }) {
     }
   });
 
-  app.get('/api/admin/transactions', adminLimiter, requireAdminSession, (request, response) => {
+  app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
     const { status, type, accountId } = request.query;
-    const where = [];
-    const params = [];
+    let query = sql`SELECT t.*, a.name AS account_name, a.email AS account_email FROM transactions t JOIN accounts a ON a.id = t.account_id`;
+    const filters = [];
 
     if (status !== undefined) {
       if (!TX_STATUSES.includes(status)) return response.status(400).json({ error: 'Invalid status filter.' });
-      where.push('t.status = ?');
-      params.push(status);
+      filters.push(sql`t.status = ${status}`);
     }
     if (type !== undefined) {
       if (!TX_TYPES.slice(0, 2).includes(type)) return response.status(400).json({ error: 'Invalid type filter.' });
-      where.push('t.type = ?');
-      params.push(type);
+      filters.push(sql`t.type = ${type}`);
     }
     if (accountId !== undefined) {
       if (typeof accountId !== 'string' || accountId.length === 0 || accountId.length > 64) {
         return response.status(400).json({ error: 'Invalid account filter.' });
       }
-      where.push('t.account_id = ?');
-      params.push(accountId);
+      filters.push(sql`t.account_id = ${accountId}`);
     }
 
-    const rows = db.prepare(`
-      SELECT t.*, a.name AS account_name, a.email AS account_email
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY t.created_at DESC
-      LIMIT 200
-    `).all(...params);
+    const rows = await (filters.length > 0 
+      ? sql`${query} WHERE ${sql.join(filters, sql` AND `)} ORDER BY t.created_at DESC LIMIT 200`
+      : sql`${query} ORDER BY t.created_at DESC LIMIT 200`
+    );
+
     return response.json({ transactions: rows.map((row) => transactionView(row, { admin: true })) });
   });
 
   function reviewTransaction(decision) {
-    return (request, response, next) => {
+    return async (request, response, next) => {
       try {
         const note = request.body?.note == null ? '' : cleanText(request.body.note, { min: 0, max: 300 });
         if (note === null) return response.status(400).json({ error: 'Note must be at most 300 characters.' });
@@ -1424,7 +1632,7 @@ export function createApp({ databasePath }) {
           return response.status(400).json({ error: 'A reason is required to reject a transaction.' });
         }
 
-        const tx = getTransaction(request.params.id);
+        const tx = await getTransaction(request.params.id);
         if (!tx) return response.status(404).json({ error: 'Transaction not found.' });
         if (tx.status !== 'pending') {
           return response.status(409).json({ error: `Transaction is already ${tx.status}.` });
@@ -1433,94 +1641,91 @@ export function createApp({ databasePath }) {
           if (tx.account_id === request.account.id) {
             return response.status(403).json({ error: 'You cannot approve your own transaction.' });
           }
-          const owner = db.prepare('SELECT status FROM accounts WHERE id = ?').get(tx.account_id);
-          if (owner.status === 'held') {
+          const owner = await sql`SELECT status FROM accounts WHERE id = ${tx.account_id}`;
+          if (owner[0].status === 'held') {
             return response.status(409).json({ error: 'This account is on hold. Release it before approving.' });
           }
-          if (tx.type === 'withdrawal' && approvedBalanceCents(tx.account_id) < tx.amount_cents) {
+          if (tx.type === 'withdrawal' && await approvedBalanceCents(tx.account_id) < tx.amount_cents) {
             return response.status(409).json({ error: 'Insufficient approved balance for this withdrawal.' });
           }
         }
 
-        withTransaction(() => {
-          db.prepare(`
-            UPDATE transactions
-            SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?
-            WHERE id = ? AND status = 'pending'
-          `).run(decision, request.account.id, new Date().toISOString(), note, tx.id);
-          recordAudit(request, `transaction.${decision}`, tx.id, {
-            type: tx.type,
-            amount: tx.amount_cents / 100,
-            accountId: tx.account_id,
-            accountEmail: tx.account_email,
-            note,
-          });
+        await sql`
+          UPDATE transactions
+          SET status = ${decision}, reviewed_by = ${request.account.id}, reviewed_at = ${new Date().toISOString()}, review_note = ${note}
+          WHERE id = ${tx.id} AND status = 'pending'
+        `;
 
-          // Apply referral commission and tier rewards if deposit is approved
-          if (decision === 'approved' && tx.type === 'deposit') {
-            const commission = applyReferralCommission(tx.id);
-            if (commission) {
-              recordAudit(request, 'referral.commission_earned', tx.account_id, {
-                amount: commission.amount,
-                commissionId: commission.commissionId,
-                type: commission.bonusType,
-                beneficiary: commission.beneficiaryId === tx.account_id ? 'member_self' : 'referrer',
-              });
+        await recordAudit(request, `transaction.${decision}`, tx.id, {
+          type: tx.type,
+          amount: tx.amount_cents / 100,
+          accountId: tx.account_id,
+          accountEmail: tx.account_email,
+          note,
+        });
+
+        if (decision === 'approved' && tx.type === 'deposit') {
+          const commission = await applyReferralCommission(tx.id);
+          if (commission) {
+            await recordAudit(request, 'referral.commission_earned', tx.account_id, {
+              amount: commission.amount,
+              commissionId: commission.commissionId,
+              type: commission.bonusType,
+              beneficiary: commission.beneficiaryId === tx.account_id ? 'member_self' : 'referrer',
+            });
+          }
+
+          const referralSignup = await sql`
+            SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${tx.account_id} LIMIT 1
+          `;
+
+          if (referralSignup.length > 0 && referralSignup[0].referrer_id) {
+            const directCount = await getDirectReferralCount(sql, referralSignup[0].referrer_id);
+            const teamTotal = await getTeamTotal(sql, referralSignup[0].referrer_id);
+            const tier = getTierByProgress(directCount, teamTotal);
+            
+            if (tier >= 0) {
+              const tierReward = await checkAndCreditTierReward(sql, referralSignup[0].referrer_id);
+              if (tierReward) {
+                await recordAudit(request, 'referral.tier_reward_credited', referralSignup[0].referrer_id, {
+                  tierIndex: tierReward.tierId,
+                  tierName: tierReward.tierName,
+                  amountUSD: tierReward.amountCents / 100,
+                  directCount,
+                  teamTotal,
+                  triggeredBy: tx.account_id,
+                });
+              }
             }
 
-            // Check and credit tier rewards for the referrer
-            const referralSignup = db.prepare(`
-              SELECT referrer_id FROM referral_signups WHERE referred_account_id = ? LIMIT 1
-            `).get(tx.account_id);
-
-            if (referralSignup?.referrer_id) {
-              const directCount = getDirectReferralCount(db, referralSignup.referrer_id);
-              const teamTotal = getTeamTotal(db, referralSignup.referrer_id);
-              const tier = getTierByProgress(directCount, teamTotal);
+            const grandParentSignup = await sql`
+              SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${referralSignup[0].referrer_id}
+            `;
+            
+            if (grandParentSignup.length > 0 && grandParentSignup[0].referrer_id) {
+              const grandDirect = await getDirectReferralCount(sql, grandParentSignup[0].referrer_id);
+              const grandTeam = await getTeamTotal(sql, grandParentSignup[0].referrer_id);
+              const grandTier = getTierByProgress(grandDirect, grandTeam);
               
-              if (tier >= 0) {
-                const tierReward = checkAndCreditTierReward(db, referralSignup.referrer_id);
-                if (tierReward) {
-                  recordAudit(request, 'referral.tier_reward_credited', referralSignup.referrer_id, {
-                    tierIndex: tierReward.tierId,
-                    tierName: tierReward.tierName,
-                    amountUSD: tierReward.amountCents / 100,
-                    directCount,
-                    teamTotal,
+              if (grandTier >= 0) {
+                const grandParentTierReward = await checkAndCreditTierReward(sql, grandParentSignup[0].referrer_id);
+                if (grandParentTierReward) {
+                  await recordAudit(request, 'referral.tier_reward_credited', grandParentSignup[0].referrer_id, {
+                    tierIndex: grandParentTierReward.tierId,
+                    tierName: grandParentTierReward.tierName,
+                    amountUSD: grandParentTierReward.amountCents / 100,
+                    directCount: grandDirect,
+                    teamTotal: grandTeam,
                     triggeredBy: tx.account_id,
                   });
                 }
               }
-
-              // Also check tier rewards for the grandparent (referrer's referrer)
-              const grandParentSignup = db.prepare(`
-                SELECT referrer_id FROM referral_signups WHERE referred_account_id = ?
-              `).get(referralSignup.referrer_id);
-              
-              if (grandParentSignup?.referrer_id) {
-                const grandDirect = getDirectReferralCount(db, grandParentSignup.referrer_id);
-                const grandTeam = getTeamTotal(db, grandParentSignup.referrer_id);
-                const grandTier = getTierByProgress(grandDirect, grandTeam);
-                
-                if (grandTier >= 0) {
-                  const grandParentTierReward = checkAndCreditTierReward(db, grandParentSignup.referrer_id);
-                  if (grandParentTierReward) {
-                    recordAudit(request, 'referral.tier_reward_credited', grandParentSignup.referrer_id, {
-                      tierIndex: grandParentTierReward.tierId,
-                      tierName: grandParentTierReward.tierName,
-                      amountUSD: grandParentTierReward.amountCents / 100,
-                      directCount: grandDirect,
-                      teamTotal: grandTeam,
-                      triggeredBy: tx.account_id,
-                    });
-                  }
-                }
-              }
             }
           }
-        });
+        }
 
-        return response.json({ transaction: transactionView(getTransaction(tx.id), { admin: true }) });
+        const updated = await getTransaction(tx.id);
+        return response.json({ transaction: transactionView(updated, { admin: true }) });
       } catch (error) {
         return next(error);
       }
@@ -1530,48 +1735,42 @@ export function createApp({ databasePath }) {
   app.post('/api/admin/transactions/:id/approve', adminLimiter, requireAdminSession, reviewTransaction('approved'));
   app.post('/api/admin/transactions/:id/reject', adminLimiter, requireAdminSession, reviewTransaction('rejected'));
 
-  app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAdminSession, (request, response, next) => {
+  app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const reason = cleanText(request.body?.reason, { min: 3, max: 300 });
       if (reason === null) {
         return response.status(400).json({ error: 'A hold reason of 3-300 characters is required.' });
       }
-      const target = db.prepare('SELECT id, email, role, status FROM accounts WHERE id = ?').get(request.params.id);
-      if (!target) return response.status(404).json({ error: 'Member account not found.' });
-      if (target.role === 'admin') return response.status(403).json({ error: 'Administrator accounts cannot be put on hold.' });
-      if (target.status === 'held') return response.status(409).json({ error: 'Account is already on hold.' });
+      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+      if (target[0].role === 'admin') return response.status(403).json({ error: 'Administrator accounts cannot be put on hold.' });
+      if (target[0].status === 'held') return response.status(409).json({ error: 'Account is already on hold.' });
 
-      withTransaction(() => {
-        db.prepare("UPDATE accounts SET status = 'held', hold_reason = ?, held_at = ? WHERE id = ?")
-          .run(reason, new Date().toISOString(), target.id);
-        db.prepare('DELETE FROM sessions WHERE account_id = ?').run(target.id);
-        recordAudit(request, 'account.hold', target.id, { email: target.email, reason });
-      });
+      await sql`UPDATE accounts SET status = 'held', hold_reason = ${reason}, held_at = ${new Date().toISOString()} WHERE id = ${target[0].id}`;
+      await sql`DELETE FROM sessions WHERE account_id = ${target[0].id}`;
+      await recordAudit(request, 'account.hold', target[0].id, { email: target[0].email, reason });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
-      return response.json({ account: accountView(account) });
+      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
+      return response.json({ account: accountView(account[0]) });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.post('/api/admin/accounts/:id/release', adminLimiter, requireAdminSession, (request, response, next) => {
+  app.post('/api/admin/accounts/:id/release', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const note = request.body?.note == null ? '' : cleanText(request.body.note, { min: 0, max: 300 });
       if (note === null) return response.status(400).json({ error: 'Note must be at most 300 characters.' });
 
-      const target = db.prepare('SELECT id, email, role, status FROM accounts WHERE id = ?').get(request.params.id);
-      if (!target) return response.status(404).json({ error: 'Member account not found.' });
-      if (target.status !== 'held') return response.status(409).json({ error: 'Account is not on hold.' });
+      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+      if (target[0].status !== 'held') return response.status(409).json({ error: 'Account is not on hold.' });
 
-      withTransaction(() => {
-        db.prepare("UPDATE accounts SET status = 'active', hold_reason = NULL, held_at = NULL WHERE id = ?")
-          .run(target.id);
-        recordAudit(request, 'account.release', target.id, { email: target.email, note });
-      });
+      await sql`UPDATE accounts SET status = 'active', hold_reason = NULL, held_at = NULL WHERE id = ${target[0].id}`;
+      await recordAudit(request, 'account.release', target[0].id, { email: target[0].email, note });
 
-      const account = db.prepare('SELECT id, name, email, created_at, role, status, must_change_password FROM accounts WHERE id = ?').get(target.id);
-      return response.json({ account: accountView(account) });
+      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
+      return response.json({ account: accountView(account[0]) });
     } catch (error) {
       return next(error);
     }
@@ -1582,41 +1781,38 @@ export function createApp({ databasePath }) {
       const newError = passwordError(request.body?.newPassword);
       if (newError) return response.status(400).json({ error: newError });
 
-      const target = db.prepare('SELECT id, email, role FROM accounts WHERE id = ?').get(request.params.id);
-      if (!target) return response.status(404).json({ error: 'Member account not found.' });
-      if (target.role === 'admin') {
+      const target = await sql`SELECT id, email, role FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+      if (target[0].role === 'admin') {
         return response.status(403).json({ error: 'Administrator passwords can only be changed by that administrator.' });
       }
 
       const hashed = await hashPassword(request.body.newPassword);
-      withTransaction(() => {
-        db.prepare('UPDATE accounts SET password_salt = ?, password_hash = ? WHERE id = ?')
-          .run(hashed.salt, hashed.hash, target.id);
-        db.prepare('DELETE FROM sessions WHERE account_id = ?').run(target.id);
-        recordAudit(request, 'password.reset_by_admin', target.id, { email: target.email });
-      });
+      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash} WHERE id = ${target[0].id}`;
+      await sql`DELETE FROM sessions WHERE account_id = ${target[0].id}`;
+      await recordAudit(request, 'password.reset_by_admin', target[0].id, { email: target[0].email });
       return response.json({ ok: true });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAdminSession, (request, response) => {
-    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
+  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
+    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
 
-    const progression = getTierProgression(db, account.id);
-    const rewards = db.prepare(`
+    const progression = await getTierProgression(sql, request.params.accountId);
+    const rewards = await sql`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
         physical_reward_value_cents, direct_referrals_at_award, 
         team_total_at_award, credited_at, transaction_id
       FROM referral_tier_rewards
-      WHERE referrer_id = ?
+      WHERE referrer_id = ${request.params.accountId}
       ORDER BY tier_index ASC
-    `).all(account.id);
+    `;
 
     return response.json({
-      account: { id: account.id, name: account.name, email: account.email },
+      account: { id: account[0].id, name: account[0].name, email: account[0].email },
       directReferrals: progression.directReferrals,
       teamTotal: progression.teamTotal,
       currentTier: progression.currentTierName,
@@ -1633,16 +1829,16 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAdminSession, (request, response) => {
-    const account = db.prepare('SELECT id, name, email FROM accounts WHERE id = ?').get(request.params.accountId);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
+  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
+    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
 
-    const directStats = db.prepare(`
+    const directStats = await sql`
       SELECT COUNT(*) AS direct_count
-      FROM referral_signups WHERE referrer_id = ?
-    `).get(account.id);
+      FROM referral_signups WHERE referrer_id = ${request.params.accountId}
+    `;
 
-    const commissions = db.prepare(`
+    const commissions = await sql`
       SELECT
         rc.id,
         rc.commission_cents,
@@ -1655,17 +1851,17 @@ export function createApp({ databasePath }) {
       FROM referral_commissions rc
       JOIN accounts a ON a.id = rc.referred_account_id
       JOIN transactions t ON t.id = rc.transaction_id
-      WHERE rc.referrer_id = ?
+      WHERE rc.referrer_id = ${request.params.accountId}
       ORDER BY rc.created_at DESC
       LIMIT 100
-    `).all(account.id);
+    `;
 
-    const directCount = directStats.direct_count;
-    const teamTotal = getTeamTotal(db, account.id);
+    const directCount = directStats[0].direct_count;
+    const teamTotal = await getTeamTotal(sql, request.params.accountId);
     const tier = getTierByProgress(directCount, teamTotal);
 
     return response.json({
-      account: { id: account.id, name: account.name, email: account.email },
+      account: { id: account[0].id, name: account[0].name, email: account[0].email },
       tier: tier >= 0 ? TIER_NAMES[tier] : null,
       directReferrals: directCount,
       teamTotal,
@@ -1682,18 +1878,15 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/audit', adminLimiter, requireAdminSession, (request, response) => {
+  app.get('/api/admin/audit', adminLimiter, requireAdminSession, async (request, response) => {
     const { action } = request.query;
     if (action !== undefined && (typeof action !== 'string' || action.length === 0 || action.length > 64)) {
       return response.status(400).json({ error: 'Invalid action filter.' });
     }
-    const rows = db.prepare(`
-      SELECT id, actor_id, actor_email, action, target_id, detail, ip, created_at
-      FROM audit_log
-      ${action ? 'WHERE action = ?' : ''}
-      ORDER BY id DESC
-      LIMIT 200
-    `).all(...(action ? [action] : []));
+    const rows = await (action
+      ? sql`SELECT id, actor_id, actor_email, action, target_id, detail, ip, created_at FROM audit_log WHERE action = ${action} ORDER BY id DESC LIMIT 200`
+      : sql`SELECT id, actor_id, actor_email, action, target_id, detail, ip, created_at FROM audit_log ORDER BY id DESC LIMIT 200`
+    );
     return response.json({
       entries: rows.map((row) => ({
         id: row.id,
@@ -1708,9 +1901,9 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.get('/api/admin/trading/ledger', adminLimiter, requireAdminSession, (request, response) => {
+  app.get('/api/admin/trading/ledger', adminLimiter, requireAdminSession, async (request, response) => {
     const { accountId } = request.query;
-    let sql = `
+    let query = sql`
       SELECT
         tl.id,
         tl.account_id,
@@ -1724,16 +1917,12 @@ export function createApp({ databasePath }) {
       JOIN accounts a ON a.id = tl.account_id
       JOIN transactions t ON t.id = tl.deposit_transaction_id
     `;
-    const params = [];
 
     if (accountId) {
-      sql += ' WHERE tl.account_id = ?';
-      params.push(accountId);
+      query = sql`${query} WHERE tl.account_id = ${accountId}`;
     }
 
-    sql += ' ORDER BY tl.profit_date DESC LIMIT 500';
-
-    const rows = db.prepare(sql).all(...params);
+    const rows = await sql`${query} ORDER BY tl.profit_date DESC LIMIT 500`;
     const totalProfit = rows.reduce((sum, r) => sum + (r.profit_cents / 100), 0);
 
     return response.json({
@@ -1752,11 +1941,71 @@ export function createApp({ databasePath }) {
     });
   });
 
-  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAdminSession, (request, response, next) => {
+  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
-      applyDailyTradingProfits();
-      recordAudit(request, 'admin.trading_profits_applied', null, {});
+      await applyDailyTradingProfits();
+      await recordAudit(request, 'admin.trading_profits_applied', null, {});
       return response.json({ ok: true, message: 'Daily trading profits applied.' });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/admin/salary/ledger', adminLimiter, requireAdminSession, async (request, response) => {
+    const { accountId, tier } = request.query;
+    let query = sql`
+      SELECT
+        wsp.id,
+        wsp.account_id,
+        wsp.tier_name,
+        wsp.salary_cents,
+        wsp.payment_week,
+        wsp.credited_at,
+        a.name AS account_name,
+        a.email AS account_email
+      FROM weekly_salary_payments wsp
+      JOIN accounts a ON a.id = wsp.account_id
+    `;
+    const filters = [];
+
+    if (accountId) {
+      filters.push(sql`wsp.account_id = ${accountId}`);
+    }
+    if (tier !== undefined) {
+      const tierIndex = TIER_NAMES.indexOf(tier);
+      if (tierIndex >= 0) {
+        filters.push(sql`wsp.tier_index = ${tierIndex}`);
+      }
+    }
+
+    if (filters.length > 0) {
+      query = sql`${query} WHERE ${sql.join(filters, sql` AND `)}`;
+    }
+
+    const rows = await sql`${query} ORDER BY wsp.payment_week DESC LIMIT 500`;
+    const totalPaid = rows.reduce((sum, r) => sum + (r.salary_cents / 100), 0);
+
+    return response.json({
+      totalPaid,
+      count: rows.length,
+      payments: rows.map(r => ({
+        id: r.id,
+        accountId: r.account_id,
+        accountName: r.account_name,
+        accountEmail: r.account_email,
+        tier: r.tier_name,
+        amount: r.salary_cents / 100,
+        week: r.payment_week,
+        creditedAt: r.credited_at,
+      })),
+    });
+  });
+
+  app.post('/api/admin/salary/apply-now', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      await applyWeeklySalaries();
+      await recordAudit(request, 'admin.weekly_salaries_applied', null, {});
+      return response.json({ ok: true, message: 'Weekly salaries applied immediately.' });
     } catch (error) {
       return next(error);
     }
@@ -1776,5 +2025,5 @@ export function createApp({ databasePath }) {
     return response.status(500).json({ error: 'An unexpected server error occurred.' });
   });
 
-  return { app, close: () => db.close() };
+  return { app, close: () => sql.end() };
 }
