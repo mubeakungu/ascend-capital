@@ -36,8 +36,8 @@ const TIER_PHYSICAL_REWARDS = {
 };
 
 // Initialize tier rewards table
-function initializeTierRewardsTable(db) {
-  db.exec(`
+async function initializeTierRewardsTable(sql) {
+  await sql`
     CREATE TABLE IF NOT EXISTS referral_tier_rewards (
       id TEXT PRIMARY KEY,
       referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -50,35 +50,33 @@ function initializeTierRewardsTable(db) {
       team_total_at_award INTEGER,
       credited_at TEXT NOT NULL,
       transaction_id TEXT REFERENCES transactions(id)
-    );
-    CREATE INDEX IF NOT EXISTS tier_rewards_referrer_idx ON referral_tier_rewards(referrer_id);
-    CREATE INDEX IF NOT EXISTS tier_rewards_tier_idx ON referral_tier_rewards(referrer_id, tier_index);
-  `);
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS tier_rewards_referrer_idx ON referral_tier_rewards(referrer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS tier_rewards_tier_idx ON referral_tier_rewards(referrer_id, tier_index)`;
 }
 
 // Get direct referral count for a user
-function getDirectReferralCount(db, referrerId) {
-  const result = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ?
-  `).get(referrerId);
-  return result?.cnt || 0;
+async function getDirectReferralCount(sql, referrerId) {
+  const result = await sql`
+    SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ${referrerId}
+  `;
+  return result[0]?.cnt || 0;
 }
 
 // Get total team count (direct + all indirect referrals)
-function getTeamTotal(db, referrerId) {
-  const result = db.prepare(`
+async function getTeamTotal(sql, referrerId) {
+  const result = await sql`
     WITH RECURSIVE team_tree AS (
-      -- Base case: direct referrals
-      SELECT referred_account_id FROM referral_signups WHERE referrer_id = ?
+      SELECT referred_account_id FROM referral_signups WHERE referrer_id = ${referrerId}
       UNION ALL
-      -- Recursive case: referrals of referrals
       SELECT rs.referred_account_id 
       FROM referral_signups rs
       JOIN team_tree tt ON rs.referrer_id = tt.referred_account_id
     )
     SELECT COUNT(*) AS cnt FROM team_tree
-  `).get(referrerId);
-  return result?.cnt || 0;
+  `;
+  return result[0]?.cnt || 0;
 }
 
 // Get tier by direct referral count
@@ -92,10 +90,10 @@ function getTierByDirectReferrals(directCount) {
 }
 
 // Check and credit tier rewards when new referral is created
-function checkAndCreditTierReward(db, referrerId) {
+async function checkAndCreditTierReward(sql, referrerId) {
   // Get current direct referral count
-  const directCount = getDirectReferralCount(db, referrerId);
-  const teamTotal = getTeamTotal(db, referrerId);
+  const directCount = await getDirectReferralCount(sql, referrerId);
+  const teamTotal = await getTeamTotal(sql, referrerId);
 
   // Calculate current tier
   const currentTier = getTierByDirectReferrals(directCount);
@@ -103,16 +101,16 @@ function checkAndCreditTierReward(db, referrerId) {
   if (currentTier < 0) return null; // No tier yet
 
   // Check if this tier reward has already been credited
-  const existing = db.prepare(`
+  const existing = await sql`
     SELECT id FROM referral_tier_rewards 
-    WHERE referrer_id = ? AND tier_index = ?
-  `).get(referrerId, currentTier);
+    WHERE referrer_id = ${referrerId} AND tier_index = ${currentTier}
+  `;
 
-  if (existing) return null; // Already credited
+  if (existing.length > 0) return null; // Already credited
 
   // Get referrer account to verify they exist
-  const referrer = db.prepare('SELECT id, email FROM accounts WHERE id = ?').get(referrerId);
-  if (!referrer) return null;
+  const referrer = await sql`SELECT id, email FROM accounts WHERE id = ${referrerId}`;
+  if (referrer.length === 0) return null;
 
   // Credit the tier reward
   const tierName = TIER_NAMES[currentTier];
@@ -125,39 +123,26 @@ function checkAndCreditTierReward(db, referrerId) {
 
   try {
     // Create reward transaction (special type)
-    db.prepare(`
+    await sql`
       INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-      VALUES (?, ?, 'tier_reward', ?, ?, 'approved', ?)
-    `).run(
-      transactionId,
-      referrerId,
-      rewardCents,
-      `${tierName} Tier Reward`,
-      now
-    );
+      VALUES (${transactionId}, ${referrerId}, 'tier_reward', ${rewardCents}, ${`${tierName} Tier Reward`}, 'approved', ${now})
+    `;
 
     // Record tier reward
-    db.prepare(`
+    await sql`
       INSERT INTO referral_tier_rewards (
         id, referrer_id, tier_index, tier_name, reward_cents,
         physical_reward, physical_reward_value_cents, 
         direct_referrals_at_award, team_total_at_award,
         credited_at, transaction_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      rewardId,
-      referrerId,
-      currentTier,
-      tierName,
-      rewardCents,
-      physicalReward ? physicalReward.item : null,
-      physicalReward ? physicalReward.estimatedValue * 100 : null,
-      directCount,
-      teamTotal,
-      now,
-      transactionId
-    );
+      VALUES (
+        ${rewardId}, ${referrerId}, ${currentTier}, ${tierName}, ${rewardCents},
+        ${physicalReward ? physicalReward.item : null},
+        ${physicalReward ? Math.round(physicalReward.estimatedValue * 100) : null},
+        ${directCount}, ${teamTotal}, ${now}, ${transactionId}
+      )
+    `;
 
     return {
       rewardId,
@@ -173,20 +158,20 @@ function checkAndCreditTierReward(db, referrerId) {
 }
 
 // Get tier progression for a referrer
-function getTierProgression(db, referrerId) {
-  const directCount = getDirectReferralCount(db, referrerId);
-  const teamTotal = getTeamTotal(db, referrerId);
+async function getTierProgression(sql, referrerId) {
+  const directCount = await getDirectReferralCount(sql, referrerId);
+  const teamTotal = await getTeamTotal(sql, referrerId);
 
   const currentTier = getTierByDirectReferrals(directCount);
 
   // Get earned tier rewards
-  const earnedRewards = db.prepare(`
+  const earnedRewards = await sql`
     SELECT tier_index, tier_name, reward_cents, physical_reward,
       physical_reward_value_cents, credited_at
     FROM referral_tier_rewards
-    WHERE referrer_id = ?
+    WHERE referrer_id = ${referrerId}
     ORDER BY tier_index ASC
-  `).all(referrerId);
+  `;
 
   // Calculate progress to next tier
   let nextTierThreshold = null;
