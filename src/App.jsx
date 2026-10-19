@@ -35,7 +35,6 @@ const navItems = [
   { id: 'rewards', label: 'Prime hour', icon: 'clock' },
 ];
 
-// Generate realistic trading data
 function generateTradingData() {
   const today = new Date();
   const data = [];
@@ -94,6 +93,7 @@ function Icon({ name, size = 18 }) {
     spark: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /><path d="m19 14 1.3 2.7L23 18l-2.7 1.3L19 22l-1.3-2.7L15 18l2.7-1.3L19 14Z" /></>,
     menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
     trending: <><path d="M3 3v18h18" /><polyline points="7 14 11 10 15 14 19 8" /></>,
+    link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
   };
 
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -114,7 +114,7 @@ async function requestApi(path, options = {}) {
   return result;
 }
 
-function AuthPage({ mode, name, email, password, error, storageMode, onNameChange, onEmailChange, onPasswordChange, onSubmit, onNavigate }) {
+function AuthPage({ mode, name, email, password, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onSubmit, onNavigate }) {
   const registering = mode === 'register';
 
   return (
@@ -127,6 +127,15 @@ function AuthPage({ mode, name, email, password, error, storageMode, onNameChang
         <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
         <h1>{registering ? 'Create your account' : 'Welcome back'}<span className="title-period">.</span></h1>
         <p className="standalone-description">Sign in to manage your member profile and process real transactions.</p>
+        {registering && referralCode && (
+          <div className="referral-notice" role="note">
+            <Icon name="link" size={16} />
+            <div>
+              <strong>Referral code detected</strong>
+              <span>You're registering with referral code: <code>{referralCode}</code></span>
+            </div>
+          </div>
+        )}
         {storageMode === 'ephemeral' && <div className="storage-warning" role="note"><strong>Temporary account storage</strong><span>This free hosting setup can erase account data when the service restarts. Do not reuse a password from another service.</span></div>}
         <form onSubmit={onSubmit}>
           {registering && <label className="account-field">Full name<input type="text" autoComplete="name" minLength={2} maxLength={80} value={name} onChange={(event) => onNameChange(event.target.value)} required /></label>}
@@ -245,8 +254,8 @@ function TradingGraph({ balance, totalDeposits }) {
       </div>
       {hasDeposits ? (
         <div className="graph-container">
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
               <defs>
                 <linearGradient id="colorEUR" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#D4AF37" stopOpacity={0.8}/>
@@ -266,14 +275,14 @@ function TradingGraph({ balance, totalDeposits }) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.2)" />
-              <XAxis dataKey="date" stroke="#888" />
-              <YAxis stroke="#888" />
+              <XAxis dataKey="date" stroke="#888" style={{ fontSize: '12px' }} />
+              <YAxis stroke="#888" style={{ fontSize: '12px' }} />
               <Tooltip 
-                contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #D4AF37' }}
+                contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #D4AF37', borderRadius: '8px' }}
                 labelStyle={{ color: '#D4AF37' }}
                 formatter={(value) => `$${value.toFixed(2)}`}
               />
-              <Legend />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} />
               <Line type="monotone" dataKey="EURUSD" stroke="#D4AF37" strokeWidth={2} dot={false} name="EUR/USD" isAnimationActive={true} />
               <Line type="monotone" dataKey="GBPUSD" stroke="#005299" strokeWidth={2} dot={false} name="GBP/USD" isAnimationActive={true} />
               <Line type="monotone" dataKey="XAUUSD" stroke="#E8C547" strokeWidth={2} dot={false} name="XAU/USD" isAnimationActive={true} />
@@ -328,6 +337,7 @@ function App() {
   const [accountPassword, setAccountPassword] = useState('');
   const [accountError, setAccountError] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [balance, setBalance] = useState(0);
   const [totalDeposits, setTotalDeposits] = useState(0);
   const [dailyIncome, setDailyIncome] = useState(0);
@@ -336,7 +346,6 @@ function App() {
   const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
 
-  // Update greeting every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setTimeGreeting(getTimeGreeting());
@@ -344,24 +353,30 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check if current time is within Prime Hour window (3:45 AM - 4:15 AM)
   useEffect(() => {
     function checkPrimeHour() {
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
       
-      // Convert to minutes since midnight
       const currentMinutes = hours * 60 + minutes;
-      const primeStart = 3 * 60 + 45; // 3:45 AM = 225 minutes
-      const primeEnd = 4 * 60 + 15;   // 4:15 AM = 255 minutes
+      const primeStart = 3 * 60 + 45;
+      const primeEnd = 4 * 60 + 15;
       
       setIsPrimeHourActive(currentMinutes >= primeStart && currentMinutes < primeEnd);
     }
     
     checkPrimeHour();
-    const interval = setInterval(checkPrimeHour, 30000); // Check every 30 seconds
+    const interval = setInterval(checkPrimeHour, 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refCode = params.get('ref') || params.get('referral') || '';
+    if (refCode) {
+      setReferralCode(refCode);
+    }
   }, []);
 
   useEffect(() => {
@@ -411,7 +426,6 @@ function App() {
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
       
-      // Calculate daily income based on active deposits
       const estimatedDaily = (result.balance || 0) * 0.03 / 365;
       setDailyIncome(estimatedDaily);
       setReferralRewards(0);
@@ -586,6 +600,7 @@ function App() {
           ...(register ? { name: accountName } : {}),
           email: accountEmail,
           password: accountPassword,
+          ...(register && referralCode ? { referralCode } : {}),
         }),
       });
       setAccount(result.account);
@@ -651,14 +666,16 @@ function App() {
     }
   }
 
-  if (route === '/login' || route === '/register') {
+  // AUTH GATE - Show login/register if not signed in
+  if (!account && !accountLoading) {
     return <AuthPage
-      mode={route.slice(1)}
+      mode={accountMode}
       name={accountName}
       email={accountEmail}
       password={accountPassword}
       error={accountError}
       storageMode={storageMode}
+      referralCode={referralCode}
       onNameChange={setAccountName}
       onEmailChange={setAccountEmail}
       onPasswordChange={setAccountPassword}
@@ -667,17 +684,21 @@ function App() {
     />;
   }
 
-  if (route === '/referrals') {
+  if (route === '/referrals' && account) {
     return <ReferralPage account={account} onNavigate={navigate} />;
   }
 
-  if (route === '/admin') {
+  if (route === '/admin' && account) {
     return <AdminPage account={account} accountLoading={accountLoading} onNavigate={navigate} />;
   }
 
   return (
     <div className="app-shell">
       <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
         :root {
           --primary-blue: #003366;
           --dark-blue: #001a33;
@@ -699,161 +720,101 @@ function App() {
           object-fit: cover;
         }
 
-        .primary-gradient {
-          background: linear-gradient(135deg, var(--primary-blue) 0%, var(--light-blue) 100%);
-        }
-
-        .gold-accent {
-          color: var(--gold);
-        }
-
-        .balance-card.balance-primary {
-          background: linear-gradient(135deg, var(--primary-blue) 0%, var(--light-blue) 100%);
+        .referral-notice {
+          background: rgba(212, 175, 55, 0.1);
           border: 2px solid var(--gold);
-        }
-
-        .button-primary {
-          background: linear-gradient(135deg, var(--gold) 0%, var(--light-gold) 100%);
-          color: var(--text-dark);
-        }
-
-        .button-primary:hover {
-          background: linear-gradient(135deg, var(--light-gold) 0%, var(--gold) 100%);
-        }
-
-        .daily-income-card {
-          background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(0, 51, 102, 0.1) 100%);
-          border: 2px solid var(--gold);
-          border-radius: 12px;
-          padding: 20px;
-          margin: 20px 0;
-          text-align: center;
-        }
-
-        .daily-income-label {
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          color: var(--gold);
-          margin-bottom: 8px;
-          font-weight: 600;
-        }
-
-        .daily-income-value {
-          font-size: 32px;
-          font-weight: 700;
-          color: var(--gold);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-        }
-
-        .daily-income-value .currency {
-          font-size: 24px;
-        }
-
-        .daily-income-info {
-          font-size: 12px;
-          color: #888;
-          margin-top: 12px;
-          font-style: italic;
-        }
-
-        .plan-card {
-          border: 2px solid var(--primary-blue);
-          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
-        }
-
-        .plan-card.plan-featured {
-          border-color: var(--gold);
-          box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
-        }
-
-        .plan-earning {
-          color: var(--gold);
-          font-weight: 700;
-        }
-
-        .daily-earnings-hint {
-          font-size: 11px;
-          color: var(--gold);
-          margin-top: 8px;
-          opacity: 0.8;
-        }
-
-        .nav-item.nav-active {
-          color: var(--gold);
-        }
-
-        .nav-indicator {
-          background: var(--gold);
-        }
-
-        h1, h2, h3 {
-          color: var(--text-light);
-        }
-
-        .eyebrow {
-          color: var(--gold);
-        }
-
-        .eyebrow-line {
-          background: var(--gold);
-        }
-
-        .prime-hour-card {
-          background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(0, 51, 102, 0.15) 100%);
-          border: 2px solid var(--gold);
-          padding: 20px;
           border-radius: 8px;
-          margin: 20px 0;
-        }
-
-        .prime-hour-card.inactive {
-          opacity: 0.6;
-          border-color: #555;
-        }
-
-        .prime-hour-status {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 12px;
-          font-weight: 600;
-          padding: 6px 12px;
-          border-radius: 20px;
-          margin-bottom: 12px;
-        }
-
-        .prime-hour-status.active {
-          background: rgba(212, 175, 55, 0.2);
+          padding: 16px;
+          margin: 16px 0;
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
           color: var(--gold);
         }
 
-        .prime-hour-status.inactive {
-          background: rgba(85, 85, 85, 0.2);
-          color: #aaa;
+        .referral-notice > svg {
+          flex-shrink: 0;
+          margin-top: 2px;
         }
 
-        .prime-hour-status-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          display: inline-block;
+        .referral-notice strong {
+          display: block;
+          margin-bottom: 4px;
         }
 
-        .prime-hour-status.active .prime-hour-status-dot {
-          background: var(--gold);
-          animation: pulse 2s infinite;
+        .referral-notice code {
+          background: rgba(0, 0, 0, 0.3);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-family: monospace;
+          font-size: 12px;
         }
 
-        .prime-hour-status.inactive .prime-hour-status-dot {
-          background: #666;
+        @media (max-width: 480px) {
+          .referral-notice {
+            flex-direction: column;
+            padding: 12px;
+          }
         }
 
-        .trading-graph-section {
-          margin: 40px 0;
+        .balance-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 20px;
+          margin: 30px 0;
+        }
+
+        @media (max-width: 768px) {
+          .balance-grid {
+            grid-template-columns: 1fr;
+            gap: 16px;
+          }
+        }
+
+        .plans-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 16px;
+          margin: 30px 0;
+        }
+
+        @media (max-width: 768px) {
+          .plans-grid {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .plans-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .action-buttons {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .action-buttons {
+            flex-direction: column;
+          }
+
+          .action-buttons .button {
+            width: 100%;
+          }
+
+          .action-buttons a {
+            width: 100% !important;
+          }
+        }
+
+        .action-buttons a {
+          flex: 1;
+          min-width: 150px;
         }
 
         .section-heading {
@@ -861,70 +822,224 @@ function App() {
           justify-content: space-between;
           align-items: flex-start;
           margin-bottom: 30px;
+          gap: 20px;
         }
 
-        .section-heading > div {
-          flex: 1;
-        }
+        @media (max-width: 768px) {
+          .section-heading {
+            flex-direction: column;
+            margin-bottom: 20px;
+          }
 
-        .graph-container {
-          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
-          border: 2px solid rgba(212, 175, 55, 0.3);
-          border-radius: 12px;
-          padding: 20px;
-          margin-bottom: 20px;
-        }
+          .section-heading > div {
+            width: 100%;
+          }
 
-        .graph-placeholder {
-          background: linear-gradient(135deg, rgba(0, 51, 102, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%);
-          border: 2px dashed rgba(212, 175, 55, 0.3);
-          border-radius: 12px;
-          padding: 60px 20px;
-          text-align: center;
-          color: #888;
-        }
-
-        .graph-placeholder svg {
-          margin-bottom: 16px;
-          opacity: 0.5;
+          .count-tag {
+            align-self: flex-start;
+          }
         }
 
         .graph-stats {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
           gap: 16px;
           margin-top: 20px;
         }
 
-        .stat-item {
-          background: rgba(212, 175, 55, 0.1);
-          border-left: 3px solid var(--gold);
-          padding: 16px;
-          border-radius: 4px;
+        @media (max-width: 480px) {
+          .graph-stats {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
         }
 
-        .stat-label {
-          display: block;
-          font-size: 12px;
-          color: #888;
-          text-transform: uppercase;
-          margin-bottom: 8px;
+        .rank-table-wrap {
+          overflow-x: auto;
+          border-radius: 8px;
+          border: 2px solid rgba(212, 175, 55, 0.3);
         }
 
-        .stat-value {
-          display: block;
+        .rank-table {
+          width: 100%;
+          font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+          .rank-table {
+            font-size: 12px;
+          }
+
+          .rank-table th, .rank-table td {
+            padding: 12px 8px;
+          }
+
+          .rank-number {
+            display: none;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .rank-table {
+            font-size: 11px;
+          }
+
+          .rank-table th, .rank-table td {
+            padding: 8px 4px;
+          }
+
+          .reward-value {
+            display: none;
+          }
+        }
+
+        .sidebar {
+          max-width: 280px;
+        }
+
+        @media (max-width: 768px) {
+          .sidebar {
+            max-width: 100%;
+            width: 100%;
+            height: 100vh;
+          }
+
+          .sidebar.sidebar-open {
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 1000;
+            background: var(--bg-dark);
+          }
+        }
+
+        .main-content {
+          flex: 1;
+        }
+
+        .page-content {
+          padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .page-content {
+            padding: 16px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .page-content {
+            padding: 12px;
+          }
+        }
+
+        .button {
+          padding: 12px 20px;
+          border-radius: 6px;
+          font-size: 14px;
+        }
+
+        @media (max-width: 480px) {
+          .button {
+            padding: 10px 16px;
+            font-size: 13px;
+          }
+        }
+
+        .modal {
+          max-width: 90vw;
+          max-height: 90vh;
+          overflow-y: auto;
+        }
+
+        @media (max-width: 480px) {
+          .modal {
+            max-width: 95vw;
+            max-height: 95vh;
+          }
+        }
+
+        h1 {
+          font-size: 28px;
+          margin: 0 0 12px 0;
+        }
+
+        @media (max-width: 768px) {
+          h1 {
+            font-size: 24px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          h1 {
+            font-size: 20px;
+          }
+        }
+
+        h2 {
+          font-size: 24px;
+          margin: 0 0 8px 0;
+        }
+
+        @media (max-width: 768px) {
+          h2 {
+            font-size: 20px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          h2 {
+            font-size: 18px;
+          }
+        }
+
+        h3 {
           font-size: 18px;
-          font-weight: 700;
-          color: var(--text-light);
         }
 
-        .stat-value.gold {
-          color: var(--gold);
+        @media (max-width: 480px) {
+          h3 {
+            font-size: 16px;
+          }
         }
 
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
+        p {
+          font-size: 14px;
+          line-height: 1.6;
+        }
+
+        @media (max-width: 480px) {
+          p {
+            font-size: 13px;
+          }
+        }
+
+        .standalone-shell {
+          min-height: 100vh;
+          padding: 20px;
+        }
+
+        @media (max-width: 480px) {
+          .standalone-shell {
+            padding: 16px;
+          }
+        }
+
+        .standalone-card {
+          max-width: 400px;
+          margin: 40px auto;
+          padding: 30px;
+          background: var(--bg-card);
+          border: 2px solid rgba(212, 175, 55, 0.3);
+          border-radius: 8px;
+        }
+
+        @media (max-width: 480px) {
+          .standalone-card {
+            margin: 20px auto;
+            padding: 20px;
+            max-width: 100%;
+          }
         }
       `}</style>
 
@@ -949,7 +1064,7 @@ function App() {
         <div className="sidebar-card">
           <div className="sidebar-card-icon"><Icon name="shield" size={17} /></div>
           <div className="sidebar-card-title">Your account</div>
-          <p>{accountError && !account ? 'Account service is unavailable. Please try again later.' : accountLoading ? 'Checking account status…' : account ? `Signed in as ${account.email}.` : 'Create an account or sign in to manage your profile.'}</p>
+          <p>{account ? `Signed in as ${account.email}.` : 'Create an account or sign in to manage your profile.'}</p>
           <button onClick={openAccountDialog}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
         </div>
         <div className="sidebar-footer"><span className="online-dot" /> All systems operational</div>
