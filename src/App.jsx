@@ -437,6 +437,11 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [showAccountPassword, setShowAccountPassword] = useState(false);
 
+  // ADMIN PASSWORD CHANGE STATE (FIX #1)
+  const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
+
   useEffect(() => {
     const interval = setInterval(() => {
       setTimeGreeting(getTimeGreeting());
@@ -805,13 +810,31 @@ function App() {
     }
   }
 
-  function openAccountDialog() {
-    setAccountMode(account ? 'profile' : 'login');
+  function openAccountDialog(mode = null) {
+    if (mode) {
+      setAccountMode(mode);
+    } else {
+      setAccountMode(account ? 'profile' : 'login');
+    }
     setAccountName(account?.name ?? '');
     setAccountEmail(account?.email ?? '');
     setAccountPassword('');
     setAccountPhone(account?.phone ?? '');
     setAccountPin('');
+    setAccountError('');
+    setAccountMessage('');
+    setAdminCurrentPassword('');
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
+    setAccountDialog(true);
+  }
+
+  // FIX #2: Add openAdminPasswordDialog function
+  function openAdminPasswordDialog() {
+    setAccountMode('admin-password');
+    setAdminCurrentPassword('');
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
     setAccountError('');
     setAccountMessage('');
     setAccountDialog(true);
@@ -823,6 +846,43 @@ function App() {
     setAccountMessage('');
 
     try {
+      // FIX #3: ADMIN PASSWORD CHANGE HANDLER
+      if (accountMode === 'admin-password') {
+        if (!adminCurrentPassword || !adminNewPassword || !adminConfirmPassword) {
+          setAccountError('All password fields are required.');
+          return;
+        }
+        if (adminNewPassword.length < 6 || adminNewPassword.length > 128) {
+          setAccountError('New password must be between 6 and 128 characters.');
+          return;
+        }
+        if (adminNewPassword !== adminConfirmPassword) {
+          setAccountError('New password and confirmation do not match.');
+          return;
+        }
+        if (adminCurrentPassword === adminNewPassword) {
+          setAccountError('New password must be different from the current password.');
+          return;
+        }
+
+        // Call admin password endpoint (THIS WAS MISSING!)
+        const result = await requestApi('/api/admin/auth/password', {
+          method: 'POST',
+          body: JSON.stringify({
+            currentPassword: adminCurrentPassword,
+            newPassword: adminNewPassword,
+          }),
+        });
+
+        setAdminCurrentPassword('');
+        setAdminNewPassword('');
+        setAdminConfirmPassword('');
+        setAccountMessage('Password changed successfully. You will need to sign in again.');
+        
+        setTimeout(() => logout(), 2000);
+        return;
+      }
+
       if (accountMode === 'profile') {
         const result = await requestApi('/api/auth/profile', {
           method: 'PATCH',
@@ -1450,7 +1510,7 @@ function App() {
           <div className="sidebar-card-icon"><Icon name="shield" size={17} /></div>
           <div className="sidebar-card-title">Your account</div>
           <p>{account ? `Signed in as ${account.email}.` : 'Create an account or sign in to manage your profile.'}</p>
-          <button onClick={openAccountDialog}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
+          <button onClick={() => openAccountDialog()}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
         </div>
         <div className="sidebar-footer"><span className="online-dot" /> All systems operational</div>
       </aside>
@@ -1463,7 +1523,7 @@ function App() {
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>{currentPage}</strong></div>
           <div className="topbar-right">
             <span className="secure-label"><Icon name="shield" size={14} /> Secure dashboard</span>
-            <button className="avatar" aria-label={account ? 'Manage account' : 'Sign in'} onClick={openAccountDialog}>{account ? account.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'AC'}</button>
+            <button className="avatar" aria-label={account ? 'Manage account' : 'Sign in'} onClick={() => openAccountDialog()}>{account ? account.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'AC'}</button>
           </div>
         </header>
 
@@ -1820,10 +1880,47 @@ function App() {
             <button className="modal-close" aria-label="Close dialog" onClick={() => setAccountDialog(false)}><Icon name="close" size={18} /></button>
             <div className="modal-icon"><Icon name="users" size={20} /></div>
             <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
-            <h2 id="account-modal-title">{accountMode === 'profile' ? 'Your profile' : accountMode === 'register' ? 'Create your account' : 'Sign in'}</h2>
-            <p className="modal-subtitle">{accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile and process transactions.'}</p>
+            <h2 id="account-modal-title">
+              {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Your profile' : accountMode === 'register' ? 'Create your account' : 'Sign in'}
+            </h2>
+            <p className="modal-subtitle">
+              {accountMode === 'admin-password' ? 'Update your administrator account password.' : accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile and process transactions.'}
+            </p>
             <form onSubmit={submitAccount}>
-              {accountMode !== 'login' && (
+              {/* FIX #4 & #5: Admin password form fields */}
+              {accountMode === 'admin-password' && (
+                <>
+                  <PasswordToggleInput
+                    label="Current Password"
+                    value={adminCurrentPassword}
+                    onChange={setAdminCurrentPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <PasswordToggleInput
+                    label="New Password"
+                    value={adminNewPassword}
+                    onChange={setAdminNewPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <PasswordToggleInput
+                    label="Confirm New Password"
+                    value={adminConfirmPassword}
+                    onChange={setAdminConfirmPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <span className="field-hint">Use at least 6 characters.</span>
+                </>
+              )}
+              {accountMode !== 'login' && accountMode !== 'admin-password' && (
                 <label className="account-field">Full name
                   <input type="text" autoComplete="name" minLength={2} maxLength={80} value={accountName} onChange={(event) => setAccountName(event.target.value)} required />
                 </label>
@@ -1838,7 +1935,7 @@ function App() {
                   </label>
                 </div>
               )}
-              {accountMode !== 'profile' && (
+              {accountMode !== 'profile' && accountMode !== 'admin-password' && (
                 <label className="account-field">Email address
                   <input type="email" autoComplete="email" maxLength={254} value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} required />
                 </label>
@@ -1848,7 +1945,7 @@ function App() {
                   <input type="email" value={accountEmail} readOnly />
                 </label>
               )}
-              {accountMode !== 'profile' && (
+              {accountMode !== 'profile' && accountMode !== 'admin-password' && (
                 <>
                   <PasswordToggleInput
                     label="Password"
@@ -1864,9 +1961,14 @@ function App() {
               )}
               {accountError && <div className="modal-message" role="alert">{accountError}</div>}
               {accountMessage && <div className="modal-message modal-success" role="status">{accountMessage}</div>}
-              <button className="button button-primary modal-submit" type="submit">{accountMode === 'profile' ? 'Save profile' : accountMode === 'register' ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
+              <button className="button button-primary modal-submit" type="submit">
+                {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Save profile' : accountMode === 'register' ? 'Create account' : 'Sign in'} 
+                <Icon name="arrow" size={15} />
+              </button>
               {accountMode === 'profile' ? (
                 <button className="account-switch logout-button" type="button" onClick={logout}>Sign out</button>
+              ) : accountMode === 'admin-password' ? (
+                <button className="account-switch" type="button" onClick={() => setAccountDialog(false)}>Cancel</button>
               ) : (
                 <button className="account-switch" type="button" onClick={() => { setAccountMode(accountMode === 'login' ? 'register' : 'login'); setAccountError(''); setAccountMessage(''); }}>{accountMode === 'login' ? 'New here? Create an account' : 'Already registered? Sign in'}</button>
               )}
