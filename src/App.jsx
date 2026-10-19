@@ -355,7 +355,8 @@ function App() {
   const [balance, setBalance] = useState(0);
   const [totalDeposits, setTotalDeposits] = useState(0);
   const [dailyIncome, setDailyIncome] = useState(0);
-  const [referralRewards, setReferralRewards] = useState(0);
+  const [referralEarnings, setReferralEarnings] = useState(0);
+  const [referralBonusFromThisDeposit, setReferralBonusFromThisDeposit] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
   const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
@@ -448,9 +449,19 @@ function App() {
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
       
-      const estimatedDaily = (result.balance || 0) * 0.03 / 365;
-      setDailyIncome(estimatedDaily);
-      setReferralRewards(0);
+      // Match balance to plan and use plan's dailyIncome value
+      const depositAmount = result.balance || 0;
+      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+      setDailyIncome(dailyIncomeValue);
+      
+      // Fetch referral earnings (5% of referrals' first deposits)
+      try {
+        const referralResult = await requestApi('/api/referrals/earnings');
+        setReferralEarnings(typeof referralResult.totalEarnings === 'number' ? referralResult.totalEarnings : 0);
+      } catch {
+        setReferralEarnings(0);
+      }
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -632,12 +643,16 @@ function App() {
       };
 
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
-      setBalance((prev) => prev + (modal === 'withdraw' ? -value : value));
+      const newBalance = balance + (modal === 'withdraw' ? -value : value);
+      setBalance(newBalance);
       
       if (modal === 'deposit') {
-        setTotalDeposits((prev) => prev + value);
-        const newDailyIncome = (balance + value) * 0.03 / 365;
-        setDailyIncome(newDailyIncome);
+        // Use the deposit amount as the plan (don't compound)
+        setTotalDeposits(value);
+        // Match deposit to plan and use plan's dailyIncome
+        const matchingPlan = plans.find((plan) => plan.deposit === value);
+        const newDailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+        setDailyIncome(newDailyIncomeValue);
       }
 
       setModal(null);
@@ -735,7 +750,7 @@ function App() {
       setBalance(0);
       setTotalDeposits(0);
       setDailyIncome(0);
-      setReferralRewards(0);
+      setReferralEarnings(0);
       setDemoActivity([]);
       setWeeklyData(null);
       setReferralStats(null);
@@ -1331,6 +1346,14 @@ function App() {
               </div>
               <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               <div className="balance-bottom"><span className="balance-caption">Estimated daily earnings</span><button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button></div>
+            </article>
+            <article className="balance-card">
+              <div className="card-topline">
+                <span className="balance-label">Referral earnings</span>
+                <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
+              </div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">5% from referral deposits</span><button className="text-link" onClick={() => navigate('referrals')}>Refer friends <Icon name="arrow" size={13} /></button></div>
             </article>
           </section>
 
