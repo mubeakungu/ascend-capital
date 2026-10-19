@@ -29,6 +29,8 @@
     "electron": "^28.0.0",
     "electron-builder": "^24.6.4",
     "electron-is-dev": "^3.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
     "vite": "^5.0.8"
   },
   "build": {
@@ -44,15 +46,24 @@
       "buildResources": "public"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "public/ascend-logo.jpg"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "public/ascend-logo.jpg"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "public/ascend-logo.jpg"
     },
     "nsis": {
