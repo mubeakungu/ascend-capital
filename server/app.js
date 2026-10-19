@@ -1151,6 +1151,36 @@ export async function createApp() {
     }
   });
 
+  app.post('/api/admin/auth/password', passwordRateLimit, requireAdminSession, async (request, response, next) => {
+    try {
+      const { currentPassword, newPassword } = request.body ?? {};
+      if (typeof currentPassword !== 'string' || currentPassword.length === 0 || currentPassword.length > 128) {
+        return response.status(400).json({ error: 'Enter your current password.' });
+      }
+      const newError = passwordError(newPassword);
+      if (newError) return response.status(400).json({ error: newError });
+      if (newPassword === currentPassword) {
+        return response.status(400).json({ error: 'New password must be different from the current password.' });
+      }
+
+      const rows = await sql`SELECT password_salt, password_hash FROM accounts WHERE id = ${request.account.id}`;
+      const row = rows[0];
+      const candidate = await scryptAsync(currentPassword, Buffer.from(row.password_salt, 'hex'), PASSWORD_BYTES, PASSWORD_OPTIONS);
+      if (!timingSafeEqual(candidate, Buffer.from(row.password_hash, 'hex'))) {
+        return response.status(401).json({ error: 'Current password is incorrect.' });
+      }
+
+      const hashed = await hashPassword(newPassword);
+      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash}, must_change_password = 0 WHERE id = ${request.account.id}`;
+      await sql`DELETE FROM sessions WHERE account_id = ${request.account.id}`;
+      await recordAudit(request, 'password.change_admin', request.account.id, { role: request.account.role });
+      await createAccountSession(request.account.id, response);
+      return response.json({ ok: true });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   // =========================================================================
   // REFERRAL ENDPOINTS
   // =========================================================================
