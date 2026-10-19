@@ -3,16 +3,16 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import DownloadAndroidButton from './components/DownloadAndroidButton';
 
 const plans = [
-  { deposit: 300, earning: '8', dailyIncome: 0.27 },
-  { deposit: 400, earning: '11', dailyIncome: 0.37 },
-  { deposit: 500, earning: '15.5', dailyIncome: 0.52 },
-  { deposit: 750, earning: '25', dailyIncome: 0.83 },
-  { deposit: 1000, earning: '35', dailyIncome: 1.17 },
-  { deposit: 2000, earning: '70', dailyIncome: 2.33 },
-  { deposit: 5000, earning: '180', dailyIncome: 6.00 },
-  { deposit: 10000, earning: '370', dailyIncome: 12.33 },
-  { deposit: 20000, earning: '750', dailyIncome: 25.00 },
-  { deposit: 35000, earning: '1,400', dailyIncome: 46.67 },
+  { deposit: 300, earning: '8', dailyIncome: 8 },
+  { deposit: 400, earning: '11', dailyIncome: 11 },
+  { deposit: 500, earning: '15', dailyIncome: 15 },
+  { deposit: 750, earning: '25', dailyIncome: 25 },
+  { deposit: 1000, earning: '35', dailyIncome: 35 },
+  { deposit: 2000, earning: '70', dailyIncome: 70 },
+  { deposit: 5000, earning: '180', dailyIncome: 180 },
+  { deposit: 10000, earning: '370', dailyIncome: 370 },
+  { deposit: 20000, earning: '750', dailyIncome: 750 },
+  { deposit: 35000, earning: '1,400', dailyIncome: 1400 },
 ];
 
 const ranks = [
@@ -1344,7 +1344,7 @@ function App() {
                 <span className="balance-label">Daily trade income</span>
                 <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
               </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{dailyIncome}</div>
               <div className="balance-bottom"><span className="balance-caption">Estimated daily earnings</span><button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button></div>
             </article>
             <article className="balance-card">
@@ -1352,7 +1352,7 @@ function App() {
                 <span className="balance-label">Referral earnings</span>
                 <span className="balance-icon subdued"><Icon name="users" size={18} /></span>
               </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{referralEarnings}</div>
               <div className="balance-bottom"><span className="balance-caption">5% from referral deposits</span><button className="text-link" onClick={() => navigate('referrals')}>Refer friends <Icon name="arrow" size={13} /></button></div>
             </article>
           </section>
@@ -1362,9 +1362,9 @@ function App() {
               <div className="daily-income-label"><Icon name="trending" size={14} style={{marginRight: '6px'}} /> Your daily trade profit</div>
               <div className="daily-income-value">
                 <span className="currency">$</span>
-                {dailyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {dailyIncome}
               </div>
-              <div className="daily-income-info">Earning daily from your active deposits · Compounds automatically</div>
+              <div className="daily-income-info">Earning daily from your active deposits</div>
             </div>
           )}
 
@@ -1393,7 +1393,7 @@ function App() {
                   <div className="plan-divider" />
                   <div className="plan-earning-label">Daily trade income</div>
                   <div className="plan-earning"><span>$</span>{plan.earning}</div>
-                  <div className="daily-earnings-hint">≈ ${plan.dailyIncome.toFixed(2)}/day</div>
+                  <div className="daily-earnings-hint">${plan.dailyIncome}/day</div>
                   <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))} disabled={!account}>{account ? 'Choose plan' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
                 </article>
               ))}
