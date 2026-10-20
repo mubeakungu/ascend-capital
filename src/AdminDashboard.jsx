@@ -427,7 +427,7 @@ function Dashboard() {
 
 function AdminReferredMembers() {
   const [{ data, error, loading }, reload] = useLoad(
-    () => api('/api/referrals/list'),
+    () => api('/api/admin/referrals/my-list'),
     []
   );
 
