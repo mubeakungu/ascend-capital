@@ -103,9 +103,11 @@ function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+// ✅ CRITICAL FIX: Added credentials: 'include' to send cookies with fetch requests
 async function requestApi(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    credentials: 'include',
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
@@ -437,7 +439,7 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [showAccountPassword, setShowAccountPassword] = useState(false);
 
-  // ADMIN PASSWORD CHANGE STATE (FIX #1)
+  // ADMIN PASSWORD CHANGE STATE
   const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
@@ -829,7 +831,6 @@ function App() {
     setAccountDialog(true);
   }
 
-  // FIX #2: Add openAdminPasswordDialog function
   function openAdminPasswordDialog() {
     setAccountMode('admin-password');
     setAdminCurrentPassword('');
@@ -846,7 +847,6 @@ function App() {
     setAccountMessage('');
 
     try {
-      // FIX #3: ADMIN PASSWORD CHANGE HANDLER
       if (accountMode === 'admin-password') {
         if (!adminCurrentPassword || !adminNewPassword || !adminConfirmPassword) {
           setAccountError('All password fields are required.');
@@ -865,7 +865,6 @@ function App() {
           return;
         }
 
-        // Call admin password endpoint (THIS WAS MISSING!)
         const result = await requestApi('/api/admin/auth/password', {
           method: 'POST',
           body: JSON.stringify({
@@ -1488,6 +1487,8 @@ function App() {
         }
       `}</style>
 
+      {/* Rest of JSX continues... [All the JSX from the original file remains the same] */}
+      
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <a className="brand" href="#overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
           <img src="/ascend-logo.jpg" alt="Ascend Capital" style={{width: '32px', height: '32px', borderRadius: '50%', marginRight: '8px'}} />
@@ -1528,6 +1529,7 @@ function App() {
         </header>
 
         <div className="page-content">
+          {/* Main content JSX continues here - all the same as original */}
           <section className="welcome-row">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
@@ -1887,7 +1889,6 @@ function App() {
               {accountMode === 'admin-password' ? 'Update your administrator account password.' : accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile and process transactions.'}
             </p>
             <form onSubmit={submitAccount}>
-              {/* FIX #4 & #5: Admin password form fields */}
               {accountMode === 'admin-password' && (
                 <>
                   <PasswordToggleInput
