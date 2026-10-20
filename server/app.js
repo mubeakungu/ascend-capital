@@ -5,6 +5,7 @@ import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'no
 import { promisify } from 'node:util';
 import postgres from 'postgres';
 import express from 'express';
+import cookieParser from 'cookie-parser';
 
 const scryptAsync = promisify(scrypt);
 
@@ -171,8 +172,9 @@ export async function createApp() {
 
   const app = express();
 
-  // Middleware
+  // ✅ CRITICAL MIDDLEWARE
   app.use(express.json());
+  app.use(cookieParser()); // ✅ Added - required for session cookies
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -189,6 +191,12 @@ export async function createApp() {
 
   app.get('/api/public-config', (req, res) => {
     res.json({ binanceWalletAddress: process.env.BINANCE_WALLET_ADDRESS || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh' });
+  });
+
+  app.get('/api/public/logo', (req, res) => {
+    res.json({
+      logo: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="50" y="50" text-anchor="middle" dy=".3em" font-size="40" fill="%23333">AC</text></svg>'
+    });
   });
 
   // ====================
