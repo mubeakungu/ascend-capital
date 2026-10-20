@@ -8,7 +8,7 @@ const when = (iso) => {
   if (!iso) return '—';
   const date = new Date(iso);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  return isMobile 
+  return isMobile
     ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : date.toLocaleString();
 };
@@ -152,7 +152,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     <div className="ad-overlay" onClick={onClose}>
       <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
         <h3>Account Details</h3>
-        
+
         <div className="ad-detail-row">
           <span className="ad-detail-label">ID</span>
           <span className="ad-detail-value">{account.id}</span>
@@ -225,7 +225,7 @@ function AccountsManagement() {
   const [search, setSearch] = useState('');
 
   const allAccounts = data?.accounts || [];
-  const accounts = allAccounts.filter(a => 
+  const accounts = allAccounts.filter(a =>
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.email.toLowerCase().includes(search.toLowerCase()) ||
     a.id.toLowerCase().includes(search.toLowerCase())
@@ -257,9 +257,9 @@ function AccountsManagement() {
       </div>
 
       <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
-        <input 
-          placeholder="Search by name, email, or ID" 
-          value={search} 
+        <input
+          placeholder="Search by name, email, or ID"
+          value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ flex: 1 }}
         />
@@ -346,8 +346,8 @@ function AccountsManagement() {
       </div>
 
       {selectedId && (
-        <AccountDetailModal 
-          accountId={selectedId} 
+        <AccountDetailModal
+          accountId={selectedId}
           onClose={() => setSelectedId(null)}
           onUpdate={reload}
         />
@@ -404,7 +404,7 @@ function Dashboard() {
         <h2>System Overview</h2>
         <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
-      
+
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
@@ -656,9 +656,9 @@ function BalanceManagement() {
       <h2>Adjust Member Balance</h2>
       <form className="ad-form" onSubmit={submit}>
         <label>Member ID</label>
-        <input 
-          type="text" 
-          value={memberId} 
+        <input
+          type="text"
+          value={memberId}
           onChange={(e) => setMemberId(e.target.value)}
           placeholder="Enter member ID"
           required
@@ -672,17 +672,17 @@ function BalanceManagement() {
         </select>
 
         <label>Amount (USD)</label>
-        <input 
-          type="number" 
+        <input
+          type="number"
           step="0.01"
-          value={amount} 
+          value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
           required
         />
 
         <label>Reason</label>
-        <textarea 
+        <textarea
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -829,7 +829,7 @@ function TransactionApproval() {
         <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
             <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
-            
+
             {actionType === 'reject' && (
               <>
                 <label>Reason for rejection</label>
@@ -1075,9 +1075,9 @@ export default function AdminDashboard() {
           </div>
           <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
             {tabs.map(([key, label]) => (
-              <button 
-                key={key} 
-                className={tab === key ? 'on' : ''} 
+              <button
+                key={key}
+                className={tab === key ? 'on' : ''}
                 onClick={() => { setTab(key); setMobileMenuOpen(false); }}
               >
                 {label}
