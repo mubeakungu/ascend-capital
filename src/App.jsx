@@ -103,7 +103,6 @@ function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
-// ✅ CRITICAL FIX: Added credentials: 'include' to send cookies with fetch requests
 async function requestApi(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -321,6 +320,89 @@ function AdminPage({ account, accountLoading, onNavigate }) {
   );
 }
 
+// ✅ NEW COMPONENT: Display referred members with their details
+function ReferredMembersList() {
+  const [referrals, setReferrals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    requestApi('/api/referrals/list')
+      .then(({ referrals: members }) => {
+        if (!cancelled) {
+          setReferrals(Array.isArray(members) ? members : []);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center', color: '#aaa' }}>
+        <p>Loading your network…</p>
+      </div>
+    );
+  }
+
+  if (referrals.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: '12px' }}>
+        <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>YOUR NETWORK</span>
+        <h3 style={{ marginTop: '4px', marginBottom: '0' }}>Referred members</h3>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px', margin: '16px 0' }}>
+        {referrals.map((member) => (
+          <div 
+            key={member.id} 
+            style={{
+              background: 'rgba(212, 175, 55, 0.05)',
+              border: '1px solid rgba(212, 175, 55, 0.15)',
+              borderRadius: '8px',
+              padding: '14px',
+            }}
+          >
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-light)', marginBottom: '3px' }}>
+                {member.name}
+              </div>
+              <div style={{ fontSize: '11px', color: '#999', wordBreak: 'break-all' }}>
+                {member.email}
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid rgba(212, 175, 55, 0.1)', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px' }}>
+                <span style={{ color: '#aaa' }}>Deposits</span>
+                <span style={{ fontWeight: '600', color: 'var(--gold)' }}>
+                  ${member.totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                <span style={{ color: '#888' }}>Joined</span>
+                <span style={{ color: '#bbb' }}>
+                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TradingGraph({ balance, totalDeposits }) {
   const data = generateTradingData();
   const hasDeposits = totalDeposits > 0;
@@ -434,12 +516,8 @@ function App() {
   const [earningsActive, setEarningsActive] = useState(false);
   const [earningsStartTime, setEarningsStartTime] = useState(null);
   const [lastDepositTime, setLastDepositTime] = useState(null);
-  
-  // PASSWORD VISIBILITY STATE
   const [showPassword, setShowPassword] = useState(false);
   const [showAccountPassword, setShowAccountPassword] = useState(false);
-
-  // ADMIN PASSWORD CHANGE STATE
   const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
@@ -469,7 +547,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check earnings status every minute
   useEffect(() => {
     const checkEarnings = () => {
       if (lastDepositTime) {
@@ -560,7 +637,6 @@ function App() {
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
       
-      // Get earnings data from backend
       if (result.lastDepositTime) {
         setLastDepositTime(result.lastDepositTime);
       }
@@ -777,7 +853,6 @@ function App() {
       if (modal === 'deposit') {
         setTotalDeposits(value);
         
-        // Set deposit time to activate earnings tomorrow at 10:00 AM
         const now = new Date();
         setLastDepositTime(now.toISOString());
         setEarningsActive(false);
@@ -1487,8 +1562,6 @@ function App() {
         }
       `}</style>
 
-      {/* Rest of JSX continues... [All the JSX from the original file remains the same] */}
-      
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <a className="brand" href="#overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
           <img src="/ascend-logo.jpg" alt="Ascend Capital" style={{width: '32px', height: '32px', borderRadius: '50%', marginRight: '8px'}} />
@@ -1529,7 +1602,6 @@ function App() {
         </header>
 
         <div className="page-content">
-          {/* Main content JSX continues here - all the same as original */}
           <section className="welcome-row">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
@@ -1712,6 +1784,11 @@ function App() {
                     </div>
                   </article>
                 </div>
+              )}
+
+              {/* ✅ SHOW REFERRED MEMBERS LIST */}
+              {account && referralStats?.directReferrals > 0 && (
+                <ReferredMembersList />
               )}
 
               <div className="rank-table-wrap">
