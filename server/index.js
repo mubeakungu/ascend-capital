@@ -6,8 +6,22 @@ import { createApp } from './app.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const { app, close } = await createApp();
-const server = createServer(app);
+let app, close, server;
+
+try {
+  console.log('🚀 Initializing Ascend Capital app...');
+  const result = await createApp();
+  app = result.app;
+  close = result.close;
+  console.log('✅ App initialized successfully');
+  
+  server = createServer(app);
+} catch (error) {
+  console.error('❌ FATAL: Failed to initialize app:', error.message);
+  console.error(error);
+  process.exit(1);
+}
+
 let vite;
 
 if (process.env.NODE_ENV === 'production') {
@@ -59,15 +73,10 @@ if (process.env.NODE_ENV === 'production') {
   });
   
   // SPA routing fallback - MUST come AFTER all other routes
-  // This middleware explicitly checks the path and only serves index.html for non-API routes
   app.use((_request, response, next) => {
-    // If the path starts with /api or /download, skip this middleware
     if (_request.path.startsWith('/api') || _request.path.startsWith('/download')) {
       return next();
     }
-    
-    // For all other paths (SPA routes), serve index.html
-    // This allows React Router to handle client-side routing
     response.sendFile(resolve(root, 'dist', 'index.html'));
   });
 } else {
@@ -89,15 +98,28 @@ if (process.env.NODE_ENV === 'production') {
 
 const port = Number(process.env.PORT ?? 5173);
 const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+
 server.listen(port, host, () => {
-  console.log(`Ascend Capital ${process.env.NODE_ENV === 'production' ? 'server' : 'development server'} listening on ${host}:${port}`);
+  console.log(`✅ Ascend Capital ${process.env.NODE_ENV === 'production' ? 'server' : 'dev server'} listening on ${host}:${port}`);
 });
 
 async function shutdown() {
+  console.log('⚠️  Shutting down gracefully...');
   server.close();
   await vite?.close();
-  close();
+  await close();
+  console.log('✅ Server closed');
 }
 
 process.on('SIGINT', () => { void shutdown(); });
 process.on('SIGTERM', () => { void shutdown(); });
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled Rejection:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
