@@ -1246,6 +1246,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIXED ENDPOINT - /api/referrals/list with proper SQL GROUP BY
   app.get('/api/referrals/list', requireAccount, async (request, response) => {
     const referrals = await sql`
       SELECT
@@ -1254,12 +1255,12 @@ export async function createApp() {
         a.name,
         a.email,
         rs.signed_up_at,
-        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
       FROM referral_signups rs
       JOIN accounts a ON a.id = rs.referred_account_id
-      LEFT JOIN transactions t ON t.account_id = a.id
+      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
       WHERE rs.referrer_id = ${request.account.id}
-      GROUP BY a.id, rs.id, rs.signed_up_at
+      GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
       ORDER BY rs.signed_up_at DESC
       LIMIT 100
     `;
@@ -1270,7 +1271,7 @@ export async function createApp() {
         name: r.name,
         email: r.email,
         signedUpAt: r.signed_up_at,
-        totalDeposits: r.total_deposits / 100,
+        totalDeposits: r.total_deposits_cents / 100,
       })),
     });
   });
