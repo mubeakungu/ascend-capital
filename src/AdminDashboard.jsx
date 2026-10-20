@@ -8,7 +8,7 @@ const when = (iso) => {
   if (!iso) return '—';
   const date = new Date(iso);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  return isMobile 
+  return isMobile
     ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : date.toLocaleString();
 };
@@ -152,7 +152,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     <div className="ad-overlay" onClick={onClose}>
       <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
         <h3>Account Details</h3>
-        
+
         <div className="ad-detail-row">
           <span className="ad-detail-label">ID</span>
           <span className="ad-detail-value">{account.id}</span>
@@ -225,7 +225,7 @@ function AccountsManagement() {
   const [search, setSearch] = useState('');
 
   const allAccounts = data?.accounts || [];
-  const accounts = allAccounts.filter(a => 
+  const accounts = allAccounts.filter(a =>
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.email.toLowerCase().includes(search.toLowerCase()) ||
     a.id.toLowerCase().includes(search.toLowerCase())
@@ -257,9 +257,9 @@ function AccountsManagement() {
       </div>
 
       <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
-        <input 
-          placeholder="Search by name, email, or ID" 
-          value={search} 
+        <input
+          placeholder="Search by name, email, or ID"
+          value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ flex: 1 }}
         />
@@ -346,8 +346,8 @@ function AccountsManagement() {
       </div>
 
       {selectedId && (
-        <AccountDetailModal 
-          accountId={selectedId} 
+        <AccountDetailModal
+          accountId={selectedId}
           onClose={() => setSelectedId(null)}
           onUpdate={reload}
         />
@@ -404,7 +404,7 @@ function Dashboard() {
         <h2>System Overview</h2>
         <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
-      
+
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
@@ -422,29 +422,53 @@ function Dashboard() {
 }
 
 // ============================================================================
-// REFERRALS MANAGEMENT
+// REFERRALS MANAGEMENT - ENHANCED WITH REFERRED MEMBERS
 // ============================================================================
 
 function ReferralsManagement() {
   const [searchId, setSearchId] = useState('');
   const [notice, setNotice] = useState(null);
+  const [referralsList, setReferralsList] = useState([]);
+  const [referralsLoading, setReferralsLoading] = useState(false);
   const [{ data, error, loading }, reload] = useLoad(
     () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
     [searchId]
   );
 
+  async function loadReferralsList(identifier) {
+    if (!identifier) return;
+    setReferralsLoading(true);
+    try {
+      const result = await api(`/admin/referrals/${identifier}/list`);
+      setReferralsList(result.referrals || []);
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+      setReferralsList([]);
+    } finally {
+      setReferralsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (searchId) {
+      loadReferralsList(searchId);
+    } else {
+      setReferralsList([]);
+    }
+  }, [searchId]);
+
   return (
     <section>
       <h2>Referral Management</h2>
       <div className="ad-row ad-search-row">
-        <input 
-          placeholder="Search by member ID" 
-          value={searchId} 
+        <input
+          placeholder="Search by member ID or email"
+          value={searchId}
           onChange={(e) => setSearchId(e.target.value)}
         />
         <button className="ad-btn ghost" onClick={reload}>Search</button>
       </div>
-      
+
       <Notice notice={notice} />
       {error && <p className="ad-error">{error}</p>}
 
@@ -460,7 +484,7 @@ function ReferralsManagement() {
             <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
           </div>
 
-          <h3>Direct Referrals</h3>
+          <h3>Commission History</h3>
           <div className="ad-scroll">
             <table className="ad-table">
               <thead>
@@ -483,11 +507,42 @@ function ReferralsManagement() {
               </tbody>
             </table>
           </div>
+
+          {/* NEW: Referred Members Network */}
+          <h3 style={{ marginTop: '24px' }}>Referred Members Network</h3>
+          {referralsLoading ? (
+            <p className="ad-empty">Loading network…</p>
+          ) : referralsList.length > 0 ? (
+            <div className="ad-scroll">
+              <table className="ad-table">
+                <thead>
+                  <tr>
+                    <th>Member Name</th>
+                    <th>Email</th>
+                    <th>Total Deposits</th>
+                    <th>Joined Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {referralsList.map((member) => (
+                    <tr key={member.id}>
+                      <td><strong>{member.name}</strong></td>
+                      <td>{member.email}</td>
+                      <td className="num" style={{ color: 'var(--accent)' }}>{money(member.totalDeposits)}</td>
+                      <td>{new Date(member.signedUpAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="ad-empty">No referred members yet</p>
+          )}
         </div>
       ) : searchId ? (
         <p className="ad-empty">No referral data found</p>
       ) : (
-        <p className="ad-empty">Enter a member ID to search</p>
+        <p className="ad-empty">Enter a member ID or email to search</p>
       )}
     </section>
   );
@@ -608,9 +663,9 @@ function BalanceManagement() {
       <h2>Adjust Member Balance</h2>
       <form className="ad-form" onSubmit={submit}>
         <label>Member ID</label>
-        <input 
-          type="text" 
-          value={memberId} 
+        <input
+          type="text"
+          value={memberId}
           onChange={(e) => setMemberId(e.target.value)}
           placeholder="Enter member ID"
           required
@@ -624,17 +679,17 @@ function BalanceManagement() {
         </select>
 
         <label>Amount (USD)</label>
-        <input 
-          type="number" 
+        <input
+          type="number"
           step="0.01"
-          value={amount} 
+          value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
           required
         />
 
         <label>Reason</label>
-        <textarea 
+        <textarea
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -652,7 +707,7 @@ function BalanceManagement() {
 }
 
 // ============================================================================
-// TRANSACTION APPROVAL - ✅ FIXED
+// TRANSACTION APPROVAL
 // ============================================================================
 
 function TransactionApproval() {
@@ -781,7 +836,7 @@ function TransactionApproval() {
         <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
             <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
-            
+
             {actionType === 'reject' && (
               <>
                 <label>Reason for rejection</label>
@@ -809,7 +864,7 @@ function TransactionApproval() {
 }
 
 // ============================================================================
-// SETTINGS / PASSWORD CHANGE - FIXED & MOBILE OPTIMIZED
+// SETTINGS / PASSWORD CHANGE
 // ============================================================================
 
 function SettingsManagement({ account }) {
@@ -1027,9 +1082,9 @@ export default function AdminDashboard() {
           </div>
           <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
             {tabs.map(([key, label]) => (
-              <button 
-                key={key} 
-                className={tab === key ? 'on' : ''} 
+              <button
+                key={key}
+                className={tab === key ? 'on' : ''}
                 onClick={() => { setTab(key); setMobileMenuOpen(false); }}
               >
                 {label}
@@ -1153,78 +1208,4 @@ const CSS = `
   .ad input,.ad select,.ad textarea{padding:12px;font-size:16px;min-height:48px}
   .ad-btn{padding:10px 14px;min-height:48px;font-size:12px}
   .ad-btn.sm{min-height:40px;padding:8px 10px;font-size:11px}
-  .ad-accounts-desktop{display:none}
-  .ad-accounts-mobile{display:block}
-  .ad-card{padding:16px}
-  .ad-detail-row{grid-template-columns:90px 1fr;gap:10px;padding:8px 0}
-  .ad-detail-label{font-size:10px}
-  .ad-detail-value{font-size:12px}
-  .ad-notice{padding:10px;font-size:12px;margin:8px 0}
-  .ad-error{font-size:12px;margin:6px 0}
-  .ad-empty{padding:16px;font-size:12px}
-  .ad-scroll{margin:10px 0}
-  .ad-modal{width:95vw;padding:16px}
-  .ad-modal h3{font-size:15px;margin:0 0 6px}
-  .ad-actions{gap:4px}
-  .ad-badge{padding:2px 6px;font-size:9px}
-  label{margin:12px 0 6px !important}
-}
-
-@media (max-width:480px){
-  .ad-hamburger{font-size:20px;padding:6px}
-  .ad-top{padding:8px}
-  .ad-brand{font-size:14px;order:2;margin-left:auto;margin-right:auto;flex:1}
-  .ad-who{order:3;width:100%;font-size:10px;justify-content:space-between}
-  .ad-main{padding:10px}
-  .ad h2{font-size:16px;margin-bottom:12px}
-  .ad h3{font-size:13px;margin:12px 0 6px}
-  .ad-grid{grid-template-columns:1fr;gap:8px}
-  .ad-stat-card{padding:10px}
-  .ad-stat-value{font-size:16px}
-  .ad-stat-label{font-size:9px}
-  .ad-row{gap:6px;margin-bottom:10px}
-  .ad-row.ad-search-row input{min-width:0}
-  .ad input,.ad select,.ad textarea{padding:10px;font-size:16px;min-height:44px}
-  .ad-btn{padding:8px 10px;min-height:44px;font-size:11px}
-  .ad-btn.sm{min-height:36px;padding:6px 8px;font-size:10px}
-  .ad-btn.xs{min-height:28px;padding:3px 5px;font-size:9px}
-  .ad-form{max-width:100%}
-  .ad-card{padding:12px;border-radius:8px}
-  .ad-account-card{padding:12px}
-  .ad-account-card-header{margin-bottom:10px;padding-bottom:10px}
-  .ad-account-name{font-size:13px}
-  .ad-account-card-body{margin-bottom:10px}
-  .ad-account-card-row{font-size:12px;padding:4px 0}
-  .ad-account-card-actions{gap:6px}
-  .ad-account-card-actions .ad-btn{min-height:36px;font-size:10px}
-  .ad-login{padding:12px}
-  .ad-modal{width:95vw;padding:14px;border-radius:8px}
-  .ad-modal h3{font-size:14px;margin:0 0 6px}
-  .ad-detail-row{grid-template-columns:70px 1fr;gap:8px;padding:6px 0;font-size:11px}
-  .ad-detail-label{font-size:9px}
-  .ad-detail-value{font-size:11px}
-  .ad-table{font-size:10px}
-  .ad-table th{padding:6px 4px;font-size:8px}
-  .ad-table td{padding:6px 4px;font-size:10px}
-  .ad-table small{font-size:8px}
-  .ad-notice{padding:8px;margin:6px 0;font-size:11px}
-  .ad-error{font-size:11px;margin:4px 0}
-  .ad-empty{padding:12px;font-size:10px}
-  .ad-muted{font-size:11px}
-  label{margin:10px 0 4px !important;font-size:12px}
-  section{padding:0}
-}
-
-@media (max-width:360px){
-  .ad-hamburger{font-size:18px}
-  .ad-brand{font-size:12px}
-  .ad-brand span{font-size:8px}
-  .ad h2{font-size:14px}
-  .ad h3{font-size:12px}
-  .ad-stat-value{font-size:14px}
-  .ad-stat-label{font-size:8px}
-  .ad-btn{padding:6px 8px;min-height:40px;font-size:10px}
-  .ad-nav button{font-size:11px;padding:8px 6px;min-height:40px}
-  .ad input,.ad select,.ad textarea{padding:8px;min-height:40px;font-size:15px}
-}
-`;
+  .ad-accounts-desktop{
