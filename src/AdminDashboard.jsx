@@ -634,7 +634,7 @@ function BalanceManagement() {
 }
 
 // ============================================================================
-// TRANSACTION APPROVAL
+// TRANSACTION APPROVAL - ✅ FIXED
 // ============================================================================
 
 function TransactionApproval() {
@@ -656,7 +656,7 @@ function TransactionApproval() {
     try {
       await api(`/admin/transactions/${actionId}/${actionType}`, {
         method: 'POST',
-        body: { reason: actionType === 'reject' ? reason : undefined },
+        body: { note: actionType === 'reject' ? reason : undefined },
       });
       setNotice({ text: `Transaction ${actionType}ed successfully` });
       setActionId(null);
