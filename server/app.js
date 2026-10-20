@@ -1623,11 +1623,11 @@ export async function createApp() {
         return response.status(400).json({ error: 'Reason must be between 3 and 300 characters.' });
       }
 
-      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
+      const target = await findAccountByIdentifier(sql, request.params.id);
+      if (!target) return response.status(404).json({ error: 'Member account not found.' });
+      if (target.role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
 
-      const currentBalance = await approvedBalanceCents(request.params.id);
+      const currentBalance = await approvedBalanceCents(target.id);
       let txType;
       let txAmount;
       let reference;
@@ -1657,19 +1657,19 @@ export async function createApp() {
       const txId = randomBytes(16).toString('hex');
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.params.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
+        VALUES (${txId}, ${target.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
       `;
 
-      await recordAudit(request, 'balance.adjustment', request.params.id, {
+      await recordAudit(request, 'balance.adjustment', target.id, {
         action,
         amountCents,
         reason: cleanReason,
-        email: target[0].email,
+        email: target.email,
         previousBalance: currentBalance / 100,
         newBalance: (action === 'set' ? amountCents : (txType === 'deposit' ? currentBalance + txAmount : currentBalance - txAmount)) / 100,
       });
 
-      const newBalance = await approvedBalanceCents(request.params.id);
+      const newBalance = await approvedBalanceCents(target.id);
       return response.json({
         ok: true,
         message: `Balance ${action}ed successfully.`,
