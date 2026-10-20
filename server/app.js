@@ -1593,6 +1593,93 @@ export async function createApp() {
     }
   });
 
+  // ✅ NEW ENDPOINT - BALANCE ADJUSTMENT
+  app.post('/api/admin/accounts/:id/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const { action, amountCents, reason } = request.body ?? {};
+
+      // Validate action
+      if (!['adjust', 'deduct', 'set'].includes(action)) {
+        return response.status(400).json({ error: 'Action must be adjust, deduct, or set.' });
+      }
+
+      // Validate amount
+      if (typeof amountCents !== 'number' || !Number.isFinite(amountCents) || amountCents <= 0) {
+        return response.status(400).json({ error: 'Amount must be a positive number in cents.' });
+      }
+
+      // Validate reason
+      const cleanReason = cleanText(reason, { min: 3, max: 300 });
+      if (cleanReason === null) {
+        return response.status(400).json({ error: 'Reason must be between 3 and 300 characters.' });
+      }
+
+      // Check target account exists and is not admin
+      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
+      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
+
+      const currentBalance = await approvedBalanceCents(request.params.id);
+      let txType;
+      let txAmount;
+      let reference;
+
+      if (action === 'adjust') {
+        // Add deposit transaction
+        txType = 'deposit';
+        txAmount = amountCents;
+        reference = `Admin adjustment: +${(amountCents / 100).toFixed(2)} USD`;
+      } else if (action === 'deduct') {
+        // Add withdrawal transaction
+        txType = 'withdrawal';
+        txAmount = amountCents;
+        reference = `Admin adjustment: -${(amountCents / 100).toFixed(2)} USD`;
+      } else if (action === 'set') {
+        // Set balance - create difference transaction
+        if (amountCents > currentBalance) {
+          txType = 'deposit';
+          txAmount = amountCents - currentBalance;
+          reference = `Admin set balance: ${(amountCents / 100).toFixed(2)} USD`;
+        } else if (amountCents < currentBalance) {
+          txType = 'withdrawal';
+          txAmount = currentBalance - amountCents;
+          reference = `Admin set balance: ${(amountCents / 100).toFixed(2)} USD`;
+        } else {
+          // Balance unchanged
+          return response.json({ ok: true, message: 'Balance unchanged.' });
+        }
+      }
+
+      // Create the transaction
+      const txId = randomBytes(16).toString('hex');
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${request.params.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
+      `;
+
+      // Record audit log
+      await recordAudit(request, 'balance.adjustment', request.params.id, {
+        action,
+        amountCents,
+        reason: cleanReason,
+        email: target[0].email,
+        previousBalance: currentBalance / 100,
+        newBalance: (action === 'set' ? amountCents : (txType === 'deposit' ? currentBalance + txAmount : currentBalance - txAmount)) / 100,
+      });
+
+      const newBalance = await approvedBalanceCents(request.params.id);
+      return response.json({
+        ok: true,
+        message: `Balance ${action}ed successfully.`,
+        previousBalance: currentBalance / 100,
+        newBalance: newBalance / 100,
+        transactionId: txId,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
     const { status, type, accountId } = request.query;
     
