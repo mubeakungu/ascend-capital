@@ -1,6 +1,5 @@
 // COMPLETE PRODUCTION-READY BACKEND - All endpoints working
-// Compatible with server/index.js
-// ✅ FIXED: createApp() is now synchronous and returns app immediately
+// Compatible with server/index.js - returns {app, close}
 
 import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -154,10 +153,10 @@ async function getAccountFromSession(req) {
 }
 
 // ====================
-// CREATE APP FUNCTION (SYNCHRONOUS - returns app immediately)
+// CREATE APP FUNCTION - Returns {app, close} object
 // ====================
 
-export function createApp() {
+export async function createApp() {
   // Create database connection
   const sql = postgres({
     host: process.env.DATABASE_HOST || 'localhost',
@@ -540,6 +539,11 @@ export function createApp() {
     }
   });
 
-  // ✅ RETURN APP SYNCHRONOUSLY - server/index.js can use it immediately
-  return app;
+  // ====================
+  // RETURN {app, close} object - matches server/index.js expectations
+  // ====================
+  return {
+    app,
+    close: () => sql.end()
+  };
 }
