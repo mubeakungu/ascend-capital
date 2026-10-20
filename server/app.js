@@ -106,7 +106,7 @@ function transactionView(row, { admin = false } = {}) {
     'trading_profit': 'Trading Profit',
     'tier_salary': 'Weekly Salary',
   };
-  
+
   const view = {
     id: row.id,
     type: typeMap[row.type] || row.type,
@@ -296,7 +296,7 @@ function getTierByProgress(directCount, teamTotal) {
     const req = TIER_REQUIREMENTS_DETAILED[i];
     const directMet = directCount >= req.direct;
     const teamMet = req.team === null || teamTotal >= req.team;
-    
+
     if (directMet && teamMet) return i;
   }
   return -1;
@@ -316,13 +316,13 @@ function getDailyProfitForDeposit(depositCents) {
 async function findAccountByIdentifier(sql, identifier) {
   // Try to find by ID first (faster)
   let account = await sql`SELECT id, name, email FROM accounts WHERE id = ${identifier}`;
-  
+
   if (account.length === 0) {
     // If not found by ID, try by email (case-insensitive)
     const emailLower = identifier.toLowerCase().trim();
     account = await sql`SELECT id, name, email FROM accounts WHERE LOWER(email) = ${emailLower}`;
   }
-  
+
   return account.length > 0 ? account[0] : null;
 }
 
@@ -540,9 +540,9 @@ export async function createApp() {
 
     const tokenHash = hashToken(token);
     const now = Date.now();
-    
+
     await sql`DELETE FROM sessions WHERE expires_at <= ${now}`;
-    
+
     const rows = await sql`
       SELECT accounts.id, accounts.name, accounts.email, accounts.phone, accounts.created_at, accounts.role, accounts.status,
         accounts.must_change_password
@@ -550,7 +550,7 @@ export async function createApp() {
       JOIN accounts ON accounts.id = sessions.account_id
       WHERE sessions.token_hash = ${tokenHash} AND sessions.expires_at > ${now} AND accounts.status = 'active'
     `;
-    
+
     if (rows.length === 0) return null;
     const row = rows[0];
     if (requireAdminRole && row.role !== 'admin') return null;
@@ -577,7 +577,7 @@ export async function createApp() {
 
     const resetRequested = process.env.RESET_ADMIN_PASSWORD === 'true';
     const existing = await sql`SELECT id FROM accounts WHERE email = ${ADMIN_USERNAME}`;
-    
+
     if (existing.length > 0 && !resetRequested) {
       await sql`UPDATE accounts SET role = 'admin' WHERE id = ${existing[0].id}`;
       return;
@@ -627,7 +627,7 @@ export async function createApp() {
       const directCount = await getDirectReferralCount(sql, codeRecord[0].account_id);
       const teamTotal = await getTeamTotal(sql, codeRecord[0].account_id);
       const tier = getTierByProgress(directCount, teamTotal);
-      
+
       if (tier >= 0) {
         const tierReward = await checkAndCreditTierReward(sql, codeRecord[0].account_id);
         if (tierReward) {
@@ -644,12 +644,12 @@ export async function createApp() {
       const directReferrerOf = await sql`
         SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${codeRecord[0].account_id}
       `;
-      
+
       if (directReferrerOf.length > 0 && directReferrerOf[0].referrer_id) {
         const grandDirect = await getDirectReferralCount(sql, directReferrerOf[0].referrer_id);
         const grandTeam = await getTeamTotal(sql, directReferrerOf[0].referrer_id);
         const grandTier = getTierByProgress(grandDirect, grandTeam);
-        
+
         if (grandTier >= 0) {
           const grandParentTierReward = await checkAndCreditTierReward(sql, directReferrerOf[0].referrer_id);
           if (grandParentTierReward) {
@@ -693,12 +693,12 @@ export async function createApp() {
     `;
 
     const referrerId = referralSignup[0]?.referrer_id;
-    
+
     let commissionCents;
     let commissionRate;
     let beneficiaryId = referrerId;
     let bonusType;
-    
+
     if (isFirstDeposit) {
       if (referrerId) {
         commissionRate = 0.05;
@@ -717,13 +717,13 @@ export async function createApp() {
         ORDER BY created_at ASC
         LIMIT 1
       `;
-      
+
       if (firstDeposit.length === 0) return null;
-      
+
       commissionRate = 0.025;
       commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
       bonusType = 'recharge_bonus_2.5%';
-      
+
       if (!referrerId) {
         beneficiaryId = tx.account_id;
       }
@@ -744,7 +744,7 @@ export async function createApp() {
   async function applyDailyTradingProfits() {
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
-    
+
     const activeDeposits = await sql`
       SELECT t.id, t.account_id, t.amount_cents, t.created_at
       FROM transactions t
@@ -762,14 +762,14 @@ export async function createApp() {
 
       const depositDate = new Date(deposit.created_at);
       const depositDay = depositDate.toISOString().split('T')[0];
-      
+
       if (depositDay === today) {
         continue;
       }
-      
+
       const currentMinutesOfDay = now.getHours() * 60 + now.getMinutes();
       const activationMinutesOfDay = EARNINGS_ACTIVATION_HOUR * 60 + EARNINGS_ACTIVATION_MINUTE;
-      
+
       if (currentMinutesOfDay < activationMinutesOfDay) {
         continue;
       }
@@ -868,9 +868,9 @@ export async function createApp() {
     const tomorrow = new Date(now);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     tomorrow.setUTCHours(0, 0, 0, 0);
-    
+
     const timeUntilMidnight = tomorrow.getTime() - now.getTime();
-    
+
     setTimeout(() => {
       applyDailyTradingProfits();
       setInterval(() => {
@@ -967,7 +967,7 @@ export async function createApp() {
       const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
       const id = randomBytes(16).toString('hex');
       const createdAt = new Date().toISOString();
-      
+
       await sql`
         INSERT INTO accounts (id, name, email, password_salt, password_hash, phone, pin, created_at)
         VALUES (${id}, ${input.name.trim()}, ${email}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${input.phone?.trim() || null}, ${input.pin || null}, ${createdAt})
@@ -1103,12 +1103,12 @@ export async function createApp() {
       }
 
       await sql`DELETE FROM sessions WHERE account_id = ${row.id}`;
-      
+
       const token = randomBytes(32).toString('base64url');
       const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
       await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${row.id}, ${expiresAt})`;
       setSessionCookie(response, token, secureCookie, ADMIN_SESSION_COOKIE);
-      
+
       await recordAudit({ ip: request.ip }, 'admin.login', row.id, { email });
       return response.json({ account: accountView(row) });
     } catch (error) {
@@ -1191,7 +1191,7 @@ export async function createApp() {
   app.get('/api/referrals/earned-rewards', requireAccount, async (request, response) => {
     const rewards = await sql`
       SELECT tier_index, tier_name, reward_cents, physical_reward,
-        physical_reward_value_cents, direct_referrals_at_award, 
+        physical_reward_value_cents, direct_referrals_at_award,
         team_total_at_award, credited_at
       FROM referral_tier_rewards
       WHERE referrer_id = ${request.account.id}
@@ -1331,6 +1331,117 @@ export async function createApp() {
     });
   });
 
+  // ✅ NEW: Manual AutoTrade Endpoints (Claim Daily Trade)
+  // =========================================================================
+
+  app.get('/api/trading/can-claim-today', requireAccount, async (request, response) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // Check if user has active deposit
+      const activeDeposits = await sql`
+        SELECT id, amount_cents FROM transactions
+        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+        LIMIT 1
+      `;
+
+      if (activeDeposits.length === 0) {
+        return response.json({
+          canClaimToday: false,
+          hasActiveDeposit: false,
+          alreadyClaimedToday: false,
+          dailyProfitAmount: 0,
+        });
+      }
+
+      // Check if already claimed today
+      const alreadyClaimed = await sql`
+        SELECT id FROM trading_ledger
+        WHERE account_id = ${request.account.id} AND profit_date = ${today}
+      `;
+
+      const dailyProfit = getDailyProfitForDeposit(activeDeposits[0].amount_cents);
+
+      return response.json({
+        canClaimToday: alreadyClaimed.length === 0,
+        hasActiveDeposit: true,
+        alreadyClaimedToday: alreadyClaimed.length > 0,
+        dailyProfitAmount: dailyProfit,
+      });
+    } catch (error) {
+      console.error('Error in /api/trading/can-claim-today:', error);
+      return response.status(500).json({ error: 'Failed to check claim status.' });
+    }
+  });
+
+  app.post('/api/trading/claim-daily-trade', updateRateLimit, requireAccount, async (request, response, next) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // Check if user has active deposit
+      const activeDeposits = await sql`
+        SELECT id, amount_cents FROM transactions
+        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+      `;
+
+      if (activeDeposits.length === 0) {
+        return response.status(409).json({ error: 'No active deposits found.' });
+      }
+
+      // Check if already claimed today
+      const alreadyClaimed = await sql`
+        SELECT id FROM trading_ledger
+        WHERE account_id = ${request.account.id} AND profit_date = ${today}
+      `;
+
+      if (alreadyClaimed.length > 0) {
+        return response.status(409).json({ error: 'You have already claimed your trade today.' });
+      }
+
+      // Calculate total daily profit from all active deposits
+      let totalProfitCents = 0;
+      for (const deposit of activeDeposits) {
+        const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
+        if (dailyProfit > 0) {
+          totalProfitCents += Math.round(dailyProfit * 100);
+        }
+      }
+
+      if (totalProfitCents <= 0) {
+        return response.status(409).json({ error: 'No profit available to claim.' });
+      }
+
+      // Create trading ledger entry for the first deposit (or sum if multiple)
+      const ledgerId = randomBytes(16).toString('hex');
+      const txId = randomBytes(16).toString('hex');
+
+      await sql`
+        INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
+        VALUES (${ledgerId}, ${request.account.id}, ${activeDeposits[0].id}, ${totalProfitCents}, ${today}, ${new Date().toISOString()})
+      `;
+
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${request.account.id}, 'trading_profit', ${totalProfitCents}, ${`Manual daily trade claim from ${today}`}, 'approved', ${new Date().toISOString()})
+      `;
+
+      await recordAudit(request, 'trading.claim_daily_trade', ledgerId, {
+        profitAmount: totalProfitCents / 100,
+        profitDate: today,
+      });
+
+      return response.status(201).json({
+        ok: true,
+        message: `Successfully claimed $${(totalProfitCents / 100).toFixed(2)} in daily trading profit.`,
+        earnedAmount: totalProfitCents / 100,
+        transactionId: txId,
+      });
+    } catch (error) {
+      console.error('Error in /api/trading/claim-daily-trade:', error);
+      return next(error);
+    }
+  });
+
   // =========================================================================
   // TRADING ENDPOINTS
   // =========================================================================
@@ -1410,7 +1521,7 @@ export async function createApp() {
 
       const id = randomBytes(16).toString('hex');
       const now = new Date().toISOString();
-      
+
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
         VALUES (${id}, ${request.account.id}, ${input.type}, ${amountCents}, ${reference}, 'pending', ${now})
@@ -1479,7 +1590,7 @@ export async function createApp() {
       LIMIT 100
     `;
 
-    return response.json({ 
+    return response.json({
       accounts: accounts.map((row) => ({
         ...accountView(row),
         holdReason: row.hold_reason ?? null,
@@ -1684,7 +1795,7 @@ export async function createApp() {
 
   app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
     const { status, type, accountId } = request.query;
-    
+
     if (status !== undefined && !TX_STATUSES.includes(status)) {
       return response.status(400).json({ error: 'Invalid status filter.' });
     }
@@ -1696,76 +1807,76 @@ export async function createApp() {
     }
 
     let rows;
-    
+
     if (status && type && accountId) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.status = ${status} AND t.type = ${type} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (status && type) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.status = ${status} AND t.type = ${type}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (status && accountId) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.status = ${status} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (type && accountId) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.type = ${type} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (status) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.status = ${status}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (type) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.type = ${type}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else if (accountId) {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         WHERE t.account_id = ${accountId}
-        ORDER BY t.created_at DESC 
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     } else {
       rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email 
-        FROM transactions t 
-        JOIN accounts a ON a.id = t.account_id 
-        ORDER BY t.created_at DESC 
+        SELECT t.*, a.name AS account_name, a.email AS account_email
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        ORDER BY t.created_at DESC
         LIMIT 200
       `;
     }
@@ -1833,7 +1944,7 @@ export async function createApp() {
             const directCount = await getDirectReferralCount(sql, referralSignup[0].referrer_id);
             const teamTotal = await getTeamTotal(sql, referralSignup[0].referrer_id);
             const tier = getTierByProgress(directCount, teamTotal);
-            
+
             if (tier >= 0) {
               const tierReward = await checkAndCreditTierReward(sql, referralSignup[0].referrer_id);
               if (tierReward) {
@@ -1851,12 +1962,12 @@ export async function createApp() {
             const grandParentSignup = await sql`
               SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${referralSignup[0].referrer_id}
             `;
-            
+
             if (grandParentSignup.length > 0 && grandParentSignup[0].referrer_id) {
               const grandDirect = await getDirectReferralCount(sql, grandParentSignup[0].referrer_id);
               const grandTeam = await getTeamTotal(sql, grandParentSignup[0].referrer_id);
               const grandTier = getTierByProgress(grandDirect, grandTeam);
-              
+
               if (grandTier >= 0) {
                 const grandParentTierReward = await checkAndCreditTierReward(sql, grandParentSignup[0].referrer_id);
                 if (grandParentTierReward) {
@@ -1947,7 +2058,7 @@ export async function createApp() {
     }
   });
 
-  // ✅ FIXED: MAIN REFERRAL ENDPOINT - Accepts ID or Email
+  // ✅ ADMIN REFERRAL ENDPOINTS - Accepts ID or Email
   app.get('/api/admin/referrals/:identifier', adminLimiter, requireAdminSession, async (request, response) => {
     const account = await findAccountByIdentifier(sql, request.params.identifier);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
@@ -1997,40 +2108,7 @@ export async function createApp() {
     });
   });
 
-  // ✅ FIXED: TIER REWARDS ENDPOINT - Accepts ID or Email
-  app.get('/api/admin/referrals/:identifier/tier-rewards', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await findAccountByIdentifier(sql, request.params.identifier);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
-
-    const progression = await getTierProgression(sql, account.id);
-    const rewards = await sql`
-      SELECT tier_index, tier_name, reward_cents, physical_reward,
-        physical_reward_value_cents, direct_referrals_at_award, 
-        team_total_at_award, credited_at, transaction_id
-      FROM referral_tier_rewards
-      WHERE referrer_id = ${account.id}
-      ORDER BY tier_index ASC
-    `;
-
-    return response.json({
-      account: { id: account.id, name: account.name, email: account.email },
-      directReferrals: progression.directReferrals,
-      teamTotal: progression.teamTotal,
-      currentTier: progression.currentTierName,
-      earnedRewards: rewards.map(r => ({
-        tierIndex: r.tier_index,
-        tierName: r.tier_name,
-        amountUSD: r.reward_cents / 100,
-        physicalReward: r.physical_reward,
-        directWhen: r.direct_referrals_at_award,
-        teamTotalWhen: r.team_total_at_award,
-        creditedAt: r.credited_at,
-        transactionId: r.transaction_id,
-      })),
-    });
-  });
-
-  // ✅ FIXED: REFERRED MEMBERS ENDPOINT - Accepts ID or Email
+  // ✅ REFERRED MEMBERS ENDPOINT - Accepts ID or Email
   app.get('/api/admin/referrals/:identifier/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
     const account = await findAccountByIdentifier(sql, request.params.identifier);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
