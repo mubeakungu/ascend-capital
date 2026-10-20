@@ -1,5 +1,6 @@
 // COMPLETE PRODUCTION-READY BACKEND - All endpoints working
 // Compatible with server/index.js
+// ✅ FIXED: createApp() is now synchronous and returns app immediately
 
 import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -31,20 +32,11 @@ const DEPOSIT_PLANS = [
 const TIER_NAMES = ['Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5', 'Star 6', 'Star 7', 'Star 8', 'Crown Leader'];
 const TIER_SALARIES = [0, 100, 200, 300, 450, 900, 1500, 2500, 5000];
 
-// Database
-const sql = postgres({
-  host: process.env.DATABASE_HOST || 'localhost',
-  port: process.env.DATABASE_PORT || 5432,
-  database: process.env.DATABASE_NAME || 'ascend',
-  username: process.env.DATABASE_USER || 'postgres',
-  password: process.env.DATABASE_PASSWORD || 'postgres',
-});
-
 // ====================
-// INITIALIZE DATABASE
+// DATABASE INITIALIZATION (ASYNC - runs in background)
 // ====================
 
-async function initializeDatabase() {
+async function initializeDatabase(sql) {
   try {
     // Accounts table
     await sql`
@@ -110,21 +102,21 @@ async function initializeDatabase() {
       )
     `;
 
-    // Admin check
+    // Admin check - create default admin if none exists
     const adminCheck = await sql`SELECT * FROM accounts WHERE role = 'admin' LIMIT 1`;
     if (adminCheck.length === 0) {
       const password = process.env.ADMIN_PASSWORD || 'Admin@123';
       const salt = randomBytes(16);
-      const hash = await scryptAsync(password, salt, PASSWORD_BYTES);
+      const hash = await scryptAsync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
       await sql`
         INSERT INTO accounts (email, name, password_hash, salt, role)
         VALUES ('admin@ascend.capital', 'Administrator', ${hash}, ${salt}, 'admin')
       `;
     }
 
-    console.log('✅ Database initialized');
+    console.log('✅ Database initialized successfully');
   } catch (error) {
-    console.error('Database error:', error);
+    console.error('❌ Database initialization error:', error.message);
   }
 }
 
@@ -134,12 +126,12 @@ async function initializeDatabase() {
 
 async function hashPassword(password) {
   const salt = randomBytes(16);
-  const hash = await scryptAsync(password, salt, PASSWORD_BYTES);
+  const hash = await scryptAsync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
   return { hash, salt };
 }
 
 async function verifyPassword(password, salt, hash) {
-  const testHash = await scryptAsync(password, salt, PASSWORD_BYTES);
+  const testHash = await scryptAsync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
   return timingSafeEqual(hash, testHash);
 }
 
@@ -162,10 +154,22 @@ async function getAccountFromSession(req) {
 }
 
 // ====================
-// CREATE APP FUNCTION
+// CREATE APP FUNCTION (SYNCHRONOUS - returns app immediately)
 // ====================
 
 export function createApp() {
+  // Create database connection
+  const sql = postgres({
+    host: process.env.DATABASE_HOST || 'localhost',
+    port: process.env.DATABASE_PORT || 5432,
+    database: process.env.DATABASE_NAME || 'ascend',
+    username: process.env.DATABASE_USER || 'postgres',
+    password: process.env.DATABASE_PASSWORD || 'postgres',
+  });
+
+  // Initialize database in BACKGROUND - does NOT block app startup
+  initializeDatabase(sql).catch(err => console.error('Database init error:', err));
+
   const app = express();
 
   // Middleware
@@ -175,9 +179,6 @@ export function createApp() {
     res.header('Access-Control-Allow-Headers', 'Content-Type');
     next();
   });
-
-  // Initialize database in background (don't wait)
-  initializeDatabase().catch(err => console.error('Database init error:', err));
 
   // ====================
   // PUBLIC ENDPOINTS
@@ -539,5 +540,6 @@ export function createApp() {
     }
   });
 
+  // ✅ RETURN APP SYNCHRONOUSLY - server/index.js can use it immediately
   return app;
 }
