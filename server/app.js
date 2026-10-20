@@ -312,6 +312,20 @@ function getDailyProfitForDeposit(depositCents) {
   return 0;
 }
 
+// ✅ HELPER FUNCTION: Find account by ID or email
+async function findAccountByIdentifier(sql, identifier) {
+  // Try to find by ID first (faster)
+  let account = await sql`SELECT id, name, email FROM accounts WHERE id = ${identifier}`;
+  
+  if (account.length === 0) {
+    // If not found by ID, try by email (case-insensitive)
+    const emailLower = identifier.toLowerCase().trim();
+    account = await sql`SELECT id, name, email FROM accounts WHERE LOWER(email) = ${emailLower}`;
+  }
+  
+  return account.length > 0 ? account[0] : null;
+}
+
 export async function createApp() {
   const sql = postgres(process.env.DATABASE_URL);
 
@@ -1933,45 +1947,14 @@ export async function createApp() {
     }
   });
 
-  app.get('/api/admin/referrals/:accountId/tier-rewards', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
-    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
-
-    const progression = await getTierProgression(sql, request.params.accountId);
-    const rewards = await sql`
-      SELECT tier_index, tier_name, reward_cents, physical_reward,
-        physical_reward_value_cents, direct_referrals_at_award, 
-        team_total_at_award, credited_at, transaction_id
-      FROM referral_tier_rewards
-      WHERE referrer_id = ${request.params.accountId}
-      ORDER BY tier_index ASC
-    `;
-
-    return response.json({
-      account: { id: account[0].id, name: account[0].name, email: account[0].email },
-      directReferrals: progression.directReferrals,
-      teamTotal: progression.teamTotal,
-      currentTier: progression.currentTierName,
-      earnedRewards: rewards.map(r => ({
-        tierIndex: r.tier_index,
-        tierName: r.tier_name,
-        amountUSD: r.reward_cents / 100,
-        physicalReward: r.physical_reward,
-        directWhen: r.direct_referrals_at_award,
-        teamTotalWhen: r.team_total_at_award,
-        creditedAt: r.credited_at,
-        transactionId: r.transaction_id,
-      })),
-    });
-  });
-
-  app.get('/api/admin/referrals/:accountId', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
-    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
+  // ✅ FIXED: MAIN REFERRAL ENDPOINT - Accepts ID or Email
+  app.get('/api/admin/referrals/:identifier', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await findAccountByIdentifier(sql, request.params.identifier);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
 
     const directStats = await sql`
       SELECT COUNT(*) AS direct_count
-      FROM referral_signups WHERE referrer_id = ${request.params.accountId}
+      FROM referral_signups WHERE referrer_id = ${account.id}
     `;
 
     const commissions = await sql`
@@ -1987,17 +1970,17 @@ export async function createApp() {
       FROM referral_commissions rc
       JOIN accounts a ON a.id = rc.referred_account_id
       JOIN transactions t ON t.id = rc.transaction_id
-      WHERE rc.referrer_id = ${request.params.accountId}
+      WHERE rc.referrer_id = ${account.id}
       ORDER BY rc.created_at DESC
       LIMIT 100
     `;
 
     const directCount = directStats[0].direct_count;
-    const teamTotal = await getTeamTotal(sql, request.params.accountId);
+    const teamTotal = await getTeamTotal(sql, account.id);
     const tier = getTierByProgress(directCount, teamTotal);
 
     return response.json({
-      account: { id: account[0].id, name: account[0].name, email: account[0].email },
+      account: { id: account.id, name: account.name, email: account.email },
       tier: tier >= 0 ? TIER_NAMES[tier] : null,
       directReferrals: directCount,
       teamTotal,
@@ -2014,10 +1997,43 @@ export async function createApp() {
     });
   });
 
-  // ✅ NEW ENDPOINT - GET REFERRED MEMBERS FOR ADMIN
-  app.get('/api/admin/referrals/:accountId/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
-    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
+  // ✅ FIXED: TIER REWARDS ENDPOINT - Accepts ID or Email
+  app.get('/api/admin/referrals/:identifier/tier-rewards', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await findAccountByIdentifier(sql, request.params.identifier);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
+
+    const progression = await getTierProgression(sql, account.id);
+    const rewards = await sql`
+      SELECT tier_index, tier_name, reward_cents, physical_reward,
+        physical_reward_value_cents, direct_referrals_at_award, 
+        team_total_at_award, credited_at, transaction_id
+      FROM referral_tier_rewards
+      WHERE referrer_id = ${account.id}
+      ORDER BY tier_index ASC
+    `;
+
+    return response.json({
+      account: { id: account.id, name: account.name, email: account.email },
+      directReferrals: progression.directReferrals,
+      teamTotal: progression.teamTotal,
+      currentTier: progression.currentTierName,
+      earnedRewards: rewards.map(r => ({
+        tierIndex: r.tier_index,
+        tierName: r.tier_name,
+        amountUSD: r.reward_cents / 100,
+        physicalReward: r.physical_reward,
+        directWhen: r.direct_referrals_at_award,
+        teamTotalWhen: r.team_total_at_award,
+        creditedAt: r.credited_at,
+        transactionId: r.transaction_id,
+      })),
+    });
+  });
+
+  // ✅ FIXED: REFERRED MEMBERS ENDPOINT - Accepts ID or Email
+  app.get('/api/admin/referrals/:identifier/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await findAccountByIdentifier(sql, request.params.identifier);
+    if (!account) return response.status(404).json({ error: 'Account not found.' });
 
     const referrals = await sql`
       SELECT
@@ -2030,14 +2046,14 @@ export async function createApp() {
       FROM referral_signups rs
       JOIN accounts a ON a.id = rs.referred_account_id
       LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
-      WHERE rs.referrer_id = ${request.params.accountId}
+      WHERE rs.referrer_id = ${account.id}
       GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
       ORDER BY rs.signed_up_at DESC
       LIMIT 100
     `;
 
     return response.json({
-      referrer: { id: account[0].id, name: account[0].name, email: account[0].email },
+      referrer: { id: account.id, name: account.name, email: account.email },
       referrals: referrals.map(r => ({
         id: r.account_id,
         name: r.name,
