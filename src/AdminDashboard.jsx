@@ -222,8 +222,14 @@ function AccountsManagement() {
   const [selectedId, setSelectedId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [search, setSearch] = useState('');
 
-  const accounts = data?.accounts || [];
+  const allAccounts = data?.accounts || [];
+  const accounts = allAccounts.filter(a => 
+    a.name.toLowerCase().includes(search.toLowerCase()) ||
+    a.email.toLowerCase().includes(search.toLowerCase()) ||
+    a.id.toLowerCase().includes(search.toLowerCase())
+  );
 
   async function deleteAccount() {
     if (!deleteId) return;
@@ -248,6 +254,18 @@ function AccountsManagement() {
       <div className="ad-row" style={{ justifyContent: 'space-between' }}>
         <h2>Account Management</h2>
         <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+      </div>
+
+      <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
+        <input 
+          placeholder="Search by name, email, or ID" 
+          value={search} 
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        {search && (
+          <button className="ad-btn ghost" onClick={() => setSearch('')} style={{ flex: 0 }}>Clear</button>
+        )}
       </div>
 
       <Notice notice={notice} />
