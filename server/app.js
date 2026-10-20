@@ -548,7 +548,7 @@ export async function createApp() {
         accounts.must_change_password
       FROM sessions
       JOIN accounts ON accounts.id = sessions.account_id
-      WHERE sessions.token_hash = ${tokenHash} AND sessions.expires_at > ${now} AND accounts.status = 'active'
+      WHERE sessions.token_hash = ${tokenHash} AND sessions.expires_at > ${now}
     `;
     
     if (rows.length === 0) return null;
@@ -1260,46 +1260,35 @@ export async function createApp() {
     }
   });
 
-  app.get('/api/referrals/list', async (request, response, next) => {
-    try {
-      // Works for both member AND admin sessions
-      const accountId = request.account?.id || request.adminAccount?.id;
+  app.get('/api/referrals/list', requireAccount, async (request, response) => {
+    const referrals = await sql`
+      SELECT
+        rs.id,
+        a.id AS account_id,
+        a.name,
+        a.email,
+        a.status,
+        rs.signed_up_at,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
+      FROM referral_signups rs
+      JOIN accounts a ON a.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
+      WHERE rs.referrer_id = ${request.account.id}
+      GROUP BY rs.id, a.id, a.name, a.email, a.status, rs.signed_up_at
+      ORDER BY rs.signed_up_at DESC
+      LIMIT 100
+    `;
 
-      if (!accountId) {
-        return response.status(401).json({ error: 'Authentication required.' });
-      }
-
-      const referrals = await sql`
-        SELECT
-          rs.id,
-          a.id AS account_id,
-          a.name,
-          a.email,
-          a.status,
-          rs.signed_up_at,
-          COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
-        FROM referral_signups rs
-        JOIN accounts a ON a.id = rs.referred_account_id
-        LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
-        WHERE rs.referrer_id = ${accountId}
-        GROUP BY rs.id, a.id, a.name, a.email, a.status, rs.signed_up_at
-        ORDER BY rs.signed_up_at DESC
-        LIMIT 100
-      `;
-
-      return response.json({
-        referrals: referrals.map(r => ({
-          id: r.account_id,
-          name: r.name,
-          email: r.email,
-          status: r.status,
-          createdAt: r.signed_up_at,
-          totalDeposits: r.total_deposits_cents / 100,
-        })),
-      });
-    } catch (error) {
-      return next(error);
-    }
+    return response.json({
+      referrals: referrals.map(r => ({
+        id: r.account_id,
+        name: r.name,
+        email: r.email,
+        status: r.status,
+        createdAt: r.signed_up_at,
+        totalDeposits: r.total_deposits_cents / 100,
+      })),
+    });
   });
 
   app.get('/api/referrals/weekly-salary', requireAccount, async (request, response) => {
