@@ -329,7 +329,7 @@ async function findAccountByIdentifier(sql, identifier) {
 export async function createApp() {
   const sql = postgres(process.env.DATABASE_URL);
 
-  // Initialize tables
+  // Initialize tables (keeping existing table creation code)
   await sql`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
@@ -1606,6 +1606,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIXED: Balance adjustment accepts both ID and email
   app.post('/api/admin/accounts/:id/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const { action, amountCents, reason } = request.body ?? {};
@@ -1623,11 +1624,15 @@ export async function createApp() {
         return response.status(400).json({ error: 'Reason must be between 3 and 300 characters.' });
       }
 
-      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
+      // ✅ FIXED: Use findAccountByIdentifier to accept both ID and email
+      const target = await findAccountByIdentifier(sql, request.params.id);
+      if (!target) return response.status(404).json({ error: 'Member account not found.' });
+      
+      const targetAccount = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${target.id}`;
+      if (targetAccount.length === 0) return response.status(404).json({ error: 'Member account not found.' });
+      if (targetAccount[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
 
-      const currentBalance = await approvedBalanceCents(request.params.id);
+      const currentBalance = await approvedBalanceCents(target.id);
       let txType;
       let txAmount;
       let reference;
@@ -1657,19 +1662,19 @@ export async function createApp() {
       const txId = randomBytes(16).toString('hex');
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.params.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
+        VALUES (${txId}, ${target.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
       `;
 
-      await recordAudit(request, 'balance.adjustment', request.params.id, {
+      await recordAudit(request, 'balance.adjustment', target.id, {
         action,
         amountCents,
         reason: cleanReason,
-        email: target[0].email,
+        email: target.email,
         previousBalance: currentBalance / 100,
         newBalance: (action === 'set' ? amountCents : (txType === 'deposit' ? currentBalance + txAmount : currentBalance - txAmount)) / 100,
       });
 
-      const newBalance = await approvedBalanceCents(request.params.id);
+      const newBalance = await approvedBalanceCents(target.id);
       return response.json({
         ok: true,
         message: `Balance ${action}ed successfully.`,
@@ -2030,7 +2035,7 @@ export async function createApp() {
     });
   });
 
-  // ✅ FIXED: REFERRED MEMBERS ENDPOINT - Accepts ID or Email
+  // ✅ FIXED: REFERRED MEMBERS ENDPOINT - Accepts ID or Email, shows detailed list
   app.get('/api/admin/referrals/:identifier/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
     const account = await findAccountByIdentifier(sql, request.params.identifier);
     if (!account) return response.status(404).json({ error: 'Account not found.' });
@@ -2042,7 +2047,8 @@ export async function createApp() {
         a.name,
         a.email,
         rs.signed_up_at,
-        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents,
+        COUNT(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN 1 END) AS deposit_count
       FROM referral_signups rs
       JOIN accounts a ON a.id = rs.referred_account_id
       LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
@@ -2054,12 +2060,14 @@ export async function createApp() {
 
     return response.json({
       referrer: { id: account.id, name: account.name, email: account.email },
+      totalReferrals: referrals.length,
       referrals: referrals.map(r => ({
         id: r.account_id,
         name: r.name,
         email: r.email,
         signedUpAt: r.signed_up_at,
         totalDeposits: r.total_deposits_cents / 100,
+        depositCount: r.deposit_count,
       })),
     });
   });
