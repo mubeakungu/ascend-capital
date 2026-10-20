@@ -555,7 +555,7 @@ export async function createApp() {
     if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
     request.account = account;
     return next();
- }
+  }
 
   async function seedInitialAdmin() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
@@ -1118,7 +1118,6 @@ export async function createApp() {
     }
   });
 
-  // ✅ FIX: ADMIN PASSWORD ENDPOINT - THIS WAS MISSING AND IS NOW ADDED
   app.post('/api/admin/auth/password', passwordRateLimit, requireAdminSession, async (request, response, next) => {
     try {
       const { currentPassword, newPassword } = request.body ?? {};
