@@ -165,7 +165,7 @@ async function getAccountFromSession(req) {
 // CREATE APP FUNCTION
 // ====================
 
-export async function createApp() {
+export function createApp() {
   const app = express();
 
   // Middleware
@@ -176,8 +176,8 @@ export async function createApp() {
     next();
   });
 
-  // Initialize database
-  await initializeDatabase();
+  // Initialize database in background (don't wait)
+  initializeDatabase().catch(err => console.error('Database init error:', err));
 
   // ====================
   // PUBLIC ENDPOINTS
