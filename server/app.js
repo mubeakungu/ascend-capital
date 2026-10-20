@@ -554,14 +554,8 @@ export async function createApp() {
     const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
     if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
     request.account = account;
-    if (account.must_change_password) {
-      return response.status(403).json({
-        error: 'Change your temporary password to continue.',
-        code: 'PASSWORD_CHANGE_REQUIRED',
-      });
-    }
     return next();
-  }
+ }
 
   async function seedInitialAdmin() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
