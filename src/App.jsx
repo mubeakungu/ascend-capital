@@ -322,7 +322,7 @@ function AdminPage({ account, accountLoading, onNavigate }) {
   );
 }
 
-// ✅ NEW COMPONENT: Display referred members with their details
+// ✅ REFERRED MEMBERS LIST
 function ReferredMembersList() {
   const [referrals, setReferrals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -485,6 +485,9 @@ function TradingGraph({ balance, totalDeposits }) {
 }
 
 function App() {
+  // ✅ API URL CONFIGURATION
+  const API_URL = import.meta.env.VITE_API_URL || 'https://ascend-capital-api.onrender.com';
+
   const [route, setRoute] = useState(() => window.location.pathname);
   const [activeNav, setActiveNav] = useState('overview');
   const [modal, setModal] = useState(null);
@@ -687,7 +690,7 @@ function App() {
 
   async function fetchDeposits() {
     try {
-      const result = await requestApi('/api/deposits');
+      const result = await requestApi(`${API_URL}/api/deposits`, { credentials: 'include' });
       setDeposits(result.deposits || []);
     } catch (error) {
       console.error('Failed to fetch deposits:', error);
@@ -1744,6 +1747,7 @@ function App() {
                 <DepositCard
                   key={deposit.id}
                   deposit={deposit}
+                  apiUrl={API_URL}
                   onClaimed={(amount) => {
                     fetchAccountBalance();
                   }}
