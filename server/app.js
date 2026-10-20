@@ -1291,6 +1291,38 @@ export async function createApp() {
     });
   });
 
+  // ✅ Admin endpoint - for admin dashboard
+  app.get('/api/admin/referrals/my-list', adminLimiter, requireAdminSession, async (request, response) => {
+    const referrals = await sql`
+      SELECT
+        rs.id,
+        a.id AS account_id,
+        a.name,
+        a.email,
+        a.status,
+        rs.signed_up_at,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
+      FROM referral_signups rs
+      JOIN accounts a ON a.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
+      WHERE rs.referrer_id = ${request.account.id}
+      GROUP BY rs.id, a.id, a.name, a.email, a.status, rs.signed_up_at
+      ORDER BY rs.signed_up_at DESC
+      LIMIT 100
+    `;
+
+    return response.json({
+      referrals: referrals.map(r => ({
+        id: r.account_id,
+        name: r.name,
+        email: r.email,
+        status: r.status,
+        createdAt: r.signed_up_at,
+        totalDeposits: r.total_deposits_cents / 100,
+      })),
+    });
+  });
+
   app.get('/api/referrals/weekly-salary', requireAccount, async (request, response) => {
     const directCount = await getDirectReferralCount(sql, request.account.id);
     const teamTotal = await getTeamTotal(sql, request.account.id);
