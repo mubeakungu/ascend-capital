@@ -1594,28 +1594,93 @@ export async function createApp() {
 
   app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
     const { status, type, accountId } = request.query;
-    let query = sql`SELECT t.*, a.name AS account_name, a.email AS account_email FROM transactions t JOIN accounts a ON a.id = t.account_id`;
-    const filters = [];
-
-    if (status !== undefined) {
-      if (!TX_STATUSES.includes(status)) return response.status(400).json({ error: 'Invalid status filter.' });
-      filters.push(sql`t.status = ${status}`);
+    
+    // Validate filters
+    if (status !== undefined && !TX_STATUSES.includes(status)) {
+      return response.status(400).json({ error: 'Invalid status filter.' });
     }
-    if (type !== undefined) {
-      if (!TX_TYPES.slice(0, 2).includes(type)) return response.status(400).json({ error: 'Invalid type filter.' });
-      filters.push(sql`t.type = ${type}`);
+    if (type !== undefined && !TX_TYPES.slice(0, 2).includes(type)) {
+      return response.status(400).json({ error: 'Invalid type filter.' });
     }
-    if (accountId !== undefined) {
-      if (typeof accountId !== 'string' || accountId.length === 0 || accountId.length > 64) {
-        return response.status(400).json({ error: 'Invalid account filter.' });
-      }
-      filters.push(sql`t.account_id = ${accountId}`);
+    if (accountId !== undefined && (typeof accountId !== 'string' || accountId.length === 0 || accountId.length > 64)) {
+      return response.status(400).json({ error: 'Invalid account filter.' });
     }
 
-    const rows = await (filters.length > 0 
-      ? sql`${query} WHERE ${sql.join(filters, sql` AND `)} ORDER BY t.created_at DESC LIMIT 200`
-      : sql`${query} ORDER BY t.created_at DESC LIMIT 200`
-    );
+    let rows;
+    
+    // Build query based on filters
+    if (status && type && accountId) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.status = ${status} AND t.type = ${type} AND t.account_id = ${accountId}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (status && type) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.status = ${status} AND t.type = ${type}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (status && accountId) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.status = ${status} AND t.account_id = ${accountId}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (type && accountId) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.type = ${type} AND t.account_id = ${accountId}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (status) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.status = ${status}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (type) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.type = ${type}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else if (accountId) {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        WHERE t.account_id = ${accountId}
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    } else {
+      rows = await sql`
+        SELECT t.*, a.name AS account_name, a.email AS account_email 
+        FROM transactions t 
+        JOIN accounts a ON a.id = t.account_id 
+        ORDER BY t.created_at DESC 
+        LIMIT 200
+      `;
+    }
 
     return response.json({ transactions: rows.map((row) => transactionView(row, { admin: true })) });
   });
