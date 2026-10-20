@@ -5,7 +5,6 @@ import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'no
 import { promisify } from 'node:util';
 import postgres from 'postgres';
 import express from 'express';
-import cookieParser from 'cookie-parser';
 
 const scryptAsync = promisify(scrypt);
 
@@ -146,8 +145,17 @@ function setSessionCookie(res, accountId) {
   return token;
 }
 
-async function getAccountFromSession(req) {
-  const token = req.cookies[SESSION_COOKIE];
+async function getAccountFromSession(req, sql) {
+  // Parse cookie from header manually (no cookie-parser needed)
+  const cookieHeader = req.headers.cookie;
+  let token = null;
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(';').map(c => c.trim());
+    const sessionCookie = cookies.find(c => c.startsWith(SESSION_COOKIE + '='));
+    if (sessionCookie) {
+      token = sessionCookie.substring(SESSION_COOKIE.length + 1);
+    }
+  }
   if (!token) return null;
   const accounts = await sql`SELECT * FROM accounts LIMIT 1`;
   return accounts[0] || null;
@@ -174,7 +182,6 @@ export async function createApp() {
 
   // ✅ CRITICAL MIDDLEWARE
   app.use(express.json());
-  app.use(cookieParser()); // ✅ Added - required for session cookies
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -242,7 +249,7 @@ export async function createApp() {
 
   app.get('/api/auth/me', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
       res.json({ account: { id: account.id, email: account.email, name: account.name, role: account.role, referralCode: account.referral_code } });
     } catch (error) {
@@ -257,7 +264,7 @@ export async function createApp() {
 
   app.patch('/api/auth/profile', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const { name } = req.body;
@@ -274,7 +281,7 @@ export async function createApp() {
 
   app.get('/api/transactions', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const transactions = await sql`SELECT * FROM transactions WHERE account_id = ${account.id} ORDER BY created_at DESC`;
@@ -288,7 +295,7 @@ export async function createApp() {
 
   app.post('/api/transactions', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const { type, amount, reference } = req.body;
@@ -310,7 +317,7 @@ export async function createApp() {
 
   app.get('/api/deposits', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const deposits = await sql`
@@ -328,7 +335,7 @@ export async function createApp() {
 
   app.get('/api/deposits/:id/claimable-profit', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const { id } = req.params;
@@ -350,7 +357,7 @@ export async function createApp() {
 
   app.post('/api/deposits/:id/claim-profit', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const { id } = req.params;
@@ -382,7 +389,7 @@ export async function createApp() {
 
   app.post('/api/trades/:depositId/trigger', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const { depositId } = req.params;
@@ -400,7 +407,7 @@ export async function createApp() {
 
   app.get('/api/referrals/code', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
       res.json({ code: account.referral_code });
     } catch (error) {
@@ -410,7 +417,7 @@ export async function createApp() {
 
   app.get('/api/referrals/stats', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const referrals = await sql`SELECT COUNT(*) as count FROM referrals WHERE referrer_id = ${account.id}`;
@@ -424,7 +431,7 @@ export async function createApp() {
 
   app.get('/api/referrals/list', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const referrals = await sql`
@@ -445,7 +452,7 @@ export async function createApp() {
 
   app.get('/api/referrals/weekly-salary', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account) return res.status(401).json({ error: 'Not authenticated' });
 
       const referrals = await sql`SELECT COUNT(*) as count FROM referrals WHERE referrer_id = ${account.id}`;
@@ -471,7 +478,7 @@ export async function createApp() {
 
   app.get('/api/admin/accounts', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account || account.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
       const accounts = await sql`SELECT id, email, name, role, created_at FROM accounts ORDER BY created_at DESC`;
@@ -483,7 +490,7 @@ export async function createApp() {
 
   app.get('/api/admin/transactions', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account || account.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
       const transactions = await sql`
@@ -502,7 +509,7 @@ export async function createApp() {
 
   app.post('/api/admin/transactions/:id/approve', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account || account.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
       const { id } = req.params;
@@ -516,7 +523,7 @@ export async function createApp() {
 
   app.patch('/api/admin/accounts/:id/profile', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account || account.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
       const { name } = req.body;
@@ -530,7 +537,7 @@ export async function createApp() {
 
   app.post('/api/admin/auth/password', async (req, res) => {
     try {
-      const account = await getAccountFromSession(req);
+      const account = await getAccountFromSession(req, sql);
       if (!account || account.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
       const { currentPassword, newPassword } = req.body;
