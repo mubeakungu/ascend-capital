@@ -175,8 +175,14 @@ export async function createApp() {
     password: process.env.DATABASE_PASSWORD || 'postgres',
   });
 
-  // Initialize database in BACKGROUND - does NOT block app startup
-  initializeDatabase(sql).catch(err => console.error('Database init error:', err));
+  // ✅ WAIT for database to be ready BEFORE accepting requests
+  try {
+    await initializeDatabase(sql);
+    console.log('✅ Database ready - app accepting requests');
+  } catch (err) {
+    console.error('❌ Database initialization failed:', err.message);
+    throw err; // Fail startup if database won't initialize
+  }
 
   const app = express();
 
