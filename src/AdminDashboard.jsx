@@ -8,7 +8,7 @@ const when = (iso) => {
   if (!iso) return '—';
   const date = new Date(iso);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  return isMobile
+  return isMobile 
     ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : date.toLocaleString();
 };
@@ -152,7 +152,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     <div className="ad-overlay" onClick={onClose}>
       <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
         <h3>Account Details</h3>
-
+        
         <div className="ad-detail-row">
           <span className="ad-detail-label">ID</span>
           <span className="ad-detail-value">{account.id}</span>
@@ -225,7 +225,7 @@ function AccountsManagement() {
   const [search, setSearch] = useState('');
 
   const allAccounts = data?.accounts || [];
-  const accounts = allAccounts.filter(a =>
+  const accounts = allAccounts.filter(a => 
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.email.toLowerCase().includes(search.toLowerCase()) ||
     a.id.toLowerCase().includes(search.toLowerCase())
@@ -257,9 +257,9 @@ function AccountsManagement() {
       </div>
 
       <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
-        <input
-          placeholder="Search by name, email, or ID"
-          value={search}
+        <input 
+          placeholder="Search by name, email, or ID" 
+          value={search} 
           onChange={(e) => setSearch(e.target.value)}
           style={{ flex: 1 }}
         />
@@ -346,8 +346,8 @@ function AccountsManagement() {
       </div>
 
       {selectedId && (
-        <AccountDetailModal
-          accountId={selectedId}
+        <AccountDetailModal 
+          accountId={selectedId} 
           onClose={() => setSelectedId(null)}
           onUpdate={reload}
         />
@@ -404,7 +404,7 @@ function Dashboard() {
         <h2>System Overview</h2>
         <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
-
+      
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
@@ -418,51 +418,6 @@ function Dashboard() {
         <StatCard label="Pending Review" value={txns.length} subtext="txns" />
       </div>
     </section>
-  );
-}
-
-// ============================================================================
-// ADMIN'S REFERRED MEMBERS (AUTO LOAD)
-// ============================================================================
-
-function AdminReferredMembers() {
-  const [{ data, error, loading }, reload] = useLoad(
-    () => api('/api/admin/referrals/my-list'),
-    []
-  );
-
-  if (loading) return <p className="ad-empty">Loading your network…</p>;
-  if (error) return null; // Silently fail if no referrals
-
-  const referrals = Array.isArray(data?.referrals) ? data.referrals : [];
-  if (!referrals.length) return null; // Don't show if no referrals
-
-  return (
-    <div style={{ marginBottom: '24px' }}>
-      <h3>Your Network - Referred Members</h3>
-      <div className="ad-scroll">
-        <table className="ad-table">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Joined</th>
-            </tr>
-          </thead>
-          <tbody>
-            {referrals.map((ref) => (
-              <tr key={ref.id}>
-                <td>{ref.name}</td>
-                <td>{ref.email}</td>
-                <td><Badge value={ref.status || 'active'} /></td>
-                <td>{when(ref.createdAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
   );
 }
 
@@ -481,18 +436,15 @@ function ReferralsManagement() {
   return (
     <section>
       <h2>Referral Management</h2>
-
-      <AdminReferredMembers />
-
       <div className="ad-row ad-search-row">
-        <input
-          placeholder="Search by member ID or email"
-          value={searchId}
+        <input 
+          placeholder="Search by member ID" 
+          value={searchId} 
           onChange={(e) => setSearchId(e.target.value)}
         />
         <button className="ad-btn ghost" onClick={reload}>Search</button>
       </div>
-
+      
       <Notice notice={notice} />
       {error && <p className="ad-error">{error}</p>}
 
@@ -535,7 +487,7 @@ function ReferralsManagement() {
       ) : searchId ? (
         <p className="ad-empty">No referral data found</p>
       ) : (
-        <p className="ad-empty">Enter a member ID or email to search</p>
+        <p className="ad-empty">Enter a member ID to search</p>
       )}
     </section>
   );
@@ -656,9 +608,9 @@ function BalanceManagement() {
       <h2>Adjust Member Balance</h2>
       <form className="ad-form" onSubmit={submit}>
         <label>Member ID</label>
-        <input
-          type="text"
-          value={memberId}
+        <input 
+          type="text" 
+          value={memberId} 
           onChange={(e) => setMemberId(e.target.value)}
           placeholder="Enter member ID"
           required
@@ -672,17 +624,17 @@ function BalanceManagement() {
         </select>
 
         <label>Amount (USD)</label>
-        <input
-          type="number"
+        <input 
+          type="number" 
           step="0.01"
-          value={amount}
+          value={amount} 
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
           required
         />
 
         <label>Reason</label>
-        <textarea
+        <textarea 
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -829,7 +781,7 @@ function TransactionApproval() {
         <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
             <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
-
+            
             {actionType === 'reject' && (
               <>
                 <label>Reason for rejection</label>
@@ -1075,9 +1027,9 @@ export default function AdminDashboard() {
           </div>
           <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
             {tabs.map(([key, label]) => (
-              <button
-                key={key}
-                className={tab === key ? 'on' : ''}
+              <button 
+                key={key} 
+                className={tab === key ? 'on' : ''} 
                 onClick={() => { setTab(key); setMobileMenuOpen(false); }}
               >
                 {label}
