@@ -554,6 +554,12 @@ export async function createApp() {
     const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
     if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
     request.account = account;
+    if (account.must_change_password) {
+      return response.status(403).json({
+        error: 'Change your temporary password to continue.',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
+    }
     return next();
   }
 
@@ -575,7 +581,7 @@ export async function createApp() {
     if (existing.length > 0) {
       await sql`
         UPDATE accounts
-        SET role = 'admin', status = 'active', password_salt = ${salt.toString('hex')}, password_hash = ${passwordHash.toString('hex')}, must_change_password = 0
+        SET role = 'admin', status = 'active', password_salt = ${salt.toString('hex')}, password_hash = ${passwordHash.toString('hex')}, must_change_password = 1
         WHERE id = ${existing[0].id}
       `;
       await sql`DELETE FROM sessions WHERE account_id = ${existing[0].id}`;
@@ -586,7 +592,7 @@ export async function createApp() {
     const id = randomBytes(16).toString('hex');
     await sql`
       INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role, must_change_password)
-      VALUES (${id}, 'Administrator', ${ADMIN_USERNAME}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${new Date().toISOString()}, 'admin', 0)
+      VALUES (${id}, 'Administrator', ${ADMIN_USERNAME}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${new Date().toISOString()}, 'admin', 1)
     `;
   }
 
@@ -1118,6 +1124,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIX: ADMIN PASSWORD ENDPOINT - THIS WAS MISSING AND IS NOW ADDED
   app.post('/api/admin/auth/password', passwordRateLimit, requireAdminSession, async (request, response, next) => {
     try {
       const { currentPassword, newPassword } = request.body ?? {};
