@@ -422,6 +422,51 @@ function Dashboard() {
 }
 
 // ============================================================================
+// ADMIN'S REFERRED MEMBERS (AUTO LOAD)
+// ============================================================================
+
+function AdminReferredMembers() {
+  const [{ data, error, loading }, reload] = useLoad(
+    () => api('/api/referrals/list'),
+    []
+  );
+
+  if (loading) return <p className="ad-empty">Loading your network…</p>;
+  if (error) return null; // Silently fail if no referrals
+
+  const referrals = Array.isArray(data?.referrals) ? data.referrals : [];
+  if (!referrals.length) return null; // Don't show if no referrals
+
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      <h3>Your Network - Referred Members</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Joined</th>
+            </tr>
+          </thead>
+          <tbody>
+            {referrals.map((ref) => (
+              <tr key={ref.id}>
+                <td>{ref.name}</td>
+                <td>{ref.email}</td>
+                <td><Badge value={ref.status || 'active'} /></td>
+                <td>{when(ref.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // REFERRALS MANAGEMENT
 // ============================================================================
 
@@ -436,15 +481,18 @@ function ReferralsManagement() {
   return (
     <section>
       <h2>Referral Management</h2>
+
+      <AdminReferredMembers />
+
       <div className="ad-row ad-search-row">
-        <input 
-          placeholder="Search by member ID" 
-          value={searchId} 
+        <input
+          placeholder="Search by member ID or email"
+          value={searchId}
           onChange={(e) => setSearchId(e.target.value)}
         />
         <button className="ad-btn ghost" onClick={reload}>Search</button>
       </div>
-      
+
       <Notice notice={notice} />
       {error && <p className="ad-error">{error}</p>}
 
@@ -487,7 +535,7 @@ function ReferralsManagement() {
       ) : searchId ? (
         <p className="ad-empty">No referral data found</p>
       ) : (
-        <p className="ad-empty">Enter a member ID to search</p>
+        <p className="ad-empty">Enter a member ID or email to search</p>
       )}
     </section>
   );
