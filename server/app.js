@@ -1246,7 +1246,6 @@ export async function createApp() {
     }
   });
 
-  // ✅ FIXED ENDPOINT - /api/referrals/list with proper SQL GROUP BY
   app.get('/api/referrals/list', requireAccount, async (request, response) => {
     const referrals = await sql`
       SELECT
@@ -1593,28 +1592,23 @@ export async function createApp() {
     }
   });
 
-  // ✅ NEW ENDPOINT - BALANCE ADJUSTMENT
   app.post('/api/admin/accounts/:id/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const { action, amountCents, reason } = request.body ?? {};
 
-      // Validate action
       if (!['adjust', 'deduct', 'set'].includes(action)) {
         return response.status(400).json({ error: 'Action must be adjust, deduct, or set.' });
       }
 
-      // Validate amount
       if (typeof amountCents !== 'number' || !Number.isFinite(amountCents) || amountCents <= 0) {
         return response.status(400).json({ error: 'Amount must be a positive number in cents.' });
       }
 
-      // Validate reason
       const cleanReason = cleanText(reason, { min: 3, max: 300 });
       if (cleanReason === null) {
         return response.status(400).json({ error: 'Reason must be between 3 and 300 characters.' });
       }
 
-      // Check target account exists and is not admin
       const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
       if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
       if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
@@ -1625,17 +1619,14 @@ export async function createApp() {
       let reference;
 
       if (action === 'adjust') {
-        // Add deposit transaction
         txType = 'deposit';
         txAmount = amountCents;
         reference = `Admin adjustment: +${(amountCents / 100).toFixed(2)} USD`;
       } else if (action === 'deduct') {
-        // Add withdrawal transaction
         txType = 'withdrawal';
         txAmount = amountCents;
         reference = `Admin adjustment: -${(amountCents / 100).toFixed(2)} USD`;
       } else if (action === 'set') {
-        // Set balance - create difference transaction
         if (amountCents > currentBalance) {
           txType = 'deposit';
           txAmount = amountCents - currentBalance;
@@ -1645,19 +1636,16 @@ export async function createApp() {
           txAmount = currentBalance - amountCents;
           reference = `Admin set balance: ${(amountCents / 100).toFixed(2)} USD`;
         } else {
-          // Balance unchanged
           return response.json({ ok: true, message: 'Balance unchanged.' });
         }
       }
 
-      // Create the transaction
       const txId = randomBytes(16).toString('hex');
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
         VALUES (${txId}, ${request.params.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
       `;
 
-      // Record audit log
       await recordAudit(request, 'balance.adjustment', request.params.id, {
         action,
         amountCents,
@@ -1683,7 +1671,6 @@ export async function createApp() {
   app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
     const { status, type, accountId } = request.query;
     
-    // Validate filters
     if (status !== undefined && !TX_STATUSES.includes(status)) {
       return response.status(400).json({ error: 'Invalid status filter.' });
     }
@@ -1696,7 +1683,6 @@ export async function createApp() {
 
     let rows;
     
-    // Build query based on filters
     if (status && type && accountId) {
       rows = await sql`
         SELECT t.*, a.name AS account_name, a.email AS account_email 
@@ -2028,6 +2014,40 @@ export async function createApp() {
     });
   });
 
+  // ✅ NEW ENDPOINT - GET REFERRED MEMBERS FOR ADMIN
+  app.get('/api/admin/referrals/:accountId/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
+    const account = await sql`SELECT id, name, email FROM accounts WHERE id = ${request.params.accountId}`;
+    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
+
+    const referrals = await sql`
+      SELECT
+        rs.id,
+        a.id AS account_id,
+        a.name,
+        a.email,
+        rs.signed_up_at,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
+      FROM referral_signups rs
+      JOIN accounts a ON a.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
+      WHERE rs.referrer_id = ${request.params.accountId}
+      GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
+      ORDER BY rs.signed_up_at DESC
+      LIMIT 100
+    `;
+
+    return response.json({
+      referrer: { id: account[0].id, name: account[0].name, email: account[0].email },
+      referrals: referrals.map(r => ({
+        id: r.account_id,
+        name: r.name,
+        email: r.email,
+        signedUpAt: r.signed_up_at,
+        totalDeposits: r.total_deposits_cents / 100,
+      })),
+    });
+  });
+
   app.get('/api/admin/audit', adminLimiter, requireAdminSession, async (request, response) => {
     const { action } = request.query;
     if (action !== undefined && (typeof action !== 'string' || action.length === 0 || action.length > 64)) {
@@ -2177,3 +2197,5 @@ export async function createApp() {
 
   return { app, close: () => sql.end() };
 }
+
+export default createApp;
