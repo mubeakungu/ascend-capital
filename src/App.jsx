@@ -329,13 +329,16 @@ function ReferredMembersList() {
   useEffect(() => {
     let cancelled = false;
     requestApi('/api/referrals/list')
-      .then(({ referrals: members }) => {
+      .then((data) => {
         if (!cancelled) {
+          console.log('Referrals data:', data);
+          const members = data?.referrals || [];
           setReferrals(Array.isArray(members) ? members : []);
         }
       })
       .catch((err) => {
         if (!cancelled) {
+          console.error('Referrals error:', err);
           setError(err.message);
         }
       })
@@ -354,7 +357,11 @@ function ReferredMembersList() {
   }
 
   if (referrals.length === 0) {
-    return null;
+    return (
+      <div style={{ padding: '20px', textAlign: 'center', color: '#999', borderTop: '1px solid #333', marginTop: '20px' }}>
+        <p style={{ fontSize: '13px' }}>No referred members yet. Share your referral link to get started!</p>
+      </div>
+    );
   }
 
   return (
