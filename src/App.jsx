@@ -941,9 +941,11 @@ function App() {
 
   // ✅ ADD: Fetch comprehensive wallet (all earnings aggregated)
   async function fetchComprehensiveWallet() {
+    console.log('🔵 fetchComprehensiveWallet() called!');
     setComprehensiveWalletLoading(true);
     try {
       const result = await requestApi('/api/wallet/comprehensive');
+      console.log('✅ Comprehensive wallet result:', result);
       setComprehensiveWallet(result);
     } catch (error) {
       console.error('Failed to fetch comprehensive wallet:', error);
