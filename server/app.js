@@ -9,7 +9,6 @@ import {
   getDirectReferralCount,
   getTeamTotal,
   TIER_REQUIREMENTS,
-  TEAM_GENERATIONS,
 } from './referral-rewards-enhancement-v2.js';
 
 const scryptAsync = promisify(scrypt);
@@ -329,13 +328,7 @@ async function findAccountByIdentifier(sql, identifier) {
 }
 
 export async function createApp() {
-  // Return COUNT/SUM (bigint) results as numbers instead of strings, so totals
-  // add up correctly and comparisons like `cnt === 0` work.
-  const sql = postgres(process.env.DATABASE_URL, {
-    types: {
-      bigint: { to: 20, from: [20], serialize: (x) => x.toString(), parse: (x) => Number(x) },
-    },
-  });
+  const sql = postgres(process.env.DATABASE_URL);
 
   // Initialize tables
   await sql`
@@ -381,24 +374,6 @@ export async function createApp() {
       review_note TEXT
     );
   `;
-
-  // Older databases were created before 'referral_commission' existed, so their
-  // type check rejects commission credits. Replace any outdated type check.
-  const outdatedTypeChecks = await sql`
-    SELECT conname FROM pg_constraint
-    WHERE conrelid = 'transactions'::regclass AND contype = 'c'
-      AND pg_get_constraintdef(oid) LIKE '%withdrawal%'
-      AND pg_get_constraintdef(oid) NOT LIKE '%referral_commission%'
-  `;
-  for (const { conname } of outdatedTypeChecks) {
-    await sql`ALTER TABLE transactions DROP CONSTRAINT ${sql(conname)}`;
-  }
-  if (outdatedTypeChecks.length > 0) {
-    await sql`
-      ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
-      CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission'))
-    `;
-  }
 
   await sql`CREATE INDEX IF NOT EXISTS transactions_account_idx ON transactions(account_id, created_at)`;
   await sql`CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions(status, created_at)`;
@@ -683,33 +658,44 @@ export async function createApp() {
         VALUES (${id}, ${codeRecord[0].account_id}, ${referralCode.toUpperCase()}, ${accountId}, ${new Date().toISOString()})
       `;
 
-      // The new member is 1st generation for their referrer, 2nd generation for
-      // the referrer's referrer and 3rd generation for the one above that, so
-      // all three uplines are checked for newly reached tiers.
-      let uplineId = codeRecord[0].account_id;
-      for (let generation = 1; generation <= TEAM_GENERATIONS && uplineId; generation++) {
-        const directCount = await getDirectReferralCount(sql, uplineId);
-        const teamTotal = await getTeamTotal(sql, uplineId);
-        const tier = getTierByProgress(directCount, teamTotal);
+      const directCount = await getDirectReferralCount(sql, codeRecord[0].account_id);
+      const teamTotal = await getTeamTotal(sql, codeRecord[0].account_id);
+      const tier = getTierByProgress(directCount, teamTotal);
 
-        if (tier >= 0) {
-          const tierReward = await checkAndCreditTierReward(sql, uplineId);
-          if (tierReward) {
-            await recordAudit({}, 'referral.tier_reward_credited', uplineId, {
-              tierIndex: tierReward.tierId,
-              tierName: tierReward.tierName,
-              amountUSD: tierReward.amountCents / 100,
-              directCount,
-              teamTotal,
-              generation,
+      if (tier >= 0) {
+        const tierReward = await checkAndCreditTierReward(sql, codeRecord[0].account_id);
+        if (tierReward) {
+          await recordAudit({}, 'referral.tier_reward_credited', codeRecord[0].account_id, {
+            tierIndex: tierReward.tierId,
+            tierName: tierReward.tierName,
+            amountUSD: tierReward.amountCents / 100,
+            directCount,
+            teamTotal,
+          });
+        }
+      }
+
+      const directReferrerOf = await sql`
+        SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${codeRecord[0].account_id}
+      `;
+
+      if (directReferrerOf.length > 0 && directReferrerOf[0].referrer_id) {
+        const grandDirect = await getDirectReferralCount(sql, directReferrerOf[0].referrer_id);
+        const grandTeam = await getTeamTotal(sql, directReferrerOf[0].referrer_id);
+        const grandTier = getTierByProgress(grandDirect, grandTeam);
+
+        if (grandTier >= 0) {
+          const grandParentTierReward = await checkAndCreditTierReward(sql, directReferrerOf[0].referrer_id);
+          if (grandParentTierReward) {
+            await recordAudit({}, 'referral.tier_reward_credited', directReferrerOf[0].referrer_id, {
+              tierIndex: grandParentTierReward.tierId,
+              tierName: grandParentTierReward.tierName,
+              amountUSD: grandParentTierReward.amountCents / 100,
+              directCount: grandDirect,
+              teamTotal: grandTeam,
             });
           }
         }
-
-        const nextUpline = await sql`
-          SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${uplineId} LIMIT 1
-        `;
-        uplineId = nextUpline[0]?.referrer_id ?? null;
       }
     } catch (error) {
       // Ignore duplicate referral signups
@@ -1931,11 +1917,104 @@ export async function createApp() {
 
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
+  // ✅ NEW: Admin endpoint to check and fix member balance reconciliation
+  app.get('/api/admin/balance-reconciliation', adminLimiter, requireAdminSession, async (request, response) => {
+    try {
+      // Get all members with their transactions
+      const members = await sql`
+        SELECT DISTINCT a.id, a.name, a.email, a.created_at
+        FROM accounts a
+        WHERE a.role = 'member' AND a.status = 'active'
+        ORDER BY a.created_at DESC
+        LIMIT 100
+      `;
+
+      const reconciliationData = [];
+
+      for (const member of members) {
+        // Get current balance using approvedBalanceCents (should include ALL earnings)
+        const currentBalance = await approvedBalanceCents(member.id) / 100;
+
+        // Get all approved transactions breakdown
+        const txBreakdown = await sql`
+          SELECT
+            type,
+            COUNT(*) as count,
+            COALESCE(SUM(amount_cents), 0) as total_cents
+          FROM transactions
+          WHERE account_id = ${member.id} AND status = 'approved'
+          GROUP BY type
+        `;
+
+        const txByType = {};
+        let deposits = 0, withdrawals = 0, earnings = 0;
+
+        for (const tx of txBreakdown) {
+          txByType[tx.type] = {
+            count: tx.count,
+            amount: tx.total_cents / 100,
+          };
+
+          if (tx.type === 'deposit') deposits += tx.total_cents;
+          else if (tx.type === 'withdrawal') withdrawals += tx.total_cents;
+          else earnings += tx.total_cents;
+        }
+
+        const tradingProfit = (txByType['trading_profit']?.amount || 0);
+        const referralCommission = (txByType['referral_commission']?.amount || 0);
+        const tierReward = (txByType['tier_reward']?.amount || 0);
+        const tierSalary = (txByType['tier_salary']?.amount || 0);
+
+        // Check if balance is correct
+        const calculatedBalance = (deposits + earnings - withdrawals) / 100;
+        const isBalanceCorrect = Math.abs(currentBalance - calculatedBalance) < 0.01; // Allow 1 cent variance
+
+        // Add to reconciliation report only if there's trading profit or balance mismatch
+        if (tradingProfit > 0 || !isBalanceCorrect) {
+          reconciliationData.push({
+            memberId: member.id,
+            memberName: member.name,
+            memberEmail: member.email,
+            currentBalance,
+            calculatedBalance,
+            isBalanceCorrect,
+            deposits: deposits / 100,
+            withdrawals: withdrawals / 100,
+            earnings: earnings / 100,
+            breakdown: {
+              tradingProfit,
+              referralCommission,
+              tierReward,
+              tierSalary,
+            },
+            transactionCounts: {
+              deposits: txByType['deposit']?.count || 0,
+              withdrawals: txByType['withdrawal']?.count || 0,
+              tradingProfits: txByType['trading_profit']?.count || 0,
+              referralCommissions: txByType['referral_commission']?.count || 0,
+              tierRewards: txByType['tier_reward']?.count || 0,
+              tierSalaries: txByType['tier_salary']?.count || 0,
+            },
+          });
+        }
+      }
+
+      return response.json({
+        totalMembersChecked: members.length,
+        membersWithIssues: reconciliationData.length,
+        reconciliation: reconciliationData,
+      });
+    } catch (error) {
+      console.error('Error in balance reconciliation:', error);
+      return response.status(500).json({ error: 'Failed to check balance reconciliation.' });
+    }
+  });
+
   app.get('/api/admin/accounts', adminLimiter, requireAdminSession, async (request, response) => {
     const accounts = await sql`
       SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
         COALESCE((
-          SELECT SUM(CASE WHEN t.type = 'withdrawal' THEN -t.amount_cents ELSE t.amount_cents END)
+          SELECT SUM(CASE WHEN t.type = 'deposit' THEN t.amount_cents ELSE -t.amount_cents END)
           FROM transactions t
           WHERE t.account_id = a.id AND t.status = 'approved'
         ), 0) AS balance_cents,
