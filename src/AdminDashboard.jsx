@@ -209,6 +209,11 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
         </div>
 
         <div className="ad-detail-row">
+          <span className="ad-detail-label">Earnings</span>
+          <span className="ad-detail-value" style={{ color: '#5BEE6A' }}>{money(data?.summary?.earnings || 0)}</span>
+        </div>
+
+        <div className="ad-detail-row">
           <span className="ad-detail-label">Created</span>
           <span className="ad-detail-value">{when(account.createdAt)}</span>
         </div>
@@ -644,6 +649,9 @@ function DepositManagement() {
   const [{ data: auditData }, loadAudit] = useLoad(() => api('/admin/deposits/verify'), []);
   const [notice, setNotice] = useState(null);
   const [showAddDeposit, setShowAddDeposit] = useState(false);
+  const [showFixModal, setShowFixModal] = useState(false);
+  const [fixAccountId, setFixAccountId] = useState('');
+  const [fixResults, setFixResults] = useState(null);
   const [memberId, setMemberId] = useState('');
   const [depositAmount, setDepositAmount] = useState('');
   const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
@@ -694,6 +702,29 @@ function DepositManagement() {
     setBusy(false);
   }
 
+  async function fixMissingBonuses() {
+    if (!fixAccountId) {
+      setNotice({ text: 'Enter account ID', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api(`/admin/accounts/${fixAccountId}/fix-missing-bonuses`, { method: 'POST' });
+      setFixResults(result);
+      setNotice({ text: `✅ ${result.message}`, bad: false });
+      setTimeout(() => {
+        reload();
+        loadAudit();
+        setShowFixModal(false);
+        setFixAccountId('');
+        setFixResults(null);
+      }, 2000);
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
   return (
     <section>
       <div style={{ marginBottom: '16px' }}>
@@ -702,6 +733,9 @@ function DepositManagement() {
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
           <button className="ad-btn" onClick={() => setShowAddDeposit(!showAddDeposit)} style={{ flex: 1 }}>
             {showAddDeposit ? '✕ Cancel' : '+ Add Deposit'}
+          </button>
+          <button className="ad-btn ghost" onClick={() => setShowFixModal(!showFixModal)} style={{ flex: 1, background: 'rgba(181, 238, 106, 0.1)', borderColor: 'rgba(181, 238, 106, 0.3)' }}>
+            {showFixModal ? '✕ Close' : '🔧 Fix Missing Bonuses'}
           </button>
         </div>
       </div>
@@ -750,6 +784,41 @@ function DepositManagement() {
         </div>
       )}
 
+      {showFixModal && (
+        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(181, 238, 106, 0.05)', border: '1px solid rgba(181, 238, 106, 0.2)' }}>
+          <h3>🔧 Fix Missing Recharge Bonuses</h3>
+          <p style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '12px' }}>
+            For accounts missing 2.5% recharge bonuses on deposits. Enter the account ID to fix.
+          </p>
+          <div>
+            <label>Account ID</label>
+            <input
+              type="text"
+              value={fixAccountId}
+              onChange={(e) => setFixAccountId(e.target.value)}
+              placeholder="Paste account ID here..."
+              required
+            />
+
+            {fixResults && (
+              <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(91, 238, 106, 0.1)', borderRadius: '6px', border: '1px solid rgba(91, 238, 106, 0.3)' }}>
+                <p style={{ margin: '0 0 8px', color: 'var(--accent)', fontWeight: 'bold' }}>✅ {fixResults.message}</p>
+                <p style={{ margin: '0 0 4px', color: 'var(--muted)', fontSize: '12px' }}>Bonuses Added: <strong>{fixResults.bonusesAdded}</strong> / {fixResults.depositCount}</p>
+                <p style={{ margin: '0 0 4px', color: 'var(--muted)', fontSize: '12px' }}>Total Added: <strong>${fixResults.totalBonusAdded}</strong></p>
+                <p style={{ margin: '0', color: 'var(--muted)', fontSize: '12px' }}>New Balance: <strong>${fixResults.newBalance}</strong></p>
+              </div>
+            )}
+
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => { setShowFixModal(false); setFixAccountId(''); setFixResults(null); }}>Cancel</button>
+              <button className="ad-btn" onClick={fixMissingBonuses} disabled={busy} style={{ flex: 0 }}>
+                {busy ? 'Fixing…' : 'Fix Bonuses'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="ad-grid">
         <StatCard label="Total Members" value={accountList.length} />
         <StatCard label="Active Accounts" value={accountList.filter(a => a.status === 'active').length} />
@@ -764,8 +833,10 @@ function DepositManagement() {
               <th>Member</th>
               <th>Email</th>
               <th>Total Deposits</th>
+              <th>Earnings</th>
               <th>Current Balance</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -774,8 +845,12 @@ function DepositManagement() {
                 <td>{acc.name}</td>
                 <td className="small">{acc.email}</td>
                 <td className="num" style={{ color: 'var(--gold)' }}>${money(acc.totalDeposits)}</td>
+                <td className="num" style={{ color: 'var(--accent)' }}>${money((acc.balance - acc.totalDeposits) || 0)}</td>
                 <td className="num" style={{ color: acc.balance > acc.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(acc.balance)}</td>
                 <td><Badge value={acc.status} /></td>
+                <td>
+                  <button className="ad-btn ghost xs" onClick={() => { setFixAccountId(acc.id); setShowFixModal(true); }} style={{ fontSize: '10px' }}>🔧 Fix</button>
+                </td>
               </tr>
             ))}
           </tbody>
