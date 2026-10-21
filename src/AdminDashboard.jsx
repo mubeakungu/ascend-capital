@@ -555,6 +555,150 @@ function ReferralsManagement() {
 }
 
 // ============================================================================
+// DEPOSIT MANAGEMENT - ADD/UPDATE MEMBER DEPOSITS
+// ============================================================================
+
+function DepositManagement() {
+  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
+  const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
+  const [notice, setNotice] = useState(null);
+  const [showAddDeposit, setShowAddDeposit] = useState(false);
+  const [memberId, setMemberId] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
+  const [busy, setBusy] = useState(false);
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const accountList = members?.accounts || [];
+
+  async function addDeposit(e) {
+    e.preventDefault();
+    if (!memberId || !depositAmount) {
+      setNotice({ text: 'Member and deposit amount required', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const amount = parseFloat(depositAmount);
+      if (isNaN(amount) || amount <= 0) throw new Error('Deposit must be greater than 0');
+
+      await api(`/admin/deposits/add`, {
+        method: 'POST',
+        body: {
+          accountId: memberId,
+          depositAmount: amount,
+          depositDate: depositDate,
+        },
+      });
+
+      setNotice({ text: `✅ Added $${amount.toFixed(2)} deposit for member ${memberId}` });
+      setMemberId('');
+      setDepositAmount('');
+      setDepositDate(new Date().toISOString().split('T')[0]);
+      setShowAddDeposit(false);
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <div style={{ marginBottom: '16px' }}>
+        <h2 style={{ marginBottom: '12px' }}>💰 Deposit Management</h2>
+        <div className="ad-row">
+          <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
+          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Load Members</button>
+          <button className="ad-btn" onClick={() => setShowAddDeposit(!showAddDeposit)} style={{ flex: 1 }}>
+            {showAddDeposit ? '✕ Cancel' : '+ Add Deposit'}
+          </button>
+        </div>
+      </div>
+
+      <Notice notice={notice} />
+
+      {showAddDeposit && (
+        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(212, 175, 55, 0.05)', border: '1px solid rgba(212, 175, 55, 0.2)' }}>
+          <h3>💸 Add Member Deposit</h3>
+          <form onSubmit={addDeposit}>
+            <label>Member</label>
+            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
+              <option value="">Select a member...</option>
+              {accountList.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
+                </option>
+              ))}
+            </select>
+
+            <label>Deposit Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+
+            <label>Deposit Date</label>
+            <input
+              type="date"
+              value={depositDate}
+              onChange={(e) => setDepositDate(e.target.value)}
+              required
+            />
+
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => setShowAddDeposit(false)}>Cancel</button>
+              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
+                {busy ? 'Adding…' : 'Add Deposit & Update Balance'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="ad-grid">
+        <StatCard label="Total Members" value={accountList.length} />
+        <StatCard label="Active Accounts" value={accountList.filter(a => a.status === 'active').length} />
+      </div>
+
+      <h3>Member Deposits Overview</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Total Deposits</th>
+              <th>Current Balance</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accountList.map((acc) => (
+              <tr key={acc.id}>
+                <td>{acc.name}</td>
+                <td className="small">{acc.email}</td>
+                <td className="num" style={{ color: 'var(--gold)' }}>${money(acc.totalDeposits)}</td>
+                <td className="num" style={{ color: acc.balance > acc.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(acc.balance)}</td>
+                <td><Badge value={acc.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!accountList.length && <p className="ad-empty">No members found</p>}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================================
 // TRADING MANAGEMENT - ENHANCED WITH ADD/UPDATE
 // ============================================================================
 
@@ -1230,6 +1374,7 @@ export default function AdminDashboard() {
     ['accounts', 'Accounts'],
     ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
+    ['deposits', 'Deposits'],
     ['trading', 'Trading'],
     ['balance', 'Balances'],
     ['settings', 'Settings'],
@@ -1278,6 +1423,7 @@ export default function AdminDashboard() {
           {tab === 'accounts' && <AccountsManagement />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
+          {tab === 'deposits' && <DepositManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'balance' && <BalanceManagement />}
           {tab === 'settings' && <SettingsManagement account={account} />}
