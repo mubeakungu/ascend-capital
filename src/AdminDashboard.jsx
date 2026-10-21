@@ -561,6 +561,7 @@ function ReferralsManagement() {
 function DepositManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
   const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
+  const [{ data: auditData }, loadAudit] = useLoad(() => api('/admin/deposits/verify'), []);
   const [notice, setNotice] = useState(null);
   const [showAddDeposit, setShowAddDeposit] = useState(false);
   const [memberId, setMemberId] = useState('');
@@ -693,6 +694,43 @@ function DepositManagement() {
           </tbody>
         </table>
         {!accountList.length && <p className="ad-empty">No members found</p>}
+      </div>
+
+      <h3 style={{ marginTop: '40px' }}>📋 Deposit Audit Log</h3>
+      <p style={{ color: '#888', fontSize: '12px', marginBottom: '16px' }}>Complete history of all deposits for each member</p>
+      <div className="ad-scroll">
+        {!auditData?.deposits?.length ? (
+          <p className="ad-empty">No deposits yet</p>
+        ) : (
+          <table className="ad-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Email</th>
+                <th>Deposit Count</th>
+                <th>Total Deposits</th>
+                <th>Deposits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditData.deposits.map((member) => (
+                <tr key={member.memberId}>
+                  <td>{member.memberName}</td>
+                  <td className="small">{member.memberEmail}</td>
+                  <td className="num">{member.depositCount}</td>
+                  <td className="num" style={{ color: 'var(--gold)', fontWeight: 'bold' }}>${member.totalDeposits}</td>
+                  <td style={{ fontSize: '12px', maxWidth: '300px' }}>
+                    {member.depositTransactions.map((dep, i) => (
+                      <div key={i} style={{ color: '#aaa', marginBottom: '4px' }}>
+                        ${dep.amount} on {dep.date}
+                      </div>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
   );
