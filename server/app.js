@@ -76,15 +76,15 @@ const DEPOSIT_PLANS = [
 ];
 
 const TIER_REQUIREMENTS_DETAILED = [
-  { direct: 5, team: null },        // Star 1: 5 direct (no team req)
-  { direct: 7, team: 13 },          // Star 2: 7 direct OR 13 team
-  { direct: 8, team: 25 },          // Star 3: 8 direct OR 25 team
-  { direct: 9, team: 40 },          // Star 4: 9 direct OR 40 team
-  { direct: 10, team: 70 },         // Star 5: 10 direct OR 70 team
-  { direct: 11, team: 150 },        // Star 6: 11 direct OR 150 team
-  { direct: 12, team: 400 },        // Star 7: 12 direct OR 400 team
-  { direct: 13, team: 700 },        // Star 8: 13 direct OR 700 team
-  { direct: 14, team: 1000 },       // Crown Leader: 14 direct OR 1,000 team
+  { direct: 5, team: 0 },           // Star 1: 5 direct (no team req)
+  { direct: 7, team: 13 },          // Star 2: 7 direct AND 13 team
+  { direct: 8, team: 25 },          // Star 3: 8 direct AND 25 team
+  { direct: 9, team: 40 },          // Star 4: 9 direct AND 40 team
+  { direct: 10, team: 70 },         // Star 5: 10 direct AND 70 team
+  { direct: 11, team: 150 },        // Star 6: 11 direct AND 150 team
+  { direct: 12, team: 400 },        // Star 7: 12 direct AND 400 team
+  { direct: 13, team: 700 },        // Star 8: 13 direct AND 700 team
+  { direct: 14, team: 1000 },       // Crown Leader: 14 direct AND 1,000 team
 ];
 
 function accountView(row) {
@@ -295,7 +295,8 @@ function getTierByProgress(directCount, teamTotal) {
   for (let i = TIER_REQUIREMENTS_DETAILED.length - 1; i >= 0; i--) {
     const req = TIER_REQUIREMENTS_DETAILED[i];
     const directMet = directCount >= req.direct;
-    const teamMet = req.team === null || teamTotal >= req.team;
+    // Star 1 has team: 0 (no team requirement), others require BOTH conditions to be met
+    const teamMet = req.team === 0 || teamTotal >= req.team;
 
     if (directMet && teamMet) return i;
   }
@@ -463,6 +464,35 @@ export async function createApp() {
   await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_account_idx ON weekly_salary_payments(account_id)`;
   await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_week_idx ON weekly_salary_payments(payment_week)`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS weekly_salary_payments_unique_idx ON weekly_salary_payments(account_id, payment_week)`;
+
+  // ✅ ADD: Prime Hour Wallet table
+  await sql`
+    CREATE TABLE IF NOT EXISTS prime_hour_wallets (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+      balance_cents INTEGER NOT NULL DEFAULT 0 CHECK(balance_cents >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS prime_hour_wallets_account_idx ON prime_hour_wallets(account_id)`;
+
+  // ✅ ADD: Prime Hour transactions table
+  await sql`
+    CREATE TABLE IF NOT EXISTS prime_hour_transactions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal')),
+      amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+      reference TEXT,
+      status TEXT NOT NULL DEFAULT 'approved' CHECK(status IN ('pending', 'approved', 'rejected')),
+      created_at TEXT NOT NULL
+    );
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS prime_hour_transactions_account_idx ON prime_hour_transactions(account_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS prime_hour_transactions_created_idx ON prime_hour_transactions(created_at)`;
 
   await initializeTierRewardsTable(sql);
 
@@ -1476,6 +1506,159 @@ export async function createApp() {
         creditedAt: p.created_at,
       })),
     });
+  });
+
+  // ✅ ADD: Prime Hour Wallet Endpoints
+  // =========================================================================
+
+  app.get('/api/prime-hour/balance', requireAccount, async (request, response) => {
+    try {
+      const wallet = await sql`
+        SELECT balance_cents FROM prime_hour_wallets
+        WHERE account_id = ${request.account.id}
+      `;
+
+      if (wallet.length === 0) {
+        // Initialize wallet if it doesn't exist
+        const id = randomBytes(16).toString('hex');
+        const now = new Date().toISOString();
+        await sql`
+          INSERT INTO prime_hour_wallets (id, account_id, balance_cents, created_at, updated_at)
+          VALUES (${id}, ${request.account.id}, 0, ${now}, ${now})
+        `;
+        return response.json({ balance: 0 });
+      }
+
+      return response.json({ balance: wallet[0].balance_cents / 100 });
+    } catch (error) {
+      console.error('Error fetching prime hour balance:', error);
+      return response.status(500).json({ error: 'Failed to fetch prime hour balance.' });
+    }
+  });
+
+  app.post('/api/prime-hour/transaction', updateRateLimit, requireAccount, async (request, response, next) => {
+    try {
+      const { type, amount, reference } = request.body ?? {};
+
+      // Validate transaction type
+      if (!['deposit', 'withdrawal'].includes(type)) {
+        return response.status(400).json({ error: 'Transaction type must be deposit or withdrawal.' });
+      }
+
+      // Validate amount
+      const amountCents = parseAmountCents(amount);
+      if (amountCents === null || amountCents < 5000) { // $50 minimum
+        return response.status(400).json({ error: 'Minimum transaction amount is $50.' });
+      }
+
+      // Get referral stats for qualification check
+      const directCount = await getDirectReferralCount(sql, request.account.id);
+      const tradingDays = await sql`
+        SELECT COUNT(DISTINCT DATE(profit_date)) AS days
+        FROM trading_ledger
+        WHERE account_id = ${request.account.id}
+      `;
+
+      const tradingDaysCount = tradingDays[0]?.days || 0;
+
+      // Prime Hour qualification: 1+ direct referral AND 3+ days trading
+      if (type === 'deposit') {
+        if (directCount < 1) {
+          return response.status(403).json({
+            error: 'You must have at least 1 referral to access Prime Hour deposits.'
+          });
+        }
+
+        if (tradingDaysCount < 3) {
+          return response.status(403).json({
+            error: 'You must have traded for at least 3 days on Ascend to access Prime Hour.'
+          });
+        }
+      }
+
+      // Get or create wallet
+      let wallet = await sql`
+        SELECT id, balance_cents FROM prime_hour_wallets
+        WHERE account_id = ${request.account.id}
+      `;
+
+      let walletId;
+      if (wallet.length === 0) {
+        walletId = randomBytes(16).toString('hex');
+        const now = new Date().toISOString();
+        await sql`
+          INSERT INTO prime_hour_wallets (id, account_id, balance_cents, created_at, updated_at)
+          VALUES (${walletId}, ${request.account.id}, 0, ${now}, ${now})
+        `;
+        wallet = [{ id: walletId, balance_cents: 0 }];
+      } else {
+        walletId = wallet[0].id;
+      }
+
+      const currentBalance = wallet[0].balance_cents;
+
+      // Handle withdrawal
+      if (type === 'withdrawal') {
+        if (amountCents > currentBalance) {
+          return response.status(409).json({
+            error: 'Insufficient prime hour balance for this withdrawal.'
+          });
+        }
+
+        // Validate wallet address
+        if (!reference || typeof reference !== 'string' || reference.trim().length < 8) {
+          return response.status(400).json({
+            error: 'Enter a valid wallet address (minimum 8 characters).'
+          });
+        }
+      }
+
+      // Process transaction
+      const txId = randomBytes(16).toString('hex');
+      const now = new Date().toISOString();
+
+      let newBalance = currentBalance;
+      if (type === 'deposit') {
+        // Add $5 bonus to deposit
+        newBalance = currentBalance + amountCents + 500; // $5 = 500 cents
+      } else {
+        newBalance = currentBalance - amountCents;
+      }
+
+      // Update wallet balance
+      await sql`
+        UPDATE prime_hour_wallets
+        SET balance_cents = ${newBalance}, updated_at = ${now}
+        WHERE id = ${walletId}
+      `;
+
+      // Record transaction
+      await sql`
+        INSERT INTO prime_hour_transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${request.account.id}, ${type}, ${amountCents}, ${reference || `Prime Hour ${type}`}, 'approved', ${now})
+      `;
+
+      // Log audit
+      await recordAudit(request, `prime_hour.${type}`, txId, {
+        amount: amountCents / 100,
+        newBalance: newBalance / 100,
+        bonus: type === 'deposit' ? 5 : 0,
+      });
+
+      const message = type === 'deposit'
+        ? `Prime deposit of $${(amountCents / 100).toFixed(2)} successful! +$5 bonus added.`
+        : `Prime withdrawal of $${(amountCents / 100).toFixed(2)} completed.`;
+
+      return response.status(201).json({
+        ok: true,
+        message,
+        transactionId: txId,
+        balance: newBalance / 100,
+      });
+    } catch (error) {
+      console.error('Error in prime hour transaction:', error);
+      return next(error);
+    }
   });
 
   // =========================================================================
