@@ -1918,6 +1918,72 @@ export async function createApp() {
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
   // ✅ NEW: Admin endpoint to check and fix member balance reconciliation
+  // ✅ NEW: Admin endpoint to deduct/remove trades from members (automatically updates balance)
+  app.post('/api/admin/trading/deduct-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const { accountId, deductAmount, deductDate } = request.body ?? {};
+
+      if (!accountId || !deductAmount || !deductDate) {
+        return response.status(400).json({ error: 'accountId, deductAmount, and deductDate are required.' });
+      }
+
+      const deductNum = parseFloat(deductAmount);
+      if (isNaN(deductNum) || deductNum <= 0) {
+        return response.status(400).json({ error: 'Deduct amount must be a positive number.' });
+      }
+
+      // Verify member exists
+      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
+      if (member.length === 0) {
+        return response.status(404).json({ error: 'Member not found.' });
+      }
+
+      // Check if trade exists for this date
+      const existing = await sql`
+        SELECT id FROM trading_ledger
+        WHERE account_id = ${accountId} AND profit_date = ${deductDate}
+      `;
+
+      if (existing.length === 0) {
+        return response.status(404).json({ error: 'No trade found for this member on this date.' });
+      }
+
+      const deductCents = Math.round(deductNum * 100);
+      const txId = randomBytes(16).toString('hex');
+      const now = new Date().toISOString();
+
+      // Create deduction transaction (reverses the trade)
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${-deductCents}, ${`Trade deducted on ${deductDate}`}, 'approved', ${now})
+      `;
+
+      // Record audit
+      await recordAudit(request, 'admin.trading.deduct_trade', txId, {
+        accountId,
+        accountName: member[0].name,
+        accountEmail: member[0].email,
+        deductAmount: deductNum,
+        deductDate,
+      });
+
+      // Get updated balance
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      return response.status(200).json({
+        ok: true,
+        message: `✅ Deducted $${deductNum.toFixed(2)} trade from ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
+        transactionId: txId,
+        memberName: member[0].name,
+        deductAmount: deductNum,
+        newBalance,
+      });
+    } catch (error) {
+      console.error('Error deducting trade:', error);
+      return next(error);
+    }
+  });
+
   // ✅ NEW: Admin endpoint to add/create trades for members (automatically updates balance)
   app.post('/api/admin/trading/add-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
