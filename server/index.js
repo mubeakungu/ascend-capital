@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApp } from './app.js';
+import { createApp } from '../app.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -35,8 +35,8 @@ if (process.env.NODE_ENV === 'production') {
     const apkPath = resolve(root, 'dist', 'ascend-capital.apk');
 
     if (!existsSync(apkPath)) {
-      return response.status(404).json({ 
-        error: 'Android app is not available for download yet. Please try again later.' 
+      return response.status(404).json({
+        error: 'Android app is not available for download yet. Please try again later.'
       });
     }
 
@@ -47,8 +47,8 @@ if (process.env.NODE_ENV === 'production') {
 
   // iOS app download endpoint (future)
   app.get('/download/ios-app', (_request, response) => {
-    response.status(501).json({ 
-      error: 'iOS app is not yet available. Check back soon.' 
+    response.status(501).json({
+      error: 'iOS app is not yet available. Check back soon.'
     });
   });
 
@@ -100,7 +100,7 @@ const port = Number(process.env.PORT ?? 5173);
 const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 
 server.listen(port, host, () => {
-  console.log(✅ Ascend Capital ${process.env.NODE_ENV === 'production' ? 'server' : 'dev server'} listening on ${host}:${port});
+  console.log(`✅ Ascend Capital ${process.env.NODE_ENV === 'production' ? 'server' : 'dev server'} listening on ${host}:${port}`);
 });
 
 async function shutdown() {
@@ -122,4 +122,4 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
   process.exit(1);
-}); 
+});
