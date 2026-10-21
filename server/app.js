@@ -1268,12 +1268,12 @@ export async function createApp() {
 
   app.get('/api/referrals/stats', requireAccount, async (request, response) => {
     try {
+      // ✅ FIX: Count DISTINCT referral_signups, not all transaction rows
       const directStats = await sql`
-        SELECT COUNT(*) AS direct_count,
+        SELECT COUNT(DISTINCT rs.id) AS direct_count,
           COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
         FROM referral_signups rs
-        LEFT JOIN accounts a ON a.id = rs.referred_account_id
-        LEFT JOIN transactions t ON t.account_id = a.id
+        LEFT JOIN transactions t ON t.account_id = rs.referred_account_id
         WHERE rs.referrer_id = ${request.account.id}
       `;
 
