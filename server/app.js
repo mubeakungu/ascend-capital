@@ -1913,7 +1913,8 @@ export async function createApp() {
         GROUP BY type
       `;
 
-      // Build transaction breakdown by type
+      // Build transaction breakdown by type - ONLY count known earning types
+      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
       const txByType = {};
       let totalDepositsCents = 0;
       let totalWithdrawalsCents = 0;
@@ -1930,10 +1931,11 @@ export async function createApp() {
           totalDepositsCents += row.total_cents;
         } else if (row.type === 'withdrawal') {
           totalWithdrawalsCents += row.total_cents;
-        } else {
-          // All other types are earnings: trading_profit, tier_reward, tier_salary, referral_commission
+        } else if (knownEarningTypes.includes(row.type)) {
+          // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
           totalEarningsCents += row.total_cents;
         }
+        // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
 
       // Calculate wallet totals
@@ -1976,6 +1978,67 @@ export async function createApp() {
     } catch (error) {
       console.error('Error fetching comprehensive wallet:', error);
       return response.status(500).json({ error: 'Failed to fetch wallet data.' });
+    }
+  });
+
+  // 🔍 DEBUG: Show ALL transaction types for current account to identify earnings issues
+  app.get('/api/debug/transactions-breakdown', requireAccount, async (request, response) => {
+    try {
+      const allTransactions = await sql`
+        SELECT
+          type,
+          COUNT(*) AS count,
+          COALESCE(SUM(amount_cents), 0) AS total_cents
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND status = 'approved'
+        GROUP BY type
+        ORDER BY total_cents DESC
+      `;
+
+      // Calculate what should be earnings (known types only)
+      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
+      let knownEarningsCents = 0;
+      let unknownEarningsCents = 0;
+
+      const txBreakdown = [];
+
+      for (const tx of allTransactions) {
+        const isKnown = knownEarningTypes.includes(tx.type);
+        const amount = tx.total_cents / 100;
+
+        if (tx.type === 'deposit') {
+          // Do nothing - deposits are deposits
+        } else if (tx.type === 'withdrawal') {
+          // Do nothing - withdrawals are withdrawals
+        } else if (isKnown) {
+          knownEarningsCents += tx.total_cents;
+        } else {
+          unknownEarningsCents += tx.total_cents;
+        }
+
+        txBreakdown.push({
+          type: tx.type,
+          count: tx.count,
+          amount: amount,
+          isKnownEarning: isKnown,
+          category: tx.type === 'deposit' ? 'DEPOSIT' : tx.type === 'withdrawal' ? 'WITHDRAWAL' : isKnown ? 'KNOWN_EARNING' : '⚠️ UNKNOWN_EARNING'
+        });
+      }
+
+      return response.json({
+        accountId: request.account.id,
+        accountName: request.account.name,
+        warning: unknownEarningsCents > 0 ? `⚠️ Found ${unknownEarningsCents / 100} in UNKNOWN earning types! Check transactions below.` : '✅ All earning types are known',
+        summary: {
+          knownEarnings: knownEarningsCents / 100,
+          unknownEarnings: unknownEarningsCents / 100,
+          totalByCategory: {}
+        },
+        transactions: txBreakdown
+      });
+    } catch (error) {
+      console.error('Error fetching transaction breakdown:', error);
+      return response.status(500).json({ error: 'Failed to fetch transaction breakdown.' });
     }
   });
 
