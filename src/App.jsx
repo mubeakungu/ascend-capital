@@ -535,6 +535,9 @@ function App() {
   const [primeHourModal, setPrimeHourModal] = useState(null);
   const [primeHourLoading, setPrimeHourLoading] = useState(false);
   const [primeHourMessage, setPrimeHourMessage] = useState('');
+  // ✅ ADD: Comprehensive Wallet states (all earnings aggregated)
+  const [comprehensiveWallet, setComprehensiveWallet] = useState(null);
+  const [comprehensiveWalletLoading, setComprehensiveWalletLoading] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -661,6 +664,8 @@ function App() {
 
       // Refresh balance after successful claim
       await fetchAccountBalance();
+      // ✅ ADD: Refresh comprehensive wallet after trade claim
+      await fetchComprehensiveWallet();
     } catch (error) {
       setTradeClaimMessage(`Error: ${error.message}`);
       setCanClaimTrade(true);
@@ -811,6 +816,8 @@ function App() {
           fetchCanClaimTrade();
           // ✅ ADD: Fetch prime hour balance on login
           fetchPrimeHourBalance();
+          // ✅ ADD: Fetch comprehensive wallet on login
+          fetchComprehensiveWallet();
         }
       })
       .catch((error) => {
@@ -926,6 +933,21 @@ function App() {
       setReferralEarnings(0);
     } finally {
       setReferralStatsLoading(false);
+    }
+  }
+
+  // ✅ ADD: Fetch comprehensive wallet (all earnings aggregated)
+  async function fetchComprehensiveWallet() {
+    if (!account) return;
+    setComprehensiveWalletLoading(true);
+    try {
+      const result = await requestApi('/api/wallet/comprehensive');
+      setComprehensiveWallet(result);
+    } catch (error) {
+      console.error('Failed to fetch comprehensive wallet:', error);
+      setComprehensiveWallet(null);
+    } finally {
+      setComprehensiveWalletLoading(false);
     }
   }
 
@@ -1056,6 +1078,8 @@ function App() {
         await fetchReferralStats();
         // ✅ ADD: Refresh claim status after deposit/withdrawal
         await fetchCanClaimTrade();
+        // ✅ ADD: Refresh comprehensive wallet after transaction
+        await fetchComprehensiveWallet();
       }
     } catch (error) {
       setNotice(`Transaction failed: ${error.message}`);
@@ -1964,6 +1988,87 @@ function App() {
               </div>
             </article>
           </section>
+
+          {/* ✅ ADD: Comprehensive Wallet Breakdown - All Earnings */}
+          {account && comprehensiveWallet && (
+            <section style={{ background: 'rgba(212, 175, 55, 0.08)', border: '2px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '24px', marginBottom: '20px' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '12px', color: '#D4AF37', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px', marginBottom: '8px' }}>💼 COMPLETE WALLET BREAKDOWN</div>
+                <h2 style={{ margin: '0', fontSize: '24px', color: '#fff' }}>Your Ascend Wallet</h2>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                <article style={{ background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px', padding: '16px' }}>
+                  <div style={{ fontSize: '11px', color: '#888', marginBottom: '6px', textTransform: 'uppercase' }}>Total Income</div>
+                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#D4AF37', marginBottom: '4px' }}>
+                    ${comprehensiveWallet.wallet.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>Deposits + All Earnings</div>
+                </article>
+
+                <article style={{ background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px', padding: '16px' }}>
+                  <div style={{ fontSize: '11px', color: '#888', marginBottom: '6px', textTransform: 'uppercase' }}>Total Withdrawals</div>
+                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#ff6b6b', marginBottom: '4px' }}>
+                    -${comprehensiveWallet.wallet.totalWithdrawals.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>Amount withdrawn</div>
+                </article>
+
+                <article style={{ background: 'rgba(76, 175, 80, 0.15)', border: '2px solid rgba(76, 175, 80, 0.4)', borderRadius: '6px', padding: '16px' }}>
+                  <div style={{ fontSize: '11px', color: '#4CAF50', marginBottom: '6px', textTransform: 'uppercase', fontWeight: '600' }}>✓ Net Wallet Balance</div>
+                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#4CAF50', marginBottom: '4px' }}>
+                    ${comprehensiveWallet.wallet.walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#4CAF50' }}>Available to withdraw</div>
+                </article>
+              </div>
+
+              <div style={{ borderTop: '1px solid rgba(212, 175, 55, 0.2)', paddingTop: '20px' }}>
+                <div style={{ fontSize: '12px', color: '#D4AF37', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>Earnings Breakdown</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                  <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #D4AF37' }}>
+                    <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>💰 Trading Profit</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>
+                      ${(comprehensiveWallet.earnings.tradingProfit?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>
+                      {comprehensiveWallet.earnings.tradingProfit?.count || 0} claims
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FFB84D' }}>
+                    <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>🎁 Tier Rewards</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>
+                      ${(comprehensiveWallet.earnings.tierRewards?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>
+                      {comprehensiveWallet.earnings.tierRewards?.count || 0} received
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #E8C547' }}>
+                    <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>📊 Weekly Salary</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>
+                      ${(comprehensiveWallet.earnings.weeklySalary?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>
+                      {comprehensiveWallet.earnings.weeklySalary?.count || 0} payouts
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #AA8C2C' }}>
+                    <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>👥 Referral Commission</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>
+                      ${(comprehensiveWallet.earnings.referralCommissions?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>
+                      {comprehensiveWallet.earnings.referralCommissions?.count || 0} earned
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
 
