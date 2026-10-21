@@ -2027,8 +2027,46 @@ function App() {
                 </article>
               </div>
 
+              <div style={{ borderTop: '1px solid rgba(212, 175, 55, 0.2)', paddingTop: '20px', marginBottom: '20px' }}>
+                <div style={{ fontSize: '12px', color: '#D4AF37', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>📊 How Your Balance Is Calculated</div>
+                <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '16px', borderRadius: '6px', fontSize: '13px', color: '#ccc', fontFamily: 'monospace', lineHeight: '1.8' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>Total Deposits:</span>
+                    <span style={{ color: '#4CAF50', fontWeight: '600' }}>${comprehensiveWallet.wallet.totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>+ Trading Profits:</span>
+                    <span style={{ color: '#FFB84D', fontWeight: '600' }}>${(comprehensiveWallet.earnings.tradingProfit?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>+ Referral Commissions:</span>
+                    <span style={{ color: '#FFB84D', fontWeight: '600' }}>${(comprehensiveWallet.earnings.referralCommissions?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>+ Tier Rewards:</span>
+                    <span style={{ color: '#FFB84D', fontWeight: '600' }}>${(comprehensiveWallet.earnings.tierRewards?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>+ Weekly Salaries:</span>
+                    <span style={{ color: '#FFB84D', fontWeight: '600' }}>${(comprehensiveWallet.earnings.weeklySalary?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '2px solid rgba(212, 175, 55, 0.4)', paddingBottom: '8px', fontWeight: '600' }}>
+                    <span>= Total Income:</span>
+                    <span style={{ color: '#D4AF37' }}>${comprehensiveWallet.wallet.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid rgba(212, 175, 55, 0.2)', paddingBottom: '8px' }}>
+                    <span>- Total Withdrawals:</span>
+                    <span style={{ color: '#ff6b6b', fontWeight: '600' }}>-${comprehensiveWallet.wallet.totalWithdrawals.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#4CAF50', fontWeight: '700', padding: '8px 0' }}>
+                    <span>✓ Your Wallet Balance:</span>
+                    <span>${comprehensiveWallet.wallet.walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+
               <div style={{ borderTop: '1px solid rgba(212, 175, 55, 0.2)', paddingTop: '20px' }}>
-                <div style={{ fontSize: '12px', color: '#D4AF37', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>Earnings Breakdown</div>
+                <div style={{ fontSize: '12px', color: '#D4AF37', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>💰 Earnings Breakdown by Type</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
                   <div style={{ background: 'rgba(212, 175, 55, 0.05)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #D4AF37' }}>
                     <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>💰 Trading Profit</div>
