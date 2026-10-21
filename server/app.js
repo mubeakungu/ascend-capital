@@ -1915,13 +1915,15 @@ export async function createApp() {
       const walletBalance = totalIncome - totalWithdrawals;
 
       return response.json({
-        wallet: {
-          totalIncome,
-          totalDeposits,
-          totalWithdrawals,
-          walletBalance,
-          availableToWithdraw: Math.max(0, walletBalance),
-        },
+        // Root-level properties for frontend wallet display
+        balance: walletBalance,           // Total wallet balance (deposits + earnings - withdrawals)
+        totalDeposits: totalDeposits,     // Original deposits (locked)
+        totalEarnings: totalEarnings,     // All earnings combined
+        totalWithdrawals: totalWithdrawals,
+        totalIncome: totalIncome,         // deposits + earnings
+        availableToWithdraw: Math.max(0, walletBalance),
+
+        // Earnings breakdown
         earnings: {
           tradingProfit: txByType['trading_profit'] ? { count: txByType['trading_profit'].count, amount: txByType['trading_profit'].amount } : { count: 0, amount: 0 },
           tierRewards: txByType['tier_reward'] ? { count: txByType['tier_reward'].count, amount: txByType['tier_reward'].amount } : { count: 0, amount: 0 },
@@ -1929,6 +1931,8 @@ export async function createApp() {
           referralCommissions: txByType['referral_commission'] ? { count: txByType['referral_commission'].count, amount: txByType['referral_commission'].amount } : { count: 0, amount: 0 },
           totalEarnings,
         },
+
+        // Detailed breakdown for admin/reporting
         breakdown: {
           'Trading Profit': txByType['trading_profit']?.amount || 0,
           'Tier Rewards': txByType['tier_reward']?.amount || 0,
@@ -1938,11 +1942,6 @@ export async function createApp() {
           'Total Deposits': totalDeposits,
           'Total Withdrawals': totalWithdrawals,
           'Net Wallet Balance': walletBalance,
-        },
-        summary: {
-          income: totalIncome,
-          withdrawals: totalWithdrawals,
-          balance: walletBalance,
         },
       });
     } catch (error) {
