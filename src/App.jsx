@@ -636,7 +636,8 @@ function App() {
     }
     try {
       const result = await requestApi('/api/trading/can-claim-today');
-      setCanClaimTrade(result.canClaim || false);
+      // ✅ FIX: Backend returns 'canClaimToday', not 'canClaim'
+      setCanClaimTrade(result.canClaimToday || false);
     } catch (error) {
       console.error('Failed to fetch claim status:', error);
       setCanClaimTrade(false);
@@ -659,16 +660,19 @@ function App() {
         body: JSON.stringify({}),
       });
 
-      setTradeClaimMessage(result.message || 'Trade claimed successfully! Your profit has been added to your balance.');
+      setTradeClaimMessage(`✅ ${result.message || 'Trade claimed successfully! Your profit has been added to your balance.'}`);
       setCanClaimTrade(false);
 
       // Refresh balance after successful claim
       await fetchAccountBalance();
+      // ✅ ADD: Refresh claim status to show "Already Claimed Today"
+      await fetchCanClaimTrade();
       // ✅ ADD: Refresh comprehensive wallet after trade claim
       await fetchComprehensiveWallet();
     } catch (error) {
-      setTradeClaimMessage(`Error: ${error.message}`);
-      setCanClaimTrade(true);
+      setTradeClaimMessage(`⚠️ ${error.message || 'Failed to claim trade. Please try again.'}`);
+      // ✅ FIX: Refresh claim status to get latest eligibility
+      await fetchCanClaimTrade();
     } finally {
       setClaimTradeLoading(false);
     }
@@ -2073,19 +2077,54 @@ function App() {
           {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
 
           {account && totalDeposits > 0 && (
-            <div className="daily-trade-claim-card">
-              <h3>Claim Your Trade Today</h3>
-              <p>Manually claim your daily trading profit from your active deposits</p>
-              <p style={{ fontSize: '12px', color: '#888', marginBottom: '12px' }}>
-                Trading hours: 1:00 PM - 1:30 PM EAT
+            <div className="daily-trade-claim-card" style={{
+              background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%)',
+              border: '1px solid rgba(76, 175, 80, 0.3)',
+              borderRadius: '8px',
+              padding: '24px',
+              marginTop: '24px',
+              color: '#fff'
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#4CAF50' }}>💰 Claim Your Trade Today</h3>
+              <p style={{ margin: '8px 0', fontSize: '14px', color: '#ccc' }}>Manually claim your daily trading profit from your active deposits</p>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⏰ Trading hours: <strong style={{ color: '#4CAF50' }}>1:00 PM - 1:30 PM EAT</strong>
               </p>
-              <button onClick={claimDailyTrade} disabled={!canClaimTrade || claimTradeLoading || !isTradingHourActive}>
-                {claimTradeLoading ? 'Processing...' : !isTradingHourActive ? `Trading Opens ${nextTradingTime}` : canClaimTrade ? 'Claim Daily Trade' : 'Already Claimed Today'}
+              <button
+                onClick={claimDailyTrade}
+                disabled={!canClaimTrade || claimTradeLoading || !isTradingHourActive}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 'not-allowed' : 'pointer',
+                  background: isTradingHourActive && canClaimTrade ? '#4CAF50' : '#666',
+                  color: '#fff',
+                  transition: 'all 0.3s ease',
+                  opacity: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 0.6 : 1,
+                }}
+              >
+                {claimTradeLoading ? '⏳ Processing...' : !isTradingHourActive ? `🕐 Opens at ${nextTradingTime}` : canClaimTrade ? '✅ Claim Daily Trade' : '✔️ Already Claimed Today'}
               </button>
-              {tradeClaimMessage && <div className="daily-trade-claim-message">{tradeClaimMessage}</div>}
+              {tradeClaimMessage && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px',
+                  borderRadius: '4px',
+                  background: tradeClaimMessage.includes('✅') ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 152, 0, 0.2)',
+                  color: tradeClaimMessage.includes('✅') ? '#4CAF50' : '#FFB74D',
+                  fontSize: '13px',
+                  border: `1px solid ${tradeClaimMessage.includes('✅') ? '#4CAF50' : '#FFB74D'}`
+                }}>
+                  {tradeClaimMessage}
+                </div>
+              )}
               {!isTradingHourActive && (
-                <div style={{ marginTop: '12px', fontSize: '12px', color: '#888' }}>
-                  Next trading window opens at {nextTradingTime}
+                <div style={{ marginTop: '12px', fontSize: '12px', color: '#888', textAlign: 'center' }}>
+                  ⏳ Next trading window opens at <strong style={{ color: '#4CAF50' }}>{nextTradingTime}</strong>
                 </div>
               )}
             </div>
