@@ -1813,9 +1813,19 @@ export async function createApp() {
     // ✅ FIX: Get the actual approved balance (includes ALL earnings)
     const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
 
+    // ✅ FIX: Calculate dailyIncome based on ORIGINAL DEPOSIT only, not total balance
     let dailyIncome = 0;
     if (earningsStatus.earningsActive && lastDepositTime) {
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === approvedBalance);
+      // Get original deposit amount (not including earnings)
+      const depositRow = await sql`
+        SELECT COALESCE(SUM(amount_cents), 0) AS total
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+      `;
+      const originalDepositAmount = (depositRow[0]?.total || 0) / 100;
+
+      // Match ORIGINAL DEPOSIT to deposit plans, not total balance
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === originalDepositAmount);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
