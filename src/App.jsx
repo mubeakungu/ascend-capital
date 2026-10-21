@@ -1844,7 +1844,10 @@ function App() {
           <div className="sidebar-card-icon"><Icon name="shield" size={17} /></div>
           <div className="sidebar-card-title">Your account</div>
           <p>{account ? `Signed in as ${account.email}.` : 'Create an account or sign in to manage your profile.'}</p>
-          <button onClick={() => openAccountDialog()}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
+          <div style={{display: 'flex', gap: '8px', flexDirection: 'column'}}>
+            <button onClick={() => openAccountDialog()}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
+            {account && <button onClick={() => logout()} style={{background: 'transparent', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)', padding: '10px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', transition: 'all 0.2s ease'}} onMouseEnter={(e) => e.target.style.background = 'rgba(212, 175, 55, 0.1)'} onMouseLeave={(e) => e.target.style.background = 'transparent'}>Sign out <Icon name="arrow" size={13} style={{transform: 'rotate(180deg)', marginLeft: '4px'}} /></button>}
+          </div>
         </div>
         <div className="sidebar-footer"><span className="online-dot" /> All systems operational</div>
       </aside>
