@@ -1923,8 +1923,8 @@ export async function createApp() {
     try {
       const { accountId, deductAmount, deductDate } = request.body ?? {};
 
-      if (!accountId || !deductAmount || !deductDate) {
-        return response.status(400).json({ error: 'accountId, deductAmount, and deductDate are required.' });
+      if (!accountId || !deductAmount) {
+        return response.status(400).json({ error: 'accountId and deductAmount are required.' });
       }
 
       const deductNum = parseFloat(deductAmount);
@@ -1938,34 +1938,16 @@ export async function createApp() {
         return response.status(404).json({ error: 'Member not found.' });
       }
 
-      // Check if trade exists for this date
-      const existing = await sql`
-        SELECT id FROM trading_ledger
-        WHERE account_id = ${accountId} AND profit_date = ${deductDate}
-      `;
-
-      if (existing.length === 0) {
-        return response.status(404).json({ error: 'No trade found for this member on this date.' });
-      }
-
       const deductCents = Math.round(deductNum * 100);
       const txId = randomBytes(16).toString('hex');
       const now = new Date().toISOString();
+      const refDate = deductDate || new Date().toISOString().split('T')[0];
 
-      // Create deduction transaction (reverses the trade)
+      // Create deduction transaction (negative trading_profit reverses the trade)
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${-deductCents}, ${`Trade deducted on ${deductDate}`}, 'approved', ${now})
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${-deductCents}, ${`Trade deducted on ${refDate}`}, 'approved', ${now})
       `;
-
-      // Record audit
-      await recordAudit(request, 'admin.trading.deduct_trade', txId, {
-        accountId,
-        accountName: member[0].name,
-        accountEmail: member[0].email,
-        deductAmount: deductNum,
-        deductDate,
-      });
 
       // Get updated balance
       const newBalance = await approvedBalanceCents(accountId) / 100;
@@ -1980,7 +1962,7 @@ export async function createApp() {
       });
     } catch (error) {
       console.error('Error deducting trade:', error);
-      return next(error);
+      return response.status(500).json({ error: `Failed to deduct trade: ${error.message}` });
     }
   });
 
