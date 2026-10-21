@@ -71,22 +71,28 @@ async function getDirectReferralCount(sql, referrerId) {
   const result = await sql`
     SELECT COUNT(*) AS cnt FROM referral_signups WHERE referrer_id = ${referrerId}
   `;
-  return result[0]?.cnt || 0;
+  return Number(result[0]?.cnt || 0);
 }
 
-// Get total team count (direct + all indirect referrals)
+// Generations that count towards the team total:
+// 1st = your direct referrals, 2nd = people they refer, 3rd = people the 2nd refer
+const TEAM_GENERATIONS = 3;
+
+// Get team total (1st + 2nd + 3rd generation)
 async function getTeamTotal(sql, referrerId) {
   const result = await sql`
     WITH RECURSIVE team_tree AS (
-      SELECT referred_account_id FROM referral_signups WHERE referrer_id = ${referrerId}
+      SELECT referred_account_id, 1 AS generation
+      FROM referral_signups WHERE referrer_id = ${referrerId}
       UNION ALL
-      SELECT rs.referred_account_id 
+      SELECT rs.referred_account_id, tt.generation + 1
       FROM referral_signups rs
       JOIN team_tree tt ON rs.referrer_id = tt.referred_account_id
+      WHERE tt.generation < ${TEAM_GENERATIONS}
     )
-    SELECT COUNT(*) AS cnt FROM team_tree
+    SELECT COUNT(DISTINCT referred_account_id) AS cnt FROM team_tree
   `;
-  return result[0]?.cnt || 0;
+  return Number(result[0]?.cnt || 0);
 }
 
 // Get tier by direct referral count AND team total (both must be met)
@@ -101,64 +107,44 @@ function getTierByDirectReferrals(directCount, teamTotal = 0) {
   return -1; // No tier yet
 }
 
-// Check and credit tier rewards when new referral is created
-async function checkAndCreditTierReward(sql, referrerId) {
-  // Get current direct referral count and team total
-  const directCount = await getDirectReferralCount(sql, referrerId);
-  const teamTotal = await getTeamTotal(sql, referrerId);
-
-  // Calculate current tier (must meet BOTH direct referrals AND team total requirements)
-  const currentTier = getTierByDirectReferrals(directCount, teamTotal);
-  
-  if (currentTier < 0) return null; // No tier yet
-
-  // Check if this tier reward has already been credited
-  const existing = await sql`
-    SELECT id FROM referral_tier_rewards 
-    WHERE referrer_id = ${referrerId} AND tier_index = ${currentTier}
-  `;
-
-  if (existing.length > 0) return null; // Already credited
-
-  // Get referrer account to verify they exist
-  const referrer = await sql`SELECT id, email FROM accounts WHERE id = ${referrerId}`;
-  if (referrer.length === 0) return null;
-
-  // Credit the tier reward
-  const tierName = TIER_NAMES[currentTier];
-  const rewardCents = TIER_REWARDS[currentTier];
-  const physicalReward = TIER_PHYSICAL_REWARDS[currentTier];
+// Credit one tier reward straight into the wallet (approved transaction)
+async function creditTierReward(sql, referrerId, tierIndex, directCount, teamTotal) {
+  const tierName = TIER_NAMES[tierIndex];
+  const rewardCents = TIER_REWARDS[tierIndex];
+  const physicalReward = TIER_PHYSICAL_REWARDS[tierIndex];
 
   const transactionId = randomBytes(16).toString('hex');
   const rewardId = randomBytes(16).toString('hex');
   const now = new Date().toISOString();
 
   try {
-    // Create reward transaction (special type)
-    await sql`
-      INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-      VALUES (${transactionId}, ${referrerId}, 'tier_reward', ${rewardCents}, ${`${tierName} Tier Reward`}, 'approved', ${now})
-    `;
+    await sql.begin(async (tx) => {
+      // Create reward transaction (special type)
+      await tx`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${transactionId}, ${referrerId}, 'tier_reward', ${rewardCents}, ${`${tierName} Tier Reward`}, 'approved', ${now})
+      `;
 
-    // Record tier reward
-    await sql`
-      INSERT INTO referral_tier_rewards (
-        id, referrer_id, tier_index, tier_name, reward_cents,
-        physical_reward, physical_reward_value_cents, 
-        direct_referrals_at_award, team_total_at_award,
-        credited_at, transaction_id
-      )
-      VALUES (
-        ${rewardId}, ${referrerId}, ${currentTier}, ${tierName}, ${rewardCents},
-        ${physicalReward ? physicalReward.item : null},
-        ${physicalReward ? Math.round(physicalReward.estimatedValue * 100) : null},
-        ${directCount}, ${teamTotal}, ${now}, ${transactionId}
-      )
-    `;
+      // Record tier reward
+      await tx`
+        INSERT INTO referral_tier_rewards (
+          id, referrer_id, tier_index, tier_name, reward_cents,
+          physical_reward, physical_reward_value_cents,
+          direct_referrals_at_award, team_total_at_award,
+          credited_at, transaction_id
+        )
+        VALUES (
+          ${rewardId}, ${referrerId}, ${tierIndex}, ${tierName}, ${rewardCents},
+          ${physicalReward ? physicalReward.item : null},
+          ${physicalReward ? Math.round(physicalReward.estimatedValue * 100) : null},
+          ${directCount}, ${teamTotal}, ${now}, ${transactionId}
+        )
+      `;
+    });
 
     return {
       rewardId,
-      tierId: currentTier,
+      tierId: tierIndex,
       tierName,
       amountCents: rewardCents,
       physicalReward: physicalReward || null,
@@ -167,6 +153,38 @@ async function checkAndCreditTierReward(sql, referrerId) {
     console.error('Failed to credit tier reward:', error);
     return null;
   }
+}
+
+// Check and credit tier rewards when new referral is created.
+// Pays every tier reached that hasn't been paid yet, so no tier is skipped
+// (e.g. team total jumping straight from Star 1 to Star 3 pays Star 2 and 3).
+async function checkAndCreditTierReward(sql, referrerId) {
+  // Get current direct referral count and team total
+  const directCount = await getDirectReferralCount(sql, referrerId);
+  const teamTotal = await getTeamTotal(sql, referrerId);
+
+  // Calculate current tier (must meet BOTH direct referrals AND team total requirements)
+  const currentTier = getTierByDirectReferrals(directCount, teamTotal);
+
+  if (currentTier < 0) return null; // No tier yet
+
+  // Get referrer account to verify they exist
+  const referrer = await sql`SELECT id, email FROM accounts WHERE id = ${referrerId}`;
+  if (referrer.length === 0) return null;
+
+  // Tiers already credited
+  const existing = await sql`
+    SELECT tier_index FROM referral_tier_rewards WHERE referrer_id = ${referrerId}
+  `;
+  const paid = new Set(existing.map((r) => Number(r.tier_index)));
+
+  let lastCredited = null;
+  for (let tierIndex = 0; tierIndex <= currentTier; tierIndex++) {
+    if (paid.has(tierIndex)) continue;
+    const credited = await creditTierReward(sql, referrerId, tierIndex, directCount, teamTotal);
+    if (credited) lastCredited = credited;
+  }
+  return lastCredited;
 }
 
 // Get tier progression for a referrer
@@ -207,7 +225,8 @@ async function getTierProgression(sql, referrerId) {
     nextTierDirect = TIER_REQUIREMENTS[0].direct;
     nextTierTeam = TIER_REQUIREMENTS[0].team;
     directProgress = Math.round((directCount / nextTierDirect) * 100);
-    teamProgress = teamTotal > 0 ? Math.round((teamTotal / nextTierTeam) * 100) : 0;
+    // Star 1 has no team requirement
+    teamProgress = nextTierTeam > 0 ? Math.round((teamTotal / nextTierTeam) * 100) : 100;
   }
 
   return {
@@ -255,4 +274,5 @@ export {
   TIER_REQUIREMENTS,
   TIER_REWARDS,
   TIER_PHYSICAL_REWARDS,
+  TEAM_GENERATIONS,
 };
