@@ -1918,6 +1918,91 @@ export async function createApp() {
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
   // ✅ NEW: Admin endpoint to check and fix member balance reconciliation
+  // ✅ NEW: Admin endpoint to add/create trades for members (automatically updates balance)
+  app.post('/api/admin/trading/add-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const { accountId, profitAmount, profitDate } = request.body ?? {};
+
+      if (!accountId || !profitAmount || !profitDate) {
+        return response.status(400).json({ error: 'accountId, profitAmount, and profitDate are required.' });
+      }
+
+      const profitNum = parseFloat(profitAmount);
+      if (isNaN(profitNum) || profitNum <= 0) {
+        return response.status(400).json({ error: 'Profit amount must be a positive number.' });
+      }
+
+      // Verify member exists
+      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
+      if (member.length === 0) {
+        return response.status(404).json({ error: 'Member not found.' });
+      }
+
+      // Check if trade already exists for this date
+      const existing = await sql`
+        SELECT id FROM trading_ledger
+        WHERE account_id = ${accountId} AND profit_date = ${profitDate}
+      `;
+
+      if (existing.length > 0) {
+        return response.status(409).json({ error: 'Trade already exists for this member on this date.' });
+      }
+
+      // Get a deposit to link to (or create entry)
+      const deposits = await sql`
+        SELECT id FROM transactions
+        WHERE account_id = ${accountId} AND type = 'deposit' AND status = 'approved'
+        LIMIT 1
+      `;
+
+      if (deposits.length === 0) {
+        return response.status(409).json({ error: 'Member has no approved deposits. Cannot add trade.' });
+      }
+
+      const profitCents = Math.round(profitNum * 100);
+      const ledgerId = randomBytes(16).toString('hex');
+      const txId = randomBytes(16).toString('hex');
+      const now = new Date().toISOString();
+
+      // Create trading ledger entry
+      await sql`
+        INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
+        VALUES (${ledgerId}, ${accountId}, ${deposits[0].id}, ${profitCents}, ${profitDate}, ${now})
+      `;
+
+      // Create approved transaction (adds directly to balance)
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'approved', ${now})
+      `;
+
+      // Record audit
+      await recordAudit(request, 'admin.trading.add_trade', ledgerId, {
+        accountId,
+        accountName: member[0].name,
+        accountEmail: member[0].email,
+        profitAmount: profitNum,
+        profitDate,
+      });
+
+      // Get updated balance
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      return response.status(201).json({
+        ok: true,
+        message: `✅ Added $${profitNum.toFixed(2)} trade for ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
+        ledgerId,
+        transactionId: txId,
+        memberName: member[0].name,
+        profitAmount: profitNum,
+        newBalance,
+      });
+    } catch (error) {
+      console.error('Error adding trade:', error);
+      return next(error);
+    }
+  });
+
   app.get('/api/admin/balance-reconciliation', adminLimiter, requireAdminSession, async (request, response) => {
     try {
       // Get all members with their transactions
