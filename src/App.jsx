@@ -1992,6 +1992,14 @@ function App() {
                 <span style={{ fontSize: '11px', color: '#D4AF37', fontWeight: '500' }}>1:00 PM - 1:30 PM EAT</span>
               </div>
             </article>
+            <article className="balance-card">
+              <div className="card-topline">
+                <span className="balance-label">Bonuses earned</span>
+                <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
+              </div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{(comprehensiveWallet?.earnings?.referralCommissions?.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">2.5% deposit bonuses</span><span className="balance-pill"><span /> Auto-credited</span></div>
+            </article>
           </section>
 
           {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
