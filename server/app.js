@@ -1923,24 +1923,27 @@ export async function createApp() {
       console.log('🔍 [COMPREHENSIVE WALLET] Account:', request.account.id, '| All Transactions:', JSON.stringify(allTransactions));
 
       for (const row of allTransactions) {
+        // 🔧 FIX: Parse total_cents as integer (database returns as string)
+        const amountCents = parseInt(row.total_cents, 10) || 0;
+
         txByType[row.type] = {
           count: row.count,
-          amount_cents: row.total_cents,
-          amount: row.total_cents / 100,
+          amount_cents: amountCents,
+          amount: amountCents / 100,
         };
 
         if (row.type === 'deposit') {
-          totalDepositsCents += row.total_cents;
-          console.log(`  ✅ DEPOSIT: +${(row.total_cents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
+          totalDepositsCents += amountCents;
+          console.log(`  ✅ DEPOSIT: +${(amountCents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
         } else if (row.type === 'withdrawal') {
-          totalWithdrawalsCents += row.total_cents;
-          console.log(`  ✅ WITHDRAWAL: +${(row.total_cents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
+          totalWithdrawalsCents += amountCents;
+          console.log(`  ✅ WITHDRAWAL: +${(amountCents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
         } else if (knownEarningTypes.includes(row.type)) {
           // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
-          totalEarningsCents += row.total_cents;
-          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(row.total_cents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
+          totalEarningsCents += amountCents;
+          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(amountCents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
         } else {
-          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(row.total_cents / 100).toFixed(2)}`);
+          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(amountCents / 100).toFixed(2)}`);
         }
         // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
@@ -2017,18 +2020,21 @@ export async function createApp() {
       const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
 
       for (const tx of allTx) {
+        // 🔧 FIX: Parse amount_cents as integer (database returns as string)
+        const amountCents = parseInt(tx.amount_cents, 10) || 0;
+
         if (!summary[tx.type]) {
           summary[tx.type] = { count: 0, totalCents: 0 };
         }
         summary[tx.type].count += 1;
-        summary[tx.type].totalCents += tx.amount_cents;
+        summary[tx.type].totalCents += amountCents;
 
         if (tx.type === 'deposit') {
-          totalDepositsCents += tx.amount_cents;
+          totalDepositsCents += amountCents;
         } else if (tx.type === 'withdrawal') {
-          totalWithdrawalsCents += tx.amount_cents;
+          totalWithdrawalsCents += amountCents;
         } else if (knownEarningTypes.includes(tx.type)) {
-          totalEarningsCents += tx.amount_cents;
+          totalEarningsCents += amountCents;
         }
       }
 
