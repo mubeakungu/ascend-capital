@@ -549,17 +549,24 @@ function ReferralsManagement() {
 }
 
 // ============================================================================
-// TRADING MANAGEMENT
+// TRADING MANAGEMENT - ENHANCED WITH ADD/UPDATE
 // ============================================================================
 
 function TradingManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
+  const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
   const [notice, setNotice] = useState(null);
+  const [showAddTrade, setShowAddTrade] = useState(false);
+  const [memberId, setMemberId] = useState('');
+  const [profitAmount, setProfitAmount] = useState('');
+  const [profitDate, setProfitDate] = useState(new Date().toISOString().split('T')[0]);
+  const [busy, setBusy] = useState(false);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
   const trades = data?.ledger || [];
+  const accountList = members?.accounts || [];
   const totalProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
 
   async function applyProfits() {
@@ -572,21 +579,101 @@ function TradingManagement() {
     }
   }
 
+  async function addTrade(e) {
+    e.preventDefault();
+    if (!memberId || !profitAmount) {
+      setNotice({ text: 'Member ID and profit amount required', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const profit = parseFloat(profitAmount);
+      if (isNaN(profit) || profit <= 0) throw new Error('Profit must be greater than 0');
+
+      await api(`/admin/trading/add-trade`, {
+        method: 'POST',
+        body: {
+          accountId: memberId,
+          profitAmount: profit,
+          profitDate: profitDate,
+        },
+      });
+
+      setNotice({ text: `✅ Added $${profit.toFixed(2)} trade for member ${memberId}` });
+      setMemberId('');
+      setProfitAmount('');
+      setProfitDate(new Date().toISOString().split('T')[0]);
+      setShowAddTrade(false);
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
   return (
     <section>
       <div style={{ marginBottom: '16px' }}>
         <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
         <div className="ad-row">
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
+          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Load Members</button>
+          <button className="ad-btn" onClick={() => setShowAddTrade(!showAddTrade)} style={{ flex: 1 }}>
+            {showAddTrade ? '✕ Cancel' : '+ Add Trade'}
+          </button>
           <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
         </div>
       </div>
 
       <Notice notice={notice} />
 
+      {showAddTrade && (
+        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(181, 238, 106, 0.05)', border: '1px solid rgba(181, 238, 106, 0.2)' }}>
+          <h3>➕ Add New Trade</h3>
+          <form onSubmit={addTrade}>
+            <label>Member</label>
+            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
+              <option value="">Select a member...</option>
+              {accountList.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
+                </option>
+              ))}
+            </select>
+
+            <label>Profit Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={profitAmount}
+              onChange={(e) => setProfitAmount(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+
+            <label>Trade Date</label>
+            <input
+              type="date"
+              value={profitDate}
+              onChange={(e) => setProfitDate(e.target.value)}
+              required
+            />
+
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => setShowAddTrade(false)}>Cancel</button>
+              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
+                {busy ? 'Adding…' : 'Add Trade & Update Member'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div className="ad-grid">
         <StatCard label="Total Trades" value={trades.length} />
         <StatCard label="Total Profit" value={money(totalProfit)} />
+        <StatCard label="Active Members" value={accountList.length} />
       </div>
 
       <h3>Recent Activity</h3>
@@ -598,6 +685,7 @@ function TradingManagement() {
               <th>Member</th>
               <th>Deposit</th>
               <th>Profit</th>
+              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -607,6 +695,7 @@ function TradingManagement() {
                 <td>{t.accountName}</td>
                 <td className="num">{money(t.depositAmount)}</td>
                 <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
+                <td><Badge value="credited" /></td>
               </tr>
             ))}
           </tbody>
