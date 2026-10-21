@@ -595,36 +595,8 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const checkEarnings = () => {
-      if (lastDepositTime) {
-        const depositDate = new Date(lastDepositTime);
-        const nextDay = new Date(depositDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        nextDay.setHours(10, 0, 0, 0);
-
-        const now = new Date();
-        const isActive = now >= nextDay;
-
-        setEarningsActive(isActive);
-
-        if (!isActive) {
-          const timeStr = nextDay.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-          });
-          setEarningsStartTime(timeStr);
-        }
-      }
-    };
-
-    checkEarnings();
-    const interval = setInterval(checkEarnings, 60000);
-    return () => clearInterval(interval);
-  }, [lastDepositTime]);
+  // ✅ REMOVED: Automatic earnings activation - now manual claim only during 1:00 PM - 1:30 PM EAT trading window
+  // All earnings are claimed manually through the claim button during trading hours
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -735,18 +707,11 @@ function App() {
         setLastDepositTime(result.lastDepositTime);
       }
 
-      if (result.earningsActive) {
-        setEarningsActive(result.earningsActive);
-        const depositAmount = result.balance || 0;
-        const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
-        const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
-        setDailyIncome(dailyIncomeValue);
-      } else {
-        setDailyIncome(0);
-        if (result.earningsStartTime) {
-          setEarningsStartTime(result.earningsStartTime);
-        }
-      }
+      // ✅ UPDATED: Calculate daily income for manual claiming - not tied to automatic activation
+      const depositAmount = result.balance || 0;
+      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+      setDailyIncome(dailyIncomeValue);
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -949,20 +914,11 @@ function App() {
 
         const now = new Date();
         setLastDepositTime(now.toISOString());
-        setEarningsActive(false);
 
-        const nextDay = new Date();
-        nextDay.setDate(nextDay.getDate() + 1);
-        nextDay.setHours(10, 0, 0, 0);
-        const timeStr = nextDay.toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true
-        });
-        setEarningsStartTime(timeStr);
-        setDailyIncome(0);
+        // ✅ UPDATED: Calculate daily income based on deposit amount for manual claiming during 1:00 PM - 1:30 PM EAT
+        const matchingPlan = plans.find((plan) => plan.deposit === value);
+        const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+        setDailyIncome(dailyIncomeValue);
       }
 
       setModal(null);
@@ -1816,28 +1772,15 @@ function App() {
                 <span className="balance-label">Daily trade income</span>
                 <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
               </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{earningsActive ? dailyIncome : '0'}</div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{totalDeposits > 0 ? dailyIncome : '0'}</div>
               <div className="balance-bottom">
-                <span className="balance-caption">Estimated daily earnings</span>
-                {!earningsActive && lastDepositTime ? (
-                  <span className="pending-earnings">Starts {earningsStartTime}</span>
-                ) : (
-                  <button className="text-link" onClick={() => navigate('deposits')}>View plans <Icon name="arrow" size={13} /></button>
-                )}
+                <span className="balance-caption">Claimable during trading hours</span>
+                <span style={{ fontSize: '11px', color: '#D4AF37', fontWeight: '500' }}>1:00 PM - 1:30 PM EAT</span>
               </div>
             </article>
           </section>
 
-          {account && totalDeposits > 0 && earningsActive && (
-            <div className="daily-income-card">
-              <div className="daily-income-label"><Icon name="trending" size={14} style={{marginRight: '6px'}} /> Your daily trade profit</div>
-              <div className="daily-income-value">
-                <span className="currency">$</span>
-                {dailyIncome}
-              </div>
-              <div className="daily-income-info">Earning daily from your active deposits</div>
-            </div>
-          )}
+          {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
 
           {account && totalDeposits > 0 && (
             <div className="daily-trade-claim-card">
@@ -1858,19 +1801,7 @@ function App() {
             </div>
           )}
 
-          {lastDepositTime && !earningsActive ? (
-            <section className="trading-graph-section">
-              <div className="section-heading">
-                <div><div className="eyebrow"><span className="eyebrow-line" /> MARKET PERFORMANCE</div><h2>Currency trading profits</h2><p className="section-subtitle">Daily profit tracking across major currency pairs linked to your deposits.</p></div>
-                <span className="count-tag">15 days <span className="count-dot" /></span>
-              </div>
-              <div className="graph-placeholder">
-                <Icon name="chart" size={48} />
-                <p>Your trading earnings will begin tomorrow at 10:00 AM. Check back then to see your profit tracking.</p>
-                <small>Earnings activate: {earningsStartTime}</small>
-              </div>
-            </section>
-          ) : (
+          {totalDeposits > 0 && (
             <TradingGraph balance={balance} totalDeposits={totalDeposits} />
           )}
 
