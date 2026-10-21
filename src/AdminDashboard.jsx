@@ -376,7 +376,7 @@ function AccountsManagement() {
 }
 
 // ============================================================================
-// DASHBOARD / ANALYTICS
+// DASHBOARD / ANALYTICS - ✅ FIXED DATA SYNC
 // ============================================================================
 
 function Dashboard() {
@@ -389,6 +389,12 @@ function Dashboard() {
     return { accounts, queue, ledger };
   }, []);
 
+  // Auto-refresh every 10 seconds to keep data in sync
+  useEffect(() => {
+    const interval = setInterval(() => reload(), 10000);
+    return () => clearInterval(interval);
+  }, [reload]);
+
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
@@ -397,7 +403,8 @@ function Dashboard() {
   const trades = data?.ledger?.ledger || [];
 
   const totalMembers = acc.length;
-  const totalDeposits = acc.reduce((sum, a) => sum + a.balance, 0);
+  // ✅ FIXED: Changed from a.balance to a.totalDeposits
+  const totalDeposits = acc.reduce((sum, a) => sum + a.totalDeposits, 0);
   const pendingDeposits = txns.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
   const pendingWithdrawals = txns.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
   const totalTrades = trades.length;
@@ -408,14 +415,14 @@ function Dashboard() {
     <section>
       <div className="ad-row" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
         <h2>System Overview</h2>
-        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+        <button className="ad-btn ghost" onClick={reload}>Refresh Now</button>
       </div>
 
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
         <StatCard label="Held Accounts" value={acc.filter(a => a.status === 'held').length} />
-        <StatCard label="Total Deposits" value={money(totalDeposits)} />
+        <StatCard label="Total Deposits" value={money(totalDeposits)} subtext="from all members" />
         <StatCard label="Active Deposits" value={money(activeDeposits)} />
         <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} req`} />
         <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} req`} />
@@ -423,6 +430,8 @@ function Dashboard() {
         <StatCard label="Trading Profit" value={money(totalTradeProfit)} />
         <StatCard label="Pending Review" value={txns.length} subtext="txns" />
       </div>
+
+      <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '16px' }}>📊 Data auto-refreshes every 10 seconds</p>
     </section>
   );
 }
@@ -555,12 +564,11 @@ function ReferralsManagement() {
 }
 
 // ============================================================================
-// DEPOSIT MANAGEMENT - ADD/UPDATE MEMBER DEPOSITS
+// DEPOSIT MANAGEMENT - ADD/UPDATE MEMBER DEPOSITS WITH AUTO-SYNC
 // ============================================================================
 
 function DepositManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
-  const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
   const [{ data: auditData }, loadAudit] = useLoad(() => api('/admin/deposits/verify'), []);
   const [notice, setNotice] = useState(null);
   const [showAddDeposit, setShowAddDeposit] = useState(false);
@@ -569,10 +577,16 @@ function DepositManagement() {
   const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
   const [busy, setBusy] = useState(false);
 
+  // Auto-refresh every 8 seconds to sync with member accounts
+  useEffect(() => {
+    const interval = setInterval(() => reload(), 8000);
+    return () => clearInterval(interval);
+  }, [reload]);
+
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
-  const accountList = members?.accounts || [];
+  const accountList = data?.accounts || [];
 
   async function addDeposit(e) {
     e.preventDefault();
@@ -601,6 +615,7 @@ function DepositManagement() {
       setDepositDate(new Date().toISOString().split('T')[0]);
       setShowAddDeposit(false);
       reload();
+      loadAudit();
     } catch (err) {
       setNotice({ text: err.message, bad: true });
     }
@@ -613,7 +628,6 @@ function DepositManagement() {
         <h2 style={{ marginBottom: '12px' }}>💰 Deposit Management</h2>
         <div className="ad-row">
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Load Members</button>
           <button className="ad-btn" onClick={() => setShowAddDeposit(!showAddDeposit)} style={{ flex: 1 }}>
             {showAddDeposit ? '✕ Cancel' : '+ Add Deposit'}
           </button>
@@ -631,7 +645,7 @@ function DepositManagement() {
               <option value="">Select a member...</option>
               {accountList.map((acc) => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
+                  {acc.name} ({acc.email}) - Total Deposits: ${money(acc.totalDeposits)}
                 </option>
               ))}
             </select>
@@ -667,6 +681,7 @@ function DepositManagement() {
       <div className="ad-grid">
         <StatCard label="Total Members" value={accountList.length} />
         <StatCard label="Active Accounts" value={accountList.filter(a => a.status === 'active').length} />
+        <StatCard label="Total Deposits (All)" value={money(accountList.reduce((sum, a) => sum + a.totalDeposits, 0))} />
       </div>
 
       <h3>Member Deposits Overview</h3>
@@ -718,7 +733,7 @@ function DepositManagement() {
                   <td>{member.memberName}</td>
                   <td className="small">{member.memberEmail}</td>
                   <td className="num">{member.depositCount}</td>
-                  <td className="num" style={{ color: 'var(--gold)', fontWeight: 'bold' }}>${member.totalDeposits}</td>
+                  <td className="num" style={{ color: 'var(--gold)', fontWeight: 'bold' }}>${money(member.totalDeposits)}</td>
                   <td style={{ fontSize: '12px', maxWidth: '300px' }}>
                     {member.depositTransactions.map((dep, i) => (
                       <div key={i} style={{ color: '#aaa', marginBottom: '4px' }}>
@@ -798,6 +813,7 @@ function TradingManagement() {
       setProfitDate(new Date().toISOString().split('T')[0]);
       setShowAddTrade(false);
       reload();
+      loadMembers();
     } catch (err) {
       setNotice({ text: err.message, bad: true });
     }
@@ -831,6 +847,7 @@ function TradingManagement() {
       setDeductDate(new Date().toISOString().split('T')[0]);
       setShowDeductTrade(false);
       reload();
+      loadMembers();
     } catch (err) {
       setNotice({ text: err.message, bad: true });
     }
@@ -843,7 +860,7 @@ function TradingManagement() {
         <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
         <div className="ad-row">
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Load Members</button>
+          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Sync Members</button>
           <button className="ad-btn" onClick={() => setShowAddTrade(!showAddTrade)} style={{ flex: 1 }}>
             {showAddTrade ? '✕ Cancel' : '+ Add Trade'}
           </button>
@@ -1223,7 +1240,7 @@ function TransactionApproval() {
 }
 
 // ============================================================================
-// SETTINGS / PASSWORD CHANGE - FIXED & MOBILE OPTIMIZED
+// SETTINGS / PASSWORD CHANGE
 // ============================================================================
 
 function SettingsManagement({ account }) {
