@@ -1981,64 +1981,76 @@ export async function createApp() {
     }
   });
 
-  // 🔍 DEBUG: Show ALL transaction types for current account to identify earnings issues
-  app.get('/api/debug/transactions-breakdown', requireAccount, async (request, response) => {
+  // 🔍 DEBUG: Show ALL transactions (individual records) to check for duplicates or inflation
+  app.get('/api/debug/all-transactions', requireAccount, async (request, response) => {
     try {
-      const allTransactions = await sql`
+      // Get ALL individual transactions (not grouped)
+      const allTx = await sql`
         SELECT
+          id,
           type,
-          COUNT(*) AS count,
-          COALESCE(SUM(amount_cents), 0) AS total_cents
+          amount_cents,
+          reference,
+          status,
+          created_at
         FROM transactions
-        WHERE account_id = ${request.account.id} AND status = 'approved'
-        GROUP BY type
-        ORDER BY total_cents DESC
+        WHERE account_id = ${request.account.id}
+        ORDER BY created_at DESC
+        LIMIT 100
       `;
 
-      // Calculate what should be earnings (known types only)
+      // Group by type for summary
+      const summary = {};
+      let totalDepositsCents = 0;
+      let totalWithdrawalsCents = 0;
+      let totalEarningsCents = 0;
+
       const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
-      let knownEarningsCents = 0;
-      let unknownEarningsCents = 0;
 
-      const txBreakdown = [];
-
-      for (const tx of allTransactions) {
-        const isKnown = knownEarningTypes.includes(tx.type);
-        const amount = tx.total_cents / 100;
+      for (const tx of allTx) {
+        if (!summary[tx.type]) {
+          summary[tx.type] = { count: 0, totalCents: 0 };
+        }
+        summary[tx.type].count += 1;
+        summary[tx.type].totalCents += tx.amount_cents;
 
         if (tx.type === 'deposit') {
-          // Do nothing - deposits are deposits
+          totalDepositsCents += tx.amount_cents;
         } else if (tx.type === 'withdrawal') {
-          // Do nothing - withdrawals are withdrawals
-        } else if (isKnown) {
-          knownEarningsCents += tx.total_cents;
-        } else {
-          unknownEarningsCents += tx.total_cents;
+          totalWithdrawalsCents += tx.amount_cents;
+        } else if (knownEarningTypes.includes(tx.type)) {
+          totalEarningsCents += tx.amount_cents;
         }
-
-        txBreakdown.push({
-          type: tx.type,
-          count: tx.count,
-          amount: amount,
-          isKnownEarning: isKnown,
-          category: tx.type === 'deposit' ? 'DEPOSIT' : tx.type === 'withdrawal' ? 'WITHDRAWAL' : isKnown ? 'KNOWN_EARNING' : '⚠️ UNKNOWN_EARNING'
-        });
       }
 
       return response.json({
         accountId: request.account.id,
         accountName: request.account.name,
-        warning: unknownEarningsCents > 0 ? `⚠️ Found ${unknownEarningsCents / 100} in UNKNOWN earning types! Check transactions below.` : '✅ All earning types are known',
-        summary: {
-          knownEarnings: knownEarningsCents / 100,
-          unknownEarnings: unknownEarningsCents / 100,
-          totalByCategory: {}
+        totalTransactions: allTx.length,
+        summary: Object.keys(summary).reduce((acc, type) => {
+          acc[type] = {
+            count: summary[type].count,
+            amount: (summary[type].totalCents / 100).toFixed(2)
+          };
+          return acc;
+        }, {}),
+        calculation: {
+          totalDeposits: (totalDepositsCents / 100).toFixed(2),
+          totalEarnings: (totalEarningsCents / 100).toFixed(2),
+          totalWithdrawals: (totalWithdrawalsCents / 100).toFixed(2),
+          expectedBalance: ((totalDepositsCents + totalEarningsCents - totalWithdrawalsCents) / 100).toFixed(2)
         },
-        transactions: txBreakdown
+        recentTransactions: allTx.map(tx => ({
+          id: tx.id,
+          type: tx.type,
+          amount: (tx.amount_cents / 100).toFixed(2),
+          reference: tx.reference,
+          date: tx.created_at
+        }))
       });
     } catch (error) {
-      console.error('Error fetching transaction breakdown:', error);
-      return response.status(500).json({ error: 'Failed to fetch transaction breakdown.' });
+      console.error('Error fetching transactions:', error);
+      return response.status(500).json({ error: 'Failed to fetch transactions.' });
     }
   });
 
