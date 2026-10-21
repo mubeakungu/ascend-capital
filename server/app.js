@@ -1918,6 +1918,54 @@ export async function createApp() {
   const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
 
   // ✅ NEW: Admin endpoint to check and fix member balance reconciliation
+  // ✅ NEW: Admin endpoint to add deposits for members (automatically updates balance)
+  app.post('/api/admin/deposits/add', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const { accountId, depositAmount, depositDate } = request.body ?? {};
+
+      if (!accountId || !depositAmount) {
+        return response.status(400).json({ error: 'accountId and depositAmount are required.' });
+      }
+
+      const depositNum = parseFloat(depositAmount);
+      if (isNaN(depositNum) || depositNum <= 0) {
+        return response.status(400).json({ error: 'Deposit amount must be a positive number.' });
+      }
+
+      // Verify member exists
+      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
+      if (member.length === 0) {
+        return response.status(404).json({ error: 'Member not found.' });
+      }
+
+      const depositCents = Math.round(depositNum * 100);
+      const txId = randomBytes(16).toString('hex');
+      const now = new Date().toISOString();
+      const refDate = depositDate || new Date().toISOString().split('T')[0];
+
+      // Create deposit transaction (approved immediately)
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${accountId}, 'deposit', ${depositCents}, ${`Manual deposit added on ${refDate}`}, 'approved', ${now})
+      `;
+
+      // Get updated balance
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      return response.status(201).json({
+        ok: true,
+        message: `✅ Added $${depositNum.toFixed(2)} deposit for ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
+        transactionId: txId,
+        memberName: member[0].name,
+        depositAmount: depositNum,
+        newBalance,
+      });
+    } catch (error) {
+      console.error('Error adding deposit:', error);
+      return response.status(500).json({ error: `Failed to add deposit: ${error.message}` });
+    }
+  });
+
   // ✅ NEW: Admin endpoint to deduct/remove trades from members (automatically updates balance)
   app.post('/api/admin/trading/deduct-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
@@ -1943,10 +1991,11 @@ export async function createApp() {
       const now = new Date().toISOString();
       const refDate = deductDate || new Date().toISOString().split('T')[0];
 
-      // Create deduction transaction (negative trading_profit reverses the trade)
+      // Create deduction as a WITHDRAWAL type (reverses the trade by removing funds)
+      // This way we stay with positive amounts in the database
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${-deductCents}, ${`Trade deducted on ${refDate}`}, 'approved', ${now})
+        VALUES (${txId}, ${accountId}, 'withdrawal', ${deductCents}, ${`Trade reversal on ${refDate}`}, 'approved', ${now})
       `;
 
       // Get updated balance
