@@ -1831,6 +1831,46 @@ export async function createApp() {
   });
 
   // ✅ NEW: COMPREHENSIVE WALLET - All earnings aggregated
+  // ✅ NEW: Get all transaction history for member (audit trail)
+  app.get('/api/wallet/transactions', requireAccount, async (request, response) => {
+    try {
+      const transactions = await sql`
+        SELECT id, type, amount_cents, reference, status, created_at
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND status = 'approved'
+        ORDER BY created_at DESC
+        LIMIT 500
+      `;
+
+      const formatted = transactions.map(tx => ({
+        id: tx.id,
+        type: tx.type
+          .replace('_', ' ')
+          .replace(/\b\w/g, l => l.toUpperCase())
+          .replace('Trading Profit', 'Trading Profit')
+          .replace('Tier Reward', 'Tier Reward')
+          .replace('Tier Salary', 'Weekly Salary')
+          .replace('Referral Commission', 'Referral Bonus'),
+        amount: tx.amount_cents / 100,
+        reference: tx.reference,
+        status: tx.status,
+        date: new Date(tx.created_at).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }),
+      }));
+
+      return response.json({
+        ok: true,
+        transactions: formatted
+      });
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      return response.status(500).json({ error: 'Failed to fetch transactions' });
+    }
+  });
+
   app.get('/api/wallet/comprehensive', requireAccount, async (request, response) => {
     try {
       // Get all transaction-based earnings (deposits, withdrawals, and all earning types)
@@ -2192,13 +2232,59 @@ export async function createApp() {
     }
   });
 
+  // ✅ VERIFICATION ENDPOINT: Check deposit calculations for all members
+  app.get('/api/admin/deposits/verify', adminLimiter, requireAdminSession, async (request, response) => {
+    try {
+      const members = await sql`SELECT id, name, email FROM accounts WHERE role = 'member' ORDER BY created_at DESC`;
+
+      const verification = await Promise.all(members.map(async (member) => {
+        // Get ONLY deposit transactions (type='deposit', status='approved')
+        const depositTxs = await sql`
+          SELECT id, amount_cents, reference, created_at
+          FROM transactions
+          WHERE account_id = ${member.id} AND type = 'deposit' AND status = 'approved'
+          ORDER BY created_at ASC
+        `;
+
+        const totalDepositsCents = depositTxs.reduce((sum, tx) => sum + tx.amount_cents, 0);
+
+        // Get current balance using approvedBalanceCents
+        const currentBalance = await approvedBalanceCents(member.id);
+
+        return {
+          memberId: member.id,
+          memberName: member.name,
+          memberEmail: member.email,
+          depositCount: depositTxs.length,
+          depositTransactions: depositTxs.map(tx => ({
+            id: tx.id,
+            amount: (tx.amount_cents / 100).toFixed(2),
+            reference: tx.reference,
+            date: tx.created_at.split('T')[0],
+          })),
+          totalDeposits: (totalDepositsCents / 100).toFixed(2),
+          currentBalance: (currentBalance / 100).toFixed(2),
+        };
+      }));
+
+      return response.json({
+        ok: true,
+        totalMembers: verification.length,
+        deposits: verification,
+      });
+    } catch (error) {
+      console.error('Error verifying deposits:', error);
+      return response.status(500).json({ error: error.message });
+    }
+  });
+
   app.get('/api/admin/accounts', adminLimiter, requireAdminSession, async (request, response) => {
     const accounts = await sql`
       SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
         COALESCE((
-          SELECT SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE 0 END)
+          SELECT SUM(amount_cents)
           FROM transactions t
-          WHERE t.account_id = a.id AND t.status = 'approved'
+          WHERE t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
         ), 0) AS total_deposits_cents,
         COALESCE((
           SELECT SUM(CASE
