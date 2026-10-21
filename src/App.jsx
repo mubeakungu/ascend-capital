@@ -2080,6 +2080,12 @@ function App() {
                     </div>
                   </article>
                   <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team total (1st-3rd gen)</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.teamTotal === 'number' ? referralStats.teamTotal : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
                     <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Commission rate</span>
                     <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
                       {typeof referralStats.commissionRate === 'number' ? `${(referralStats.commissionRate * 100).toFixed(0)}%` : '0%'}
