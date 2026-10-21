@@ -538,7 +538,11 @@ export async function createApp() {
 
   async function approvedBalanceCents(accountId) {
     const row = await sql`
-      SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE -amount_cents END), 0) AS balance
+      SELECT COALESCE(SUM(CASE
+        WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
+        WHEN type = 'withdrawal' THEN -amount_cents
+        ELSE 0
+      END), 0) AS balance
       FROM transactions
       WHERE account_id = ${accountId} AND status = 'approved'
     `;
