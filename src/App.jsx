@@ -353,16 +353,18 @@ function ReferredMembersList() {
     );
   }
 
-  if (referrals.length === 0) {
-    return null;
-  }
-
   return (
     <div>
       <div style={{ marginBottom: '12px' }}>
         <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>YOUR NETWORK</span>
         <h3 style={{ marginTop: '4px', marginBottom: '0' }}>Referred members</h3>
       </div>
+      {referrals.length === 0 && (
+        <div style={{ padding: '20px', textAlign: 'center', color: '#aaa', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', marginBottom: '20px' }}>
+          <p>No referrals yet. Share your referral code to start building your network!</p>
+        </div>
+      )}
+      {referrals.length > 0 && (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px', margin: '16px 0' }}>
         {referrals.map((member) => (
           <div
@@ -399,6 +401,7 @@ function ReferredMembersList() {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
