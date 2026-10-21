@@ -1810,15 +1810,17 @@ export async function createApp() {
     const lastDepositTime = accountRow[0]?.last_deposit_time || null;
     const earningsStatus = calculateEarningsStatus(lastDepositTime);
 
+    // ✅ FIX: Get the actual approved balance (includes ALL earnings)
+    const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
+
     let dailyIncome = 0;
     if (earningsStatus.earningsActive && lastDepositTime) {
-      const balance = await approvedBalanceCents(request.account.id) / 100;
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === balance);
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === approvedBalance);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
     return response.json({
-      balance: await approvedBalanceCents(request.account.id) / 100,
+      balance: approvedBalance,
       pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
       transactions: rows.map((row) => transactionView(row)),
       lastDepositTime,
