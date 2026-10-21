@@ -115,6 +115,10 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [showBalanceAdjust, setShowBalanceAdjust] = useState(false);
+  const [balanceAction, setBalanceAction] = useState('adjust');
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [balanceReason, setBalanceReason] = useState('');
 
   useEffect(() => {
     if (data?.account) {
@@ -134,6 +138,34 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
       });
       setNotice({ text: 'Account updated' });
       setEditMode(false);
+      reload();
+      onUpdate();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  async function adjustBalance(e) {
+    e?.preventDefault();
+    if (!balanceAmount || !balanceReason) {
+      setNotice({ text: 'Amount and reason required', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const amountNum = parseFloat(balanceAmount);
+      if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid amount');
+
+      await api(`/admin/accounts/${accountId}/balance`, {
+        method: 'POST',
+        body: { action: balanceAction, amountCents: Math.round(amountNum * 100), reason: balanceReason }
+      });
+
+      setNotice({ text: `Balance ${balanceAction}ed successfully` });
+      setBalanceAmount('');
+      setBalanceReason('');
+      setShowBalanceAdjust(false);
       reload();
       onUpdate();
     } catch (err) {
@@ -203,10 +235,50 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
               <span className="ad-detail-label">Email</span>
               <span className="ad-detail-value">{account.email}</span>
             </div>
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>
-              <button type="button" className="ad-btn" onClick={() => setEditMode(true)}>Edit</button>
-            </div>
+
+            {/* ✅ Quick Balance Adjustment */}
+            {!showBalanceAdjust ? (
+              <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
+                <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>
+                <button type="button" className="ad-btn" onClick={() => setEditMode(true)}>Edit</button>
+                <button type="button" className="ad-btn ghost" onClick={() => setShowBalanceAdjust(true)}>💰 Adjust Balance</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
+                  <label>Action</label>
+                  <select value={balanceAction} onChange={(e) => setBalanceAction(e.target.value)}>
+                    <option value="adjust">Add Balance</option>
+                    <option value="deduct">Deduct Balance</option>
+                    <option value="set">Set Balance</option>
+                  </select>
+
+                  <label>Amount (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={balanceAmount}
+                    onChange={(e) => setBalanceAmount(e.target.value)}
+                    placeholder="0.00"
+                    required
+                  />
+
+                  <label>Reason</label>
+                  <textarea
+                    rows={2}
+                    value={balanceReason}
+                    onChange={(e) => setBalanceReason(e.target.value)}
+                    placeholder="Why are you adjusting this balance?"
+                    required
+                  />
+
+                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
+                    <button type="button" className="ad-btn ghost" onClick={() => { setShowBalanceAdjust(false); setBalanceAmount(''); setBalanceReason(''); }}>Cancel</button>
+                    <button type="button" className="ad-btn" onClick={adjustBalance} disabled={busy}>{busy ? 'Adjusting…' : 'Apply'}</button>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </form>
