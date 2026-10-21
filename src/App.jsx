@@ -1969,7 +1969,7 @@ function App() {
                 <span className="balance-label">Ascend wallet</span>
                 <span className="balance-icon"><Icon name="wallet" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>{balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-value"><span className="currency">$</span>{(comprehensiveWallet?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               <div className="balance-bottom"><span className="balance-caption">Available balance</span><span className="balance-pill"><span /> USD</span></div>
             </article>
             <article className="balance-card">
@@ -1977,8 +1977,8 @@ function App() {
                 <span className="balance-label">Total deposits</span>
                 <span className="balance-icon subdued"><Icon name="trending" size={18} /></span>
               </div>
-              <div className="balance-value"><span className="currency">$</span>{totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div className="balance-bottom"><span className="balance-caption">Active investments</span><span className="muted-metric">{totalDeposits === 0 ? 'No activity yet' : 'Earning'}</span></div>
+              <div className="balance-value"><span className="currency">$</span>{(comprehensiveWallet?.totalDeposits || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">Active investments</span><span className="muted-metric">{(comprehensiveWallet?.totalDeposits || 0) === 0 ? 'No activity yet' : 'Locked'}</span></div>
             </article>
             <article className="balance-card">
               <div className="card-topline">
