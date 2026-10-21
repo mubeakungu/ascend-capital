@@ -1570,9 +1570,9 @@ export async function createApp() {
       }
 
       // ✅ Check Prime Hour time window (3:45 AM - 4:15 AM EAT/UTC+3)
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
+      const currentTime = new Date();
+      const hours = currentTime.getHours();
+      const minutes = currentTime.getMinutes();
       const currentMinutes = hours * 60 + minutes;
       const primeStart = 3 * 60 + 45;  // 3:45 AM = 225 minutes
       const primeEnd = 4 * 60 + 15;    // 4:15 AM = 255 minutes
