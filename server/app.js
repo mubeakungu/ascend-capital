@@ -1873,18 +1873,16 @@ export async function createApp() {
         };
       }
 
-      // Add referral commission from separate table
-      const refCommissionAmount = refCommissions[0]?.total_cents || 0;
-      earningsByType['referral_commission'] = {
-        count: earningsByType['referral_commission']?.count || 0,
-        amount: (earningsByType['referral_commission']?.amount || 0) + (refCommissionAmount / 100),
-      };
-
       // Calculate totals
       const totalDeposits = (deposits[0]?.total_cents || 0) / 100;
       const totalWithdrawals = (withdrawals[0]?.total_cents || 0) / 100;
 
-      const totalEarnings = Object.values(earningsByType).reduce((sum, type) => sum + type.amount, 0);
+      // Calculate total earnings from all types
+      let totalEarnings = 0;
+      for (const type of Object.values(earningsByType)) {
+        totalEarnings += type.amount;
+      }
+
       const totalIncome = totalDeposits + totalEarnings;
       const walletBalance = totalIncome - totalWithdrawals;
 
