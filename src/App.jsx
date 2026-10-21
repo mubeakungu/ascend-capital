@@ -16,7 +16,7 @@ const plans = [
 ];
 
 const ranks = [
-  { name: 'Star 1', direct: 5, team: null, reward: '$80', weeklySalary: null },
+  { name: 'Star 1', direct: 5, team: 0, reward: '$80', weeklySalary: null },
   { name: 'Star 2', direct: 7, team: 13, reward: '$150', weeklySalary: '$100' },
   { name: 'Star 3', direct: 8, team: 25, reward: '$250', weeklySalary: '$200' },
   { name: 'Star 4', direct: 9, team: 40, reward: '$400', weeklySalary: '$300' },
@@ -2103,14 +2103,14 @@ function App() {
                     <tr key={rank.name} style={{background: referralStats?.tier === rank.name ? 'rgba(212, 175, 55, 0.1)' : 'transparent'}}>
                       <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
                       <td>{rank.direct} <span className="table-muted">direct</span></td>
-                      <td>{rank.team === null ? <span className="table-dash">—</span> : rank.team}</td>
+                      <td>{rank.team === null || rank.team === 0 ? <span className="table-dash">—</span> : rank.team}</td>
                       <td className="reward-cell">{rank.reward}{rank.name === 'Star 8' && <span className="reward-value"> · $27,000 value</span>}{rank.name === 'Crown Leader' && <span className="reward-value"> · $46,000 value</span>}{rank.name === 'Star 7' && <span className="reward-value"> · $80,000 house</span>}</td>
                       <td className="salary-cell" style={{color: 'var(--gold)', fontWeight: '600'}}>{rank.weeklySalary ? rank.weeklySalary : '—'}</td>
                     </tr>
                   ))}</tbody>
                 </table>
               </div>
-              <p className="team-note">Your current tier is highlighted above. Qualify for higher tiers by recruiting more direct referrals or building your team total.</p>
+              <p className="team-note">Your current tier is highlighted above. Qualify for higher tiers by meeting BOTH direct referral AND team total requirements. (Star 1 only requires direct referrals.)</p>
             </div>
 
             <aside className={`bonus-card ${!isPrimeHourActive ? 'prime-hour-card inactive' : 'prime-hour-card'}`} id="rewards">
