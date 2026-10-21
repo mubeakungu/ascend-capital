@@ -284,8 +284,12 @@ function AccountsManagement() {
                 <span className="value">{a.email}</span>
               </div>
               <div className="ad-account-card-row">
-                <span className="label">Balance:</span>
-                <span className="value">{money(a.balance)}</span>
+                <span className="label">Total Deposits:</span>
+                <span className="value" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</span>
+              </div>
+              <div className="ad-account-card-row">
+                <span className="label">Current Balance:</span>
+                <span className="value" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</span>
               </div>
               <div className="ad-account-card-row">
                 <span className="label">Role:</span>
@@ -315,7 +319,8 @@ function AccountsManagement() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Status</th>
-                <th>Balance</th>
+                <th>Total Deposits</th>
+                <th>Current Balance</th>
                 <th>Role</th>
                 <th>Created</th>
                 <th>Actions</th>
@@ -327,7 +332,8 @@ function AccountsManagement() {
                   <td>{a.name}</td>
                   <td>{a.email}</td>
                   <td><Badge value={a.status} /></td>
-                  <td className="num">{money(a.balance)}</td>
+                  <td className="num" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</td>
+                  <td className="num" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</td>
                   <td><Badge value={a.role} /></td>
                   <td>{new Date(a.createdAt).toLocaleDateString()}</td>
                   <td>
