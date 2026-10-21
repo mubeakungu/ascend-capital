@@ -338,7 +338,7 @@ export async function createApp() {
       email TEXT NOT NULL UNIQUE,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      phone TEXT,
+      phone TEXT UNIQUE,
       pin TEXT,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
@@ -1015,6 +1015,13 @@ export async function createApp() {
       const email = input.email.trim().toLowerCase();
       const existing = await sql`SELECT id FROM accounts WHERE email = ${email}`;
       if (existing.length > 0) return response.status(409).json({ error: 'An account with this email already exists.' });
+
+      // ✅ Check for duplicate phone number
+      const phone = input.phone?.trim() || null;
+      if (phone) {
+        const existingPhone = await sql`SELECT id FROM accounts WHERE phone = ${phone}`;
+        if (existingPhone.length > 0) return response.status(409).json({ error: 'An account with this phone number already exists.' });
+      }
 
       const salt = randomBytes(16);
       const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
