@@ -13,8 +13,18 @@ const TIER_NAMES = [
   'Crown Leader',
 ];
 
-// Direct referrals required to reach each tier
-const TIER_REQUIREMENTS = [1, 3, 6, 10, 15, 25, 40, 60, 100];
+// Tier requirements: [direct referrals needed, team total needed]
+const TIER_REQUIREMENTS = [
+  { direct: 5, team: 0 },        // Star 1: 5 direct
+  { direct: 7, team: 13 },       // Star 2: 7 direct + 13 team
+  { direct: 8, team: 25 },       // Star 3: 8 direct + 25 team
+  { direct: 9, team: 40 },       // Star 4: 9 direct + 40 team
+  { direct: 10, team: 70 },      // Star 5: 10 direct + 70 team
+  { direct: 11, team: 150 },     // Star 6: 11 direct + 150 team
+  { direct: 12, team: 400 },     // Star 7: 12 direct + 400 team
+  { direct: 13, team: 700 },     // Star 8: 13 direct + 700 team
+  { direct: 14, team: 1000 },    // Crown Leader: 14 direct + 1000 team
+];
 
 // Tier reward amounts (in cents)
 const TIER_REWARDS = {
@@ -79,10 +89,12 @@ async function getTeamTotal(sql, referrerId) {
   return result[0]?.cnt || 0;
 }
 
-// Get tier by direct referral count
-function getTierByDirectReferrals(directCount) {
+// Get tier by direct referral count AND team total (both must be met)
+function getTierByDirectReferrals(directCount, teamTotal = 0) {
   for (let i = TIER_REQUIREMENTS.length - 1; i >= 0; i--) {
-    if (directCount >= TIER_REQUIREMENTS[i]) {
+    const requirement = TIER_REQUIREMENTS[i];
+    // Both direct referrals AND team total requirements must be met
+    if (directCount >= requirement.direct && teamTotal >= requirement.team) {
       return i;
     }
   }
@@ -91,12 +103,12 @@ function getTierByDirectReferrals(directCount) {
 
 // Check and credit tier rewards when new referral is created
 async function checkAndCreditTierReward(sql, referrerId) {
-  // Get current direct referral count
+  // Get current direct referral count and team total
   const directCount = await getDirectReferralCount(sql, referrerId);
   const teamTotal = await getTeamTotal(sql, referrerId);
 
-  // Calculate current tier
-  const currentTier = getTierByDirectReferrals(directCount);
+  // Calculate current tier (must meet BOTH direct referrals AND team total requirements)
+  const currentTier = getTierByDirectReferrals(directCount, teamTotal);
   
   if (currentTier < 0) return null; // No tier yet
 
@@ -162,7 +174,8 @@ async function getTierProgression(sql, referrerId) {
   const directCount = await getDirectReferralCount(sql, referrerId);
   const teamTotal = await getTeamTotal(sql, referrerId);
 
-  const currentTier = getTierByDirectReferrals(directCount);
+  // Calculate current tier (must meet BOTH direct referrals AND team total requirements)
+  const currentTier = getTierByDirectReferrals(directCount, teamTotal);
 
   // Get earned tier rewards
   const earnedRewards = await sql`
@@ -173,20 +186,28 @@ async function getTierProgression(sql, referrerId) {
     ORDER BY tier_index ASC
   `;
 
-  // Calculate progress to next tier
-  let nextTierThreshold = null;
-  let currentTierThreshold = null;
-  let progressToNext = 0;
+  // Calculate progress to next tier (must meet BOTH requirements)
+  let nextTierDirect = null;
+  let nextTierTeam = null;
+  let currentTierDirect = null;
+  let currentTierTeam = null;
+  let directProgress = 0;
+  let teamProgress = 0;
 
   if (currentTier >= 0) {
-    currentTierThreshold = TIER_REQUIREMENTS[currentTier];
+    currentTierDirect = TIER_REQUIREMENTS[currentTier].direct;
+    currentTierTeam = TIER_REQUIREMENTS[currentTier].team;
     if (currentTier < 8) {
-      nextTierThreshold = TIER_REQUIREMENTS[currentTier + 1];
-      progressToNext = Math.round((directCount / nextTierThreshold) * 100);
+      nextTierDirect = TIER_REQUIREMENTS[currentTier + 1].direct;
+      nextTierTeam = TIER_REQUIREMENTS[currentTier + 1].team;
+      directProgress = Math.round((directCount / nextTierDirect) * 100);
+      teamProgress = Math.round((teamTotal / nextTierTeam) * 100);
     }
   } else {
-    nextTierThreshold = TIER_REQUIREMENTS[0];
-    progressToNext = 0;
+    nextTierDirect = TIER_REQUIREMENTS[0].direct;
+    nextTierTeam = TIER_REQUIREMENTS[0].team;
+    directProgress = Math.round((directCount / nextTierDirect) * 100);
+    teamProgress = teamTotal > 0 ? Math.round((teamTotal / nextTierTeam) * 100) : 0;
   }
 
   return {
@@ -203,10 +224,22 @@ async function getTierProgression(sql, referrerId) {
       creditedAt: r.credited_at,
     })),
     progression: {
-      currentThreshold: currentTierThreshold,
-      nextThreshold: nextTierThreshold,
-      progressPercent: progressToNext,
-      needsForNext: nextTierThreshold ? Math.max(0, nextTierThreshold - directCount) : 0,
+      current: {
+        directThreshold: currentTierDirect,
+        teamThreshold: currentTierTeam,
+      },
+      next: {
+        directThreshold: nextTierDirect,
+        teamThreshold: nextTierTeam,
+      },
+      progress: {
+        directPercent: directProgress,
+        teamPercent: teamProgress,
+      },
+      needsForNext: {
+        direct: nextTierDirect ? Math.max(0, nextTierDirect - directCount) : 0,
+        team: nextTierTeam ? Math.max(0, nextTierTeam - teamTotal) : 0,
+      },
     },
   };
 }
