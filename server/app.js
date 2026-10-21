@@ -745,17 +745,9 @@ export async function createApp() {
         bonusType = 'first_deposit_bonus_2.5%';
       }
     } else {
-      const firstDeposit = await sql`
-        SELECT amount_cents FROM transactions
-        WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved'
-        ORDER BY created_at ASC
-        LIMIT 1
-      `;
-
-      if (firstDeposit.length === 0) return null;
-
+      // ✅ RECHARGE BONUS: 2.5% of THIS deposit (not the first deposit)
       commissionRate = 0.025;
-      commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
+      commissionCents = Math.round(tx.amount_cents * commissionRate);
       bonusType = 'recharge_bonus_2.5%';
 
       if (!referrerId) {
