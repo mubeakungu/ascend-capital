@@ -2099,7 +2099,16 @@ export async function createApp() {
     const accounts = await sql`
       SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
         COALESCE((
-          SELECT SUM(CASE WHEN t.type = 'deposit' THEN t.amount_cents ELSE -t.amount_cents END)
+          SELECT SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE 0 END)
+          FROM transactions t
+          WHERE t.account_id = a.id AND t.status = 'approved'
+        ), 0) AS total_deposits_cents,
+        COALESCE((
+          SELECT SUM(CASE
+            WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
+            WHEN type = 'withdrawal' THEN -amount_cents
+            ELSE 0
+          END)
           FROM transactions t
           WHERE t.account_id = a.id AND t.status = 'approved'
         ), 0) AS balance_cents,
@@ -2114,6 +2123,7 @@ export async function createApp() {
         ...accountView(row),
         holdReason: row.hold_reason ?? null,
         heldAt: row.held_at ?? null,
+        totalDeposits: row.total_deposits_cents / 100,
         balance: row.balance_cents / 100,
         pendingTransactions: row.pending_count,
       }))
