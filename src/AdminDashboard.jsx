@@ -563,9 +563,13 @@ function TradingManagement() {
   const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
   const [notice, setNotice] = useState(null);
   const [showAddTrade, setShowAddTrade] = useState(false);
+  const [showDeductTrade, setShowDeductTrade] = useState(false);
   const [memberId, setMemberId] = useState('');
+  const [deductMemberId, setDeductMemberId] = useState('');
   const [profitAmount, setProfitAmount] = useState('');
+  const [deductAmount, setDeductAmount] = useState('');
   const [profitDate, setProfitDate] = useState(new Date().toISOString().split('T')[0]);
+  const [deductDate, setDeductDate] = useState(new Date().toISOString().split('T')[0]);
   const [busy, setBusy] = useState(false);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
@@ -618,6 +622,39 @@ function TradingManagement() {
     setBusy(false);
   }
 
+  async function deductTrade(e) {
+    e.preventDefault();
+    if (!deductMemberId || !deductAmount) {
+      setNotice({ text: 'Member ID and deduct amount required', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const amount = parseFloat(deductAmount);
+      if (isNaN(amount) || amount <= 0) throw new Error('Deduct amount must be greater than 0');
+
+      await api(`/admin/trading/deduct-trade`, {
+        method: 'POST',
+        body: {
+          accountId: deductMemberId,
+          deductAmount: amount,
+          deductDate: deductDate,
+        },
+      });
+
+      setNotice({ text: `✅ Deducted $${amount.toFixed(2)} trade from member ${deductMemberId}` });
+      setDeductMemberId('');
+      setDeductAmount('');
+      setDeductDate(new Date().toISOString().split('T')[0]);
+      setShowDeductTrade(false);
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
   return (
     <section>
       <div style={{ marginBottom: '16px' }}>
@@ -627,6 +664,9 @@ function TradingManagement() {
           <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Load Members</button>
           <button className="ad-btn" onClick={() => setShowAddTrade(!showAddTrade)} style={{ flex: 1 }}>
             {showAddTrade ? '✕ Cancel' : '+ Add Trade'}
+          </button>
+          <button className="ad-btn ghost danger" onClick={() => setShowDeductTrade(!showDeductTrade)} style={{ flex: 1 }}>
+            {showDeductTrade ? '✕ Cancel' : '➖ Deduct Trade'}
           </button>
           <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
         </div>
@@ -670,6 +710,48 @@ function TradingManagement() {
               <button type="button" className="ad-btn ghost" onClick={() => setShowAddTrade(false)}>Cancel</button>
               <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
                 {busy ? 'Adding…' : 'Add Trade & Update Member'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showDeductTrade && (
+        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(255, 107, 107, 0.05)', border: '1px solid rgba(255, 107, 107, 0.2)' }}>
+          <h3>➖ Deduct Trade</h3>
+          <form onSubmit={deductTrade}>
+            <label>Member</label>
+            <select value={deductMemberId} onChange={(e) => setDeductMemberId(e.target.value)} required>
+              <option value="">Select a member...</option>
+              {(members?.accounts || []).map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
+                </option>
+              ))}
+            </select>
+
+            <label>Deduct Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={deductAmount}
+              onChange={(e) => setDeductAmount(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+
+            <label>Deduct Date</label>
+            <input
+              type="date"
+              value={deductDate}
+              onChange={(e) => setDeductDate(e.target.value)}
+              required
+            />
+
+            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => setShowDeductTrade(false)}>Cancel</button>
+              <button className="ad-btn ghost danger" disabled={busy} style={{ flex: 0 }}>
+                {busy ? 'Deducting…' : 'Deduct & Update Member'}
               </button>
             </div>
           </form>
