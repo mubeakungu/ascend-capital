@@ -20,7 +20,7 @@ const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
 const PIN_PATTERN = /^\d{6}$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary'];
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
@@ -364,7 +364,7 @@ export async function createApp() {
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary')),
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission')),
       amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
       reference TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
@@ -761,12 +761,30 @@ export async function createApp() {
 
     const commissionId = randomBytes(16).toString('hex');
     try {
+      const now = new Date().toISOString();
+
+      // ✅ INSERT commission record
       await sql`
         INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
-        VALUES (${commissionId}, ${beneficiaryId}, ${transactionId}, ${tx.account_id}, ${commissionCents}, ${commissionRate}, ${new Date().toISOString()})
+        VALUES (${commissionId}, ${beneficiaryId}, ${transactionId}, ${tx.account_id}, ${commissionCents}, ${commissionRate}, ${now})
       `;
-      return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId };
+
+      // ✅ ADD: Credit commission directly to Ascend wallet as approved transaction
+      const commissionTxId = randomBytes(16).toString('hex');
+      const reference = bonusType === 'referral_bonus_5%'
+        ? `Referral bonus (5%) from ${tx.account_id}`
+        : bonusType === 'first_deposit_bonus_2.5%'
+        ? `First deposit bonus (2.5%)`
+        : `Recharge bonus (2.5%)`;
+
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'approved', ${now})
+      `;
+
+      return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId, commissionTxId };
     } catch (error) {
+      console.error('Failed to apply referral commission:', error);
       return null;
     }
   }
