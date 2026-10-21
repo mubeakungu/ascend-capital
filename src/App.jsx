@@ -31,6 +31,7 @@ const navItems = [
   { id: 'overview', label: 'Overview', icon: 'grid' },
   { id: 'deposits', label: 'Deposit plans', icon: 'chart' },
   { id: 'referrals', label: 'Referrals & ranks', icon: 'users' },
+  { id: 'history', label: 'Transaction History', icon: 'trending' },
   { id: 'rewards', label: 'Prime hour', icon: 'clock' },
 ];
 
@@ -955,6 +956,24 @@ function App() {
     }
   }
 
+  // ✅ NEW: Fetch transaction history
+  const [transactionHistory, setTransactionHistory] = useState([]);
+  const [transactionLoading, setTransactionLoading] = useState(false);
+
+  async function fetchTransactionHistory() {
+    if (!account) return;
+    setTransactionLoading(true);
+    try {
+      const result = await requestApi('/api/wallet/transactions');
+      setTransactionHistory(result.transactions || []);
+    } catch (error) {
+      console.error('Failed to fetch transaction history:', error);
+      setTransactionHistory([]);
+    } finally {
+      setTransactionLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (account) {
       fetchWeeklySalary();
@@ -1202,6 +1221,8 @@ function App() {
         await fetchReferralStats();
         // ✅ ADD: Fetch claim status after login
         await fetchCanClaimTrade();
+        // ✅ ADD: Fetch transaction history for audit log
+        await fetchTransactionHistory();
       }
 
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
@@ -2201,6 +2222,74 @@ function App() {
               ))}
             </div>
             <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income starts tomorrow at 10:00 AM. Minimum withdrawal is $40.</p></div>
+          </section>
+
+          <section className="referral-layout" id="history" style={{ display: activeNav === 'history' ? 'block' : 'none' }}>
+            <div className="section-heading">
+              <div><h2>📊 Transaction History</h2><p className="section-subtitle">Complete audit trail of all your deposits, earnings, and withdrawals</p></div>
+            </div>
+
+            {/* Earnings Breakdown */}
+            <div style={{ marginBottom: '40px' }}>
+              <h3 style={{ marginBottom: '20px', color: 'var(--gold)' }}>💰 Earnings Breakdown</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                <div style={{ background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ color: 'var(--gold)', fontSize: '12px', marginBottom: '8px' }}>TOTAL DEPOSITS</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--gold)' }}>${comprehensiveWallet?.totalDeposits.toFixed(2) || '0.00'}</div>
+                </div>
+                <div style={{ background: 'rgba(91, 238, 106, 0.1)', border: '1px solid rgba(91, 238, 106, 0.3)', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ color: '#5BEE6A', fontSize: '12px', marginBottom: '8px' }}>TRADING PROFITS</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5BEE6A' }}>${comprehensiveWallet?.tradingProfit.toFixed(2) || '0.00'}</div>
+                </div>
+                <div style={{ background: 'rgba(91, 238, 106, 0.1)', border: '1px solid rgba(91, 238, 106, 0.3)', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ color: '#5BEE6A', fontSize: '12px', marginBottom: '8px' }}>REFERRAL COMMISSIONS</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5BEE6A' }}>${comprehensiveWallet?.referralCommissions.toFixed(2) || '0.00'}</div>
+                </div>
+                <div style={{ background: 'rgba(91, 238, 106, 0.1)', border: '1px solid rgba(91, 238, 106, 0.3)', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ color: '#5BEE6A', fontSize: '12px', marginBottom: '8px' }}>TIER REWARDS</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5BEE6A' }}>${comprehensiveWallet?.tierRewards.toFixed(2) || '0.00'}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction List */}
+            <div>
+              <h3 style={{ marginBottom: '20px' }}>📝 All Transactions</h3>
+              <div style={{ background: 'var(--bg-card)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                {transactionLoading ? (
+                  <p style={{ padding: '20px', textAlign: 'center', color: '#888' }}>Loading transactions...</p>
+                ) : transactionHistory.length === 0 ? (
+                  <p style={{ padding: '20px', textAlign: 'center', color: '#888' }}>No transactions yet</p>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(212, 175, 55, 0.1)', borderBottom: '1px solid var(--border)' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'var(--gold)', fontSize: '12px', fontWeight: '600' }}>DATE</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'var(--gold)', fontSize: '12px', fontWeight: '600' }}>TYPE</th>
+                        <th style={{ padding: '12px', textAlign: 'right', color: 'var(--gold)', fontSize: '12px', fontWeight: '600' }}>AMOUNT</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'var(--gold)', fontSize: '12px', fontWeight: '600' }}>STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactionHistory.map((tx, idx) => (
+                        <tr key={idx} style={{ borderBottom: idx < transactionHistory.length - 1 ? '1px solid rgba(212, 175, 55, 0.1)' : 'none' }}>
+                          <td style={{ padding: '12px', fontSize: '13px' }}>{tx.date}</td>
+                          <td style={{ padding: '12px', fontSize: '13px', color: 'var(--gold)', fontWeight: '500' }}>{tx.type}</td>
+                          <td style={{ padding: '12px', textAlign: 'right', fontSize: '13px', fontWeight: '600', color: tx.amount > 0 ? '#5BEE6A' : '#ff6b6b' }}>
+                            {tx.amount > 0 ? '+' : '-'}${Math.abs(tx.amount).toFixed(2)}
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '12px' }}>
+                            <span style={{ background: tx.status === 'approved' ? 'rgba(91, 238, 106, 0.2)' : 'rgba(255, 193, 7, 0.2)', color: tx.status === 'approved' ? '#5BEE6A' : '#FFC107', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>
+                              {tx.status.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </section>
 
           <section className="referral-layout" id="referrals">
