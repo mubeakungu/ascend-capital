@@ -9,7 +9,7 @@ import {
   getDirectReferralCount,
   getTeamTotal,
   TIER_REQUIREMENTS,
-} from './referral-rewards-enhancement-v2.js';
+} 
 
 const scryptAsync = promisify(scrypt);
 const SESSION_COOKIE = 'ascend_session';
