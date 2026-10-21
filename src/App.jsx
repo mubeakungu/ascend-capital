@@ -527,6 +527,11 @@ function App() {
   const [tradeClaimMessage, setTradeClaimMessage] = useState('');
   const [isTradingHourActive, setIsTradingHourActive] = useState(false);
   const [nextTradingTime, setNextTradingTime] = useState('');
+  // ✅ ADD: Prime Hour Wallet states
+  const [primeHourBalance, setPrimeHourBalance] = useState(0);
+  const [primeHourModal, setPrimeHourModal] = useState(null);
+  const [primeHourLoading, setPrimeHourLoading] = useState(false);
+  const [primeHourMessage, setPrimeHourMessage] = useState('');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -595,6 +600,17 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // ✅ ADD: Refresh prime hour balance during prime hour window
+  useEffect(() => {
+    if (isPrimeHourActive && account) {
+      fetchPrimeHourBalance();
+      const interval = setInterval(() => {
+        fetchPrimeHourBalance();
+      }, 60000); // Refresh every minute during prime hour
+      return () => clearInterval(interval);
+    }
+  }, [isPrimeHourActive, account]);
+
   // ✅ REMOVED: Automatic earnings activation - now manual claim only during 1:00 PM - 1:30 PM EAT trading window
   // All earnings are claimed manually through the claim button during trading hours
 
@@ -650,6 +666,110 @@ function App() {
     }
   }
 
+  // ✅ ADD: Fetch Prime Hour wallet balance
+  async function fetchPrimeHourBalance() {
+    if (!account) {
+      setPrimeHourBalance(0);
+      return;
+    }
+    try {
+      const result = await requestApi('/api/prime-hour/balance');
+      setPrimeHourBalance(result.balance || 0);
+    } catch (error) {
+      console.error('Failed to fetch prime hour balance:', error);
+      setPrimeHourBalance(0);
+    }
+  }
+
+  // ✅ ADD: Handle Prime Hour deposits/withdrawals
+  async function submitPrimeHourAction(event, actionType) {
+    event.preventDefault();
+    const value = Number(amount);
+
+    if (!account) {
+      setPrimeHourMessage('You must be signed in to perform transactions.');
+      return;
+    }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      setPrimeHourMessage('Enter an amount greater than $0.');
+      return;
+    }
+
+    // ✅ UPDATED: Prime Hour specific requirements
+    if (actionType === 'deposit') {
+      // Minimum deposit: $50
+      if (value < 50) {
+        setPrimeHourMessage('💰 Prime Hour Deposit Minimum: $50 (You earn a $5 bonus on deposits!)');
+        return;
+      }
+
+      // Check referral qualifications - REFERRER (you) must meet requirements
+      if (!referralStats || !referralStats.directReferrals || referralStats.directReferrals === 0) {
+        setPrimeHourMessage('⚠️ Prime Hour Qualification: You must have at least 1 referral to deposit.');
+        return;
+      }
+
+      // Check if YOU (referrer) have traded for 3+ days
+      if (!referralStats.tradingDays || referralStats.tradingDays < 3) {
+        setPrimeHourMessage('⚠️ To access Prime Hour: You must have traded for at least 3 days on Ascend.');
+        return;
+      }
+    }
+
+    if (actionType === 'withdraw') {
+      // Minimum withdrawal: $50
+      if (value < 50) {
+        setPrimeHourMessage('The minimum Prime Hour withdrawal amount is $50.');
+        return;
+      }
+
+      if (value > primeHourBalance) {
+        setPrimeHourMessage('Insufficient prime hour balance for this withdrawal.');
+        return;
+      }
+
+      if (destination.trim().length < 8) {
+        setPrimeHourMessage('Enter a wallet address with at least 8 characters.');
+        return;
+      }
+    }
+
+    setPrimeHourLoading(true);
+    try {
+      const result = await requestApi('/api/prime-hour/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: actionType === 'withdraw' ? 'withdrawal' : 'deposit',
+          amount: value,
+          reference: actionType === 'withdraw' ? destination.trim() : `Prime-Deposit-${Date.now()}`,
+        }),
+      });
+
+      // ✅ Show success with bonus info for deposits
+      const successMsg = actionType === 'deposit'
+        ? `✅ Prime deposit of $${value} successful! +$5 bonus added to your prime hour wallet.`
+        : `✅ Prime withdrawal of $${value} completed successfully!`;
+
+      setPrimeHourMessage(result.message || successMsg);
+      setAmount('');
+      setDestination('');
+
+      // Refresh prime hour balance
+      await fetchPrimeHourBalance();
+
+      // Close modal after 2 seconds
+      setTimeout(() => {
+        setPrimeHourModal(null);
+        setPrimeHourMessage('');
+      }, 2000);
+    } catch (error) {
+      setPrimeHourMessage(`Error: ${error.message}`);
+    } finally {
+      setPrimeHourLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     requestApi('/api/public-config')
@@ -686,6 +806,8 @@ function App() {
           fetchReferralStats();
           // ✅ ADD: Fetch claim status on login
           fetchCanClaimTrade();
+          // ✅ ADD: Fetch prime hour balance on login
+          fetchPrimeHourBalance();
         }
       })
       .catch((error) => {
@@ -1083,6 +1205,9 @@ function App() {
       setTradeClaimMessage('');
       setIsTradingHourActive(false);
       setNextTradingTime('');
+      setPrimeHourBalance(0);
+      setPrimeHourModal(null);
+      setPrimeHourMessage('');
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -1750,6 +1875,60 @@ function App() {
             <button className="date-chip"><span className="date-dot" /> Member overview</button>
           </section>
 
+          {/* ✅ PRIME HOUR WALLET - Only visible during prime hour window (3:45 AM - 4:15 AM) */}
+          {isPrimeHourActive && account && (
+            <section style={{ background: 'linear-gradient(135deg, rgba(255, 153, 0, 0.15) 0%, rgba(255, 153, 0, 0.05) 100%)', border: '2px solid rgba(255, 153, 0, 0.5)', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#FF9900', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>⏰ PRIME HOUR ACTIVE</div>
+                  <h2 style={{ margin: '4px 0 0 0', color: '#FF9900', fontSize: '24px' }}>Prime Hour Wallet</h2>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '12px', color: '#FF9900' }}>Window closes in</div>
+                  <div style={{ fontSize: '18px', fontWeight: '700', color: '#FF9900' }}>3:45 - 4:15 AM</div>
+                </div>
+              </div>
+
+              <article style={{ background: 'rgba(255, 153, 0, 0.1)', border: '2px solid rgba(255, 153, 0, 0.3)', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '12px', color: '#FF9900', fontWeight: '600' }}>PRIME HOUR BALANCE</span>
+                  <span style={{ fontSize: '12px', color: '#FF9900' }}>Exclusive Window</span>
+                </div>
+                <div style={{ fontSize: '32px', fontWeight: '700', color: '#FF9900', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>$</span>{primeHourBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => { setPrimeHourModal('deposit'); setAmount(''); setPrimeHourMessage(''); }}
+                    style={{ flex: 1, padding: '12px 20px', background: '#FF9900', color: '#000', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => e.target.style.background = '#FFB84D'}
+                    onMouseLeave={(e) => e.target.style.background = '#FF9900'}
+                  >
+                    <Icon name="plus" size={16} style={{marginRight: '6px'}} /> Deposit to Prime
+                  </button>
+                  <button
+                    onClick={() => { setPrimeHourModal('withdraw'); setAmount(''); setDestination(''); setPrimeHourMessage(''); }}
+                    style={{ flex: 1, padding: '12px 20px', background: 'rgba(255, 153, 0, 0.2)', color: '#FF9900', border: '2px solid #FF9900', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => { e.target.style.background = 'rgba(255, 153, 0, 0.3)'; }}
+                    onMouseLeave={(e) => { e.target.style.background = 'rgba(255, 153, 0, 0.2)'; }}
+                  >
+                    <Icon name="withdraw" size={16} style={{marginRight: '6px'}} /> Withdraw from Prime
+                  </button>
+                </div>
+              </article>
+
+              <div style={{ background: 'rgba(255, 153, 0, 0.1)', border: '1px solid rgba(255, 153, 0, 0.3)', borderRadius: '6px', padding: '12px', fontSize: '12px', color: '#FF9900' }}>
+                <Icon name="spark" size={14} style={{marginRight: '6px', display: 'inline'}} />
+                <strong>Prime Hour Requirements:</strong>
+                <div style={{ marginTop: '8px', lineHeight: '1.6' }}>
+                  💰 <strong>Min Deposit:</strong> $50 → Earn $5 bonus<br/>
+                  💳 <strong>Min Withdrawal:</strong> $50<br/>
+                  👥 <strong>You must have:</strong> 1+ referral + 3+ days of trading
+                </div>
+              </div>
+            </section>
+          )}
+
           <section className="balance-grid" aria-label="Wallet balances">
             <article className="balance-card balance-primary">
               <div className="card-topline">
@@ -2079,6 +2258,45 @@ function App() {
           </section>
         </div>
       )}
+      {/* ✅ ADD: Prime Hour Modal */}
+      {primeHourModal && isPrimeHourActive && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrimeHourModal(null); }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="prime-hour-modal-title" style={{ borderTop: '3px solid #FF9900' }}>
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setPrimeHourModal(null)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon" style={{ color: '#FF9900' }}><Icon name="clock" size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" style={{background: '#FF9900'}} /> PRIME HOUR TRANSACTION</div>
+            <h2 id="prime-hour-modal-title" style={{ color: '#FF9900' }}>{primeHourModal === 'withdraw' ? 'Withdraw from Prime Hour' : 'Deposit to Prime Hour'}</h2>
+            <p className="modal-subtitle">
+              {primeHourModal === 'withdraw'
+                ? 'Withdraw from your prime hour wallet. Minimum: $50'
+                : 'Deposit to your prime hour wallet. Minimum: $50 • Earn: $5 bonus'}
+            </p>
+            <form onSubmit={(e) => submitPrimeHourAction(e, primeHourModal)}>
+              <label className="amount-label" htmlFor="prime-hour-amount">{primeHourModal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
+              <div className="amount-input-wrap"><span>$</span><input id="prime-hour-amount" type="number" min={primeHourModal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setPrimeHourMessage(''); }} placeholder="0.00" required disabled={primeHourLoading} /></div>
+              {primeHourModal === 'withdraw' ? (
+                <>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => { setDestination(event.target.value); setPrimeHourMessage(''); }} placeholder="Enter wallet address" required disabled={primeHourLoading} /></label>
+                  <div className="showcase-fee"><span>Estimated fee (16%)</span><strong>${(Number(amount || 0) * 0.16).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+                </>
+              ) : (
+                <div className="deposit-wallet-card">
+                  <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
+                  <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured'}</code>
+                  {binanceWalletAddress
+                    ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
+                    : <span className="wallet-config-hint">{walletAddressError ? 'Could not load the wallet address.' : walletAddressLoading ? 'Loading wallet address…' : 'Wallet address not configured.'}</span>}
+                  <p>Send funds to this address during the prime hour window to complete your deposit.</p>
+                </div>
+              )}
+              {primeHourMessage && <div className="modal-message" role={primeHourMessage.includes('Error') ? 'alert' : 'status'} style={{borderLeft: `3px solid ${primeHourMessage.includes('Error') ? '#ff4444' : '#FF9900'}`}}>{primeHourMessage}</div>}
+              <button className="button button-primary modal-submit" type="submit" disabled={primeHourLoading} style={{background: '#FF9900', borderColor: '#FF9900'}}>{primeHourLoading ? 'Processing…' : 'Complete Transaction'} <Icon name="arrow" size={15} /></button>
+              <p className="modal-footnote"><Icon name="spark" size={13} /> Prime Hour exclusive · Limited window (3:45 AM - 4:15 AM)</p>
+            </form>
+          </section>
+        </div>
+      )}
+
       {accountDialog && (
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountDialog(false); }}>
           <section className="modal account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
