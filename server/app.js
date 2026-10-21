@@ -950,7 +950,8 @@ export async function createApp() {
 
   await seedInitialAdmin();
   scheduleWeeklySalaries();
-  scheduleDailyTradingProfits();
+  // ✅ DISABLED: Daily trading profits are now claimed MANUALLY only via /api/trading/claim-daily-trade
+  // scheduleDailyTradingProfits();
 
   // =========================================================================
   // PUBLIC ENDPOINTS
