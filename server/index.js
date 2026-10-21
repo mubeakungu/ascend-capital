@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApp } from '../app.js';
+import { createApp } from './app.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
