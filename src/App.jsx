@@ -521,11 +521,12 @@ function App() {
   const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
-
-  // ✅ NEW: Daily trade claim state
+  // ✅ ADD: New state variables for daily trade claim
   const [canClaimTrade, setCanClaimTrade] = useState(false);
   const [claimTradeLoading, setClaimTradeLoading] = useState(false);
   const [tradeClaimMessage, setTradeClaimMessage] = useState('');
+  const [isTradingHourActive, setIsTradingHourActive] = useState(false);
+  const [nextTradingTime, setNextTradingTime] = useState('');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -549,6 +550,48 @@ function App() {
 
     checkPrimeHour();
     const interval = setInterval(checkPrimeHour, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ✅ ADD: Check trading hours (1:00 PM - 1:30 PM EAT)
+  useEffect(() => {
+    function checkTradingHours() {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+
+      const currentMinutes = hours * 60 + minutes;
+      const tradingStart = 13 * 60; // 1:00 PM (13:00 in 24-hour format)
+      const tradingEnd = 13 * 60 + 30; // 1:30 PM (13:30 in 24-hour format)
+
+      const isActive = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
+      setIsTradingHourActive(isActive);
+
+      if (!isActive) {
+        // Calculate next trading time
+        let nextTime = new Date(now);
+        if (currentMinutes >= tradingEnd) {
+          // Trading window passed for today, set for tomorrow at 1:00 PM
+          nextTime.setDate(nextTime.getDate() + 1);
+          nextTime.setHours(13, 0, 0, 0);
+        } else {
+          // Trading window hasn't started yet today
+          nextTime.setHours(13, 0, 0, 0);
+        }
+
+        const timeStr = nextTime.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+        setNextTradingTime(timeStr);
+      }
+    }
+
+    checkTradingHours();
+    const interval = setInterval(checkTradingHours, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -591,6 +634,50 @@ function App() {
     }
   }, []);
 
+  // ✅ ADD: New function to fetch claim eligibility
+  async function fetchCanClaimTrade() {
+    if (!account || totalDeposits === 0) {
+      setCanClaimTrade(false);
+      return;
+    }
+    try {
+      const result = await requestApi('/api/trading/can-claim-today');
+      setCanClaimTrade(result.canClaim || false);
+    } catch (error) {
+      console.error('Failed to fetch claim status:', error);
+      setCanClaimTrade(false);
+    }
+  }
+
+  // ✅ ADD: New function to claim daily trade
+  async function claimDailyTrade() {
+    if (!account || totalDeposits === 0 || claimTradeLoading) {
+      setTradeClaimMessage('Cannot claim trade at this time.');
+      return;
+    }
+
+    setClaimTradeLoading(true);
+    setTradeClaimMessage('');
+
+    try {
+      const result = await requestApi('/api/trading/claim-daily-trade', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+
+      setTradeClaimMessage(result.message || 'Trade claimed successfully! Your profit has been added to your balance.');
+      setCanClaimTrade(false);
+
+      // Refresh balance after successful claim
+      await fetchAccountBalance();
+    } catch (error) {
+      setTradeClaimMessage(`Error: ${error.message}`);
+      setCanClaimTrade(true);
+    } finally {
+      setClaimTradeLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     requestApi('/api/public-config')
@@ -625,6 +712,7 @@ function App() {
           fetchWeeklySalary();
           fetchReferralCode();
           fetchReferralStats();
+          // ✅ ADD: Fetch claim status on login
           fetchCanClaimTrade();
         }
       })
@@ -748,47 +836,6 @@ function App() {
       setReferralEarnings(0);
     } finally {
       setReferralStatsLoading(false);
-    }
-  }
-
-  // ✅ NEW: Fetch if member can claim daily trade
-  async function fetchCanClaimTrade() {
-    if (!account) return;
-    try {
-      const result = await requestApi('/api/trading/can-claim-today');
-      setCanClaimTrade(result.canClaimToday || false);
-      setTradeClaimMessage('');
-    } catch (error) {
-      console.error('Failed to check daily trade claim eligibility:', error);
-      setCanClaimTrade(false);
-    }
-  }
-
-  // ✅ NEW: Claim the daily trade
-  async function claimDailyTrade() {
-    if (!account) {
-      setTradeClaimMessage('You must be signed in to claim a daily trade.');
-      return;
-    }
-
-    setClaimTradeLoading(true);
-    setTradeClaimMessage('');
-    try {
-      const result = await requestApi('/api/trading/claim-daily-trade', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-
-      setNotice(`Daily trade claimed! You earned $${result.profitAmount.toFixed(2)}`);
-      setCanClaimTrade(false);
-
-      // Refresh balance and activity
-      await fetchAccountBalance();
-      await fetchTransactionHistory();
-    } catch (error) {
-      setTradeClaimMessage(error.message || 'Failed to claim daily trade.');
-    } finally {
-      setClaimTradeLoading(false);
     }
   }
 
@@ -926,6 +973,8 @@ function App() {
       if (account) {
         await fetchAccountBalance();
         await fetchReferralStats();
+        // ✅ ADD: Refresh claim status after deposit/withdrawal
+        await fetchCanClaimTrade();
       }
     } catch (error) {
       setNotice(`Transaction failed: ${error.message}`);
@@ -1042,6 +1091,7 @@ function App() {
         await fetchWeeklySalary();
         await fetchReferralCode();
         await fetchReferralStats();
+        // ✅ ADD: Fetch claim status after login
         await fetchCanClaimTrade();
       }
 
@@ -1074,6 +1124,9 @@ function App() {
       setLastDepositTime(null);
       setEarningsActive(false);
       setCanClaimTrade(false);
+      setTradeClaimMessage('');
+      setIsTradingHourActive(false);
+      setNextTradingTime('');
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -1610,11 +1663,12 @@ function App() {
           }
         }
 
+        /* ✅ ADD: CSS for daily trade claim card */
         .daily-trade-claim-card {
-          background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(212, 175, 55, 0.05) 100%);
-          border: 2px solid rgba(212, 175, 55, 0.4);
+          background: rgba(212, 175, 55, 0.08);
+          border: 2px solid rgba(212, 175, 55, 0.3);
           border-radius: 8px;
-          padding: 20px;
+          padding: 24px;
           margin: 20px 0;
           text-align: center;
         }
@@ -1628,38 +1682,59 @@ function App() {
         .daily-trade-claim-card p {
           color: #aaa;
           margin: 0 0 16px 0;
-          font-size: 13px;
+          font-size: 14px;
         }
 
         .daily-trade-claim-card button {
           background: var(--gold);
           color: #000;
           border: none;
-          padding: 12px 28px;
+          padding: 12px 32px;
           border-radius: 6px;
           font-weight: 600;
-          cursor: pointer;
           font-size: 14px;
+          cursor: pointer;
           transition: all 0.2s ease;
         }
 
         .daily-trade-claim-card button:hover:not(:disabled) {
           background: var(--light-gold);
-          transform: translateY(-1px);
+          transform: translateY(-2px);
         }
 
         .daily-trade-claim-card button:disabled {
-          opacity: 0.6;
+          background: #666;
+          color: #999;
           cursor: not-allowed;
+          opacity: 0.6;
         }
 
+        /* ✅ ADD: CSS for daily trade claim message */
         .daily-trade-claim-message {
-          margin-top: 12px;
-          padding: 10px;
+          margin-top: 16px;
+          padding: 12px 16px;
+          background: rgba(212, 175, 55, 0.15);
+          border-left: 3px solid var(--gold);
           border-radius: 4px;
-          font-size: 12px;
-          color: #aaa;
-          background: rgba(0, 0, 0, 0.3);
+          color: var(--gold);
+          font-size: 13px;
+          font-weight: 500;
+        }
+
+        @media (max-width: 480px) {
+          .daily-trade-claim-card {
+            padding: 16px;
+            margin: 16px 0;
+          }
+
+          .daily-trade-claim-card h3 {
+            font-size: 18px;
+          }
+
+          .daily-trade-claim-card button {
+            padding: 10px 24px;
+            font-size: 13px;
+          }
         }
       `}</style>
 
@@ -1764,20 +1839,20 @@ function App() {
             </div>
           )}
 
-          {/* ✅ NEW: Daily Trade Claim Section */}
-          {account && totalDeposits > 0 && earningsActive && (
+          {account && totalDeposits > 0 && (
             <div className="daily-trade-claim-card">
               <h3>Claim Your Trade Today</h3>
               <p>Manually claim your daily trading profit from your active deposits</p>
-              <button
-                onClick={claimDailyTrade}
-                disabled={!canClaimTrade || claimTradeLoading}
-              >
-                {claimTradeLoading ? 'Processing...' : canClaimTrade ? 'Claim Daily Trade' : 'Already Claimed Today'}
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '12px' }}>
+                Trading hours: 1:00 PM - 1:30 PM EAT
+              </p>
+              <button onClick={claimDailyTrade} disabled={!canClaimTrade || claimTradeLoading || !isTradingHourActive}>
+                {claimTradeLoading ? 'Processing...' : !isTradingHourActive ? `Trading Opens ${nextTradingTime}` : canClaimTrade ? 'Claim Daily Trade' : 'Already Claimed Today'}
               </button>
-              {tradeClaimMessage && (
-                <div className="daily-trade-claim-message">
-                  {tradeClaimMessage}
+              {tradeClaimMessage && <div className="daily-trade-claim-message">{tradeClaimMessage}</div>}
+              {!isTradingHourActive && (
+                <div style={{ marginTop: '12px', fontSize: '12px', color: '#888' }}>
+                  Next trading window opens at {nextTradingTime}
                 </div>
               )}
             </div>
