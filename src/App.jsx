@@ -48,7 +48,7 @@ function generateTradingData() {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
     const dayStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
+    
     const dataPoint = { date: dayStr };
     currencies.forEach(currency => {
       const volatility = (Math.random() - 0.5) * 0.4;
@@ -123,7 +123,7 @@ function PasswordToggleInput({ label, value, onChange, error, required = false, 
   return (
     <label className="account-field" style={{position: 'relative'}}>
       {label}
-      <input
+      <input 
         type={showPassword ? 'text' : 'password'}
         autoComplete={autoComplete}
         minLength={6}
@@ -365,8 +365,8 @@ function ReferredMembersList() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px', margin: '16px 0' }}>
         {referrals.map((member) => (
-          <div
-            key={member.id}
+          <div 
+            key={member.id} 
             style={{
               background: 'rgba(212, 175, 55, 0.05)',
               border: '1px solid rgba(212, 175, 55, 0.15)',
@@ -438,7 +438,7 @@ function TradingGraph({ balance, totalDeposits }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.2)" />
               <XAxis dataKey="date" stroke="#888" style={{ fontSize: '12px' }} />
               <YAxis stroke="#888" style={{ fontSize: '12px' }} />
-              <Tooltip
+              <Tooltip 
                 contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #D4AF37', borderRadius: '8px' }}
                 labelStyle={{ color: '#D4AF37' }}
                 formatter={(value) => `$${value.toFixed(2)}`}
@@ -522,11 +522,6 @@ function App() {
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
 
-  // ✅ NEW: Daily trade claim state
-  const [canClaimTrade, setCanClaimTrade] = useState(false);
-  const [claimTradeLoading, setClaimTradeLoading] = useState(false);
-  const [tradeClaimMessage, setTradeClaimMessage] = useState('');
-
   useEffect(() => {
     const interval = setInterval(() => {
       setTimeGreeting(getTimeGreeting());
@@ -539,14 +534,14 @@ function App() {
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
-
+      
       const currentMinutes = hours * 60 + minutes;
       const primeStart = 3 * 60 + 45;
       const primeEnd = 4 * 60 + 15;
-
+      
       setIsPrimeHourActive(currentMinutes >= primeStart && currentMinutes < primeEnd);
     }
-
+    
     checkPrimeHour();
     const interval = setInterval(checkPrimeHour, 30000);
     return () => clearInterval(interval);
@@ -559,12 +554,12 @@ function App() {
         const nextDay = new Date(depositDate);
         nextDay.setDate(nextDay.getDate() + 1);
         nextDay.setHours(10, 0, 0, 0);
-
+        
         const now = new Date();
         const isActive = now >= nextDay;
-
+        
         setEarningsActive(isActive);
-
+        
         if (!isActive) {
           const timeStr = nextDay.toLocaleString('en-US', {
             month: 'short',
@@ -577,7 +572,7 @@ function App() {
         }
       }
     };
-
+    
     checkEarnings();
     const interval = setInterval(checkEarnings, 60000);
     return () => clearInterval(interval);
@@ -625,7 +620,6 @@ function App() {
           fetchWeeklySalary();
           fetchReferralCode();
           fetchReferralStats();
-          fetchCanClaimTrade();
         }
       })
       .catch((error) => {
@@ -642,11 +636,11 @@ function App() {
       const result = await requestApi('/api/transactions');
       setBalance(result.balance || 0);
       setTotalDeposits(result.balance || 0);
-
+      
       if (result.lastDepositTime) {
         setLastDepositTime(result.lastDepositTime);
       }
-
+      
       if (result.earningsActive) {
         setEarningsActive(result.earningsActive);
         const depositAmount = result.balance || 0;
@@ -726,21 +720,21 @@ function App() {
     try {
       const result = await requestApi('/api/referrals/stats');
       setReferralStats(result);
-
+      
       let bonusAmount = 0;
-
+      
       if (typeof result.totalEarned === 'number') {
         bonusAmount = Math.floor(result.totalEarned);
       } else {
-        const totalReferralDeposits =
-          result.totalReferralDeposits ||
-          result.referralDepositsTotal ||
+        const totalReferralDeposits = 
+          result.totalReferralDeposits || 
+          result.referralDepositsTotal || 
           result.totalDepositsFromReferrals ||
           result.totalDeposits ||
           0;
         bonusAmount = Math.floor(totalReferralDeposits * 0.05);
       }
-
+      
       setReferralEarnings(bonusAmount);
     } catch (error) {
       console.error('Failed to fetch referral stats:', error);
@@ -748,47 +742,6 @@ function App() {
       setReferralEarnings(0);
     } finally {
       setReferralStatsLoading(false);
-    }
-  }
-
-  // ✅ NEW: Fetch if member can claim daily trade
-  async function fetchCanClaimTrade() {
-    if (!account) return;
-    try {
-      const result = await requestApi('/api/trading/can-claim-today');
-      setCanClaimTrade(result.canClaimToday || false);
-      setTradeClaimMessage('');
-    } catch (error) {
-      console.error('Failed to check daily trade claim eligibility:', error);
-      setCanClaimTrade(false);
-    }
-  }
-
-  // ✅ NEW: Claim the daily trade
-  async function claimDailyTrade() {
-    if (!account) {
-      setTradeClaimMessage('You must be signed in to claim a daily trade.');
-      return;
-    }
-
-    setClaimTradeLoading(true);
-    setTradeClaimMessage('');
-    try {
-      const result = await requestApi('/api/trading/claim-daily-trade', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-
-      setNotice(`Daily trade claimed! You earned $${result.profitAmount.toFixed(2)}`);
-      setCanClaimTrade(false);
-
-      // Refresh balance and activity
-      await fetchAccountBalance();
-      await fetchTransactionHistory();
-    } catch (error) {
-      setTradeClaimMessage(error.message || 'Failed to claim daily trade.');
-    } finally {
-      setClaimTradeLoading(false);
     }
   }
 
@@ -847,7 +800,7 @@ function App() {
   async function submitShowcaseAction(event) {
     event.preventDefault();
     const value = Number(amount);
-
+    
     if (!account) {
       setNotice('You must be signed in to perform transactions.');
       return;
@@ -896,14 +849,14 @@ function App() {
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
       const newBalance = balance + (modal === 'withdraw' ? -value : value);
       setBalance(newBalance);
-
+      
       if (modal === 'deposit') {
         setTotalDeposits(value);
-
+        
         const now = new Date();
         setLastDepositTime(now.toISOString());
         setEarningsActive(false);
-
+        
         const nextDay = new Date();
         nextDay.setDate(nextDay.getDate() + 1);
         nextDay.setHours(10, 0, 0, 0);
@@ -999,7 +952,7 @@ function App() {
         setAdminNewPassword('');
         setAdminConfirmPassword('');
         setAccountMessage('Password changed successfully. You will need to sign in again.');
-
+        
         setTimeout(() => logout(), 2000);
         return;
       }
@@ -1035,14 +988,13 @@ function App() {
       setAccountPassword('');
       setAccountPin('');
       setAccountDialog(false);
-
+      
       if (result.account) {
         await fetchAccountBalance();
         await fetchTransactionHistory();
         await fetchWeeklySalary();
         await fetchReferralCode();
         await fetchReferralStats();
-        await fetchCanClaimTrade();
       }
 
       if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
@@ -1073,7 +1025,6 @@ function App() {
       setReferralStats(null);
       setLastDepositTime(null);
       setEarningsActive(false);
-      setCanClaimTrade(false);
       setNotice('You are signed out.');
     } catch (error) {
       setAccountError(error.message);
@@ -1609,58 +1560,6 @@ function App() {
             padding: 12px;
           }
         }
-
-        .daily-trade-claim-card {
-          background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(212, 175, 55, 0.05) 100%);
-          border: 2px solid rgba(212, 175, 55, 0.4);
-          border-radius: 8px;
-          padding: 20px;
-          margin: 20px 0;
-          text-align: center;
-        }
-
-        .daily-trade-claim-card h3 {
-          color: var(--gold);
-          margin: 0 0 8px 0;
-          font-size: 20px;
-        }
-
-        .daily-trade-claim-card p {
-          color: #aaa;
-          margin: 0 0 16px 0;
-          font-size: 13px;
-        }
-
-        .daily-trade-claim-card button {
-          background: var(--gold);
-          color: #000;
-          border: none;
-          padding: 12px 28px;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          font-size: 14px;
-          transition: all 0.2s ease;
-        }
-
-        .daily-trade-claim-card button:hover:not(:disabled) {
-          background: var(--light-gold);
-          transform: translateY(-1px);
-        }
-
-        .daily-trade-claim-card button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .daily-trade-claim-message {
-          margin-top: 12px;
-          padding: 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          color: #aaa;
-          background: rgba(0, 0, 0, 0.3);
-        }
       `}</style>
 
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
@@ -1764,22 +1663,14 @@ function App() {
             </div>
           )}
 
-          {/* ✅ NEW: Daily Trade Claim Section */}
-          {account && totalDeposits > 0 && earningsActive && (
+          {account && totalDeposits > 0 && (
             <div className="daily-trade-claim-card">
               <h3>Claim Your Trade Today</h3>
               <p>Manually claim your daily trading profit from your active deposits</p>
-              <button
-                onClick={claimDailyTrade}
-                disabled={!canClaimTrade || claimTradeLoading}
-              >
+              <button onClick={claimDailyTrade} disabled={!canClaimTrade || claimTradeLoading}>
                 {claimTradeLoading ? 'Processing...' : canClaimTrade ? 'Claim Daily Trade' : 'Already Claimed Today'}
               </button>
-              {tradeClaimMessage && (
-                <div className="daily-trade-claim-message">
-                  {tradeClaimMessage}
-                </div>
-              )}
+              {tradeClaimMessage && <div className="daily-trade-claim-message">{tradeClaimMessage}</div>}
             </div>
           )}
 
@@ -1840,7 +1731,7 @@ function App() {
                   <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
                   <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your link and earn 5% from each friend's first deposit</div>
                   <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>
-                    {referralEarnings > 0
+                    {referralEarnings > 0 
                       ? `You've earned $${referralEarnings} from referral bonuses (5% of first deposits)`
                       : 'Example: Friend deposits $2000 → You earn $100 (5%)'}
                   </div>
@@ -1852,8 +1743,8 @@ function App() {
                     <p style={{color: '#aaa', fontSize: '13px', marginBottom: '12px'}}>Generate your referral code to start earning...</p>
                   )}
                 </div>
-                <button
-                  className="copy-button referral-code-example"
+                <button 
+                  className="copy-button referral-code-example" 
                   style={{cursor: 'pointer', padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '12px'}}
                   onClick={async () => {
                     if (!account?.referralCode) {
@@ -1975,8 +1866,8 @@ function App() {
                     <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
                       <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
                       <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
-                        {typeof weeklyData.weeklySalary === 'number' && weeklyData.weeklySalary > 0
-                          ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}`
+                        {typeof weeklyData.weeklySalary === 'number' && weeklyData.weeklySalary > 0 
+                          ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}` 
                           : 'None'}
                       </div>
                       <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
@@ -1984,7 +1875,7 @@ function App() {
                     <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
                       <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
                       <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
-                        ${typeof weeklyData.totalEarned === 'number'
+                        ${typeof weeklyData.totalEarned === 'number' 
                           ? weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
                           : '0.00'}
                       </div>
@@ -2000,7 +1891,7 @@ function App() {
                           <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
                             <span>{String(payment.week || 'Week')}</span>
                             <span style={{color: 'var(--gold)', fontWeight: '600'}}>
-                              +${typeof payment.amount === 'number'
+                              +${typeof payment.amount === 'number' 
                                 ? payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
                                 : '0.00'}
                             </span>
@@ -2160,7 +2051,7 @@ function App() {
               {accountError && <div className="modal-message" role="alert">{accountError}</div>}
               {accountMessage && <div className="modal-message modal-success" role="status">{accountMessage}</div>}
               <button className="button button-primary modal-submit" type="submit">
-                {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Save profile' : accountMode === 'register' ? 'Create account' : 'Sign in'}
+                {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Save profile' : accountMode === 'register' ? 'Create account' : 'Sign in'} 
                 <Icon name="arrow" size={15} />
               </button>
               {accountMode === 'profile' ? (
