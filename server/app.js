@@ -1920,6 +1920,8 @@ export async function createApp() {
       let totalWithdrawalsCents = 0;
       let totalEarningsCents = 0;
 
+      console.log('🔍 [COMPREHENSIVE WALLET] Account:', request.account.id, '| All Transactions:', JSON.stringify(allTransactions));
+
       for (const row of allTransactions) {
         txByType[row.type] = {
           count: row.count,
@@ -1929,11 +1931,16 @@ export async function createApp() {
 
         if (row.type === 'deposit') {
           totalDepositsCents += row.total_cents;
+          console.log(`  ✅ DEPOSIT: +${(row.total_cents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
         } else if (row.type === 'withdrawal') {
           totalWithdrawalsCents += row.total_cents;
+          console.log(`  ✅ WITHDRAWAL: +${(row.total_cents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
         } else if (knownEarningTypes.includes(row.type)) {
           // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
           totalEarningsCents += row.total_cents;
+          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(row.total_cents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
+        } else {
+          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(row.total_cents / 100).toFixed(2)}`);
         }
         // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
@@ -1944,6 +1951,8 @@ export async function createApp() {
       const totalEarnings = totalEarningsCents / 100;
       const totalIncome = totalDeposits + totalEarnings;
       const walletBalance = totalIncome - totalWithdrawals;
+
+      console.log(`💰 [COMPREHENSIVE WALLET FINAL] Deposits: $${totalDeposits.toFixed(2)} | Earnings: $${totalEarnings.toFixed(2)} | Balance: $${walletBalance.toFixed(2)}`);
 
       return response.json({
         // Root-level properties for frontend wallet display
