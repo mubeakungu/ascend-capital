@@ -1,1810 +1,1561 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const CURRENCY = 'USD';
+const AdminDashboard = () => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATE MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
 
-const money = (n) =>
-  `${CURRENCY} ${Number(n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const when = (iso) => {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  return isMobile
-    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    : date.toLocaleString();
-};
+  const [activePage, setActivePage] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adjustTab, setAdjustTab] = useState('balance');
 
-async function api(path, { method = 'GET', body } = {}) {
-  const init = { method, credentials: 'same-origin' };
-  if (method !== 'GET') {
-    init.headers = { 'Content-Type': 'application/json' };
-    init.body = JSON.stringify(body ?? {});
-  }
-  const res = await fetch(`/api${path}`, init);
-  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(data.error || 'Request failed.');
-    err.status = res.status;
-    throw err;
-  }
-  return data;
-}
+  // Data
+  const [stats, setStats] = useState({
+    clients: 0,
+    deposits: 0,
+    withdrawals: 0,
+    pending_deposits: 0,
+    total_profit_paid: 0,
+    trades_today: 0,
+    ref_commissions: 0,
+    total_referrals: 0,
+    scheduler_running: false
+  });
 
-function useLoad(loader, deps) {
-  const [state, setState] = useState({ data: null, error: '', loading: true });
-  const run = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: '' }));
+  const [allTx, setAllTx] = useState([]);
+  const [allClients, setAllClients] = useState([]);
+  const [chartData, setChartData] = useState({ deposits: [], clients: [] });
+
+  // Filters & Search
+  const [clientSearch, setClientSearch] = useState('');
+  const [txSearch, setTxSearch] = useState('');
+  const [txTypeFilter, setTxTypeFilter] = useState('');
+  const [txStatusFilter, setTxStatusFilter] = useState('');
+  const [tradeStatusFilter, setTradeStatusFilter] = useState('');
+
+  // Modals
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showApproveWdrModal, setShowApproveWdrModal] = useState(false);
+  const [showRejectWdrModal, setShowRejectWdrModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const [selectedTx, setSelectedTx] = useState(null);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [editData, setEditData] = useState({ name: '', email: '', phone: '' });
+
+  // Adjust Balance
+  const [adjustClient, setAdjustClient] = useState('');
+  const [adjustField, setAdjustField] = useState('balance');
+  const [adjustAmount, setAdjustAmount] = useState('');
+  const [adjustNote, setAdjustNote] = useState('');
+  const [adjustMethod, setAdjustMethod] = useState('MANUAL');
+
+  // Referral Creation
+  const [refReferrer, setRefReferrer] = useState('');
+  const [refMode, setRefMode] = useState('existing');
+  const [refReferred, setRefReferred] = useState('');
+  const [refNewName, setRefNewName] = useState('');
+  const [refNewEmail, setRefNewEmail] = useState('');
+  const [refNewPhone, setRefNewPhone] = useState('');
+  const [refNewPassword, setRefNewPassword] = useState('');
+  const [refCreateDeposit, setRefCreateDeposit] = useState(false);
+  const [refDepositAmount, setRefDepositAmount] = useState('');
+  const [refDepositMethod, setRefDepositMethod] = useState('MANUAL');
+  const [refNote, setRefNote] = useState('');
+
+  // Messages
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // API HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const api = async (url, opts = {}) => {
     try {
-      setState({ data: await loader(), error: '', loading: false });
+      const res = await fetch(url, { credentials: 'same-origin', ...opts });
+      return await res.json();
     } catch (e) {
-      setState({ data: null, error: e.message, loading: false });
+      console.error('API Error:', e);
+      return { success: false, error: e.message };
     }
-  }, deps);
-  useEffect(() => { run(); }, [run]);
-  return [state, run];
-}
+  };
 
-function Notice({ notice }) {
-  if (!notice) return null;
-  return <p className={`ad-notice ${notice.bad ? 'bad' : ''}`}>{notice.text}</p>;
-}
+  const post = (url, body) => api(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
 
-function Badge({ value }) {
-  return <span className={`ad-badge ${value}`}>{value}</span>;
-}
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UTILITIES
+  // ═══════════════════════════════════════════════════════════════════════════
 
-function StatCard({ label, value, subtext }) {
-  return (
-    <div className="ad-stat-card">
-      <p className="ad-stat-label">{label}</p>
-      <p className="ad-stat-value">{value}</p>
-      {subtext && <p className="ad-stat-sub">{subtext}</p>}
-    </div>
-  );
-}
+  const fmt = (n) => parseFloat(n || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 
-function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText = 'Confirm', danger, onSubmit, onClose }) {
-  const [value, setValue] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const fmtD = (n) => '$' + fmt(n);
 
-  async function submit(e) {
-    e.preventDefault();
-    const length = type === 'password' ? value.length : value.trim().length;
-    if (length < min) return setError(`Enter at least ${min} characters.`);
-    setBusy(true);
-    try {
-      await onSubmit(value);
-      onClose();
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
-  }
+  const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  return (
-    <div className="ad-overlay" onClick={onClose}>
-      <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>{title}</h3>
-        <label>{label}</label>
-        {multiline ? (
-          <textarea rows={3} value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
-        ) : (
-          <input type={type} value={value} autoComplete="new-password" onChange={(e) => setValue(e.target.value)} autoFocus />
-        )}
-        {error && <p className="ad-error">{error}</p>}
-        <div className="ad-row end">
-          <button type="button" className="ad-btn ghost" onClick={onClose}>Cancel</button>
-          <button className={`ad-btn ${danger ? 'danger' : ''}`} disabled={busy}>{busy ? 'Working…' : confirmText}</button>
-        </div>
-      </form>
-    </div>
-  );
-}
+  const showSuccess = (msg) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
 
-// ============================================================================
-// ACCOUNT MANAGEMENT
-// ============================================================================
+  const showError = (msg) => {
+    setErrorMsg(msg);
+    setTimeout(() => setErrorMsg(''), 5000);
+  };
 
-function AccountDetailModal({ accountId, onClose, onUpdate }) {
-  const [{ data, loading, error }, reload] = useLoad(
-    () => api(`/admin/accounts/${accountId}/activity`),
-    [accountId]
-  );
-  const [editMode, setEditMode] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState(null);
-  const [showBalanceAdjust, setShowBalanceAdjust] = useState(false);
-  const [balanceAction, setBalanceAction] = useState('adjust');
-  const [balanceAmount, setBalanceAmount] = useState('');
-  const [balanceReason, setBalanceReason] = useState('');
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DATA LOADING
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  useEffect(() => {
-    if (data?.account) {
-      setName(data.account.name);
-      setEmail(data.account.email);
-    }
-  }, [data]);
-
-  async function saveChanges(e) {
-    e?.preventDefault();
-    setBusy(true);
-    setNotice(null);
-    try {
-      await api(`/admin/accounts/${accountId}`, {
-        method: 'PATCH',
-        body: { name, email },
-      });
-      setNotice({ text: 'Account updated' });
-      setEditMode(false);
-      reload();
-      onUpdate();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function adjustBalance(e) {
-    e?.preventDefault();
-    if (!balanceAmount || !balanceReason) {
-      setNotice({ text: 'Amount and reason required', bad: true });
+  const loadStats = async () => {
+    const d = await api('/api/admin/stats');
+    if (!d.success) {
+      window.location.href = '/admin';
       return;
     }
-    setBusy(true);
-    try {
-      const amountNum = parseFloat(balanceAmount);
-      if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid amount');
+    setStats(d.data);
+  };
 
-      await api(`/admin/accounts/${accountId}/balance`, {
-        method: 'POST',
-        body: { action: balanceAction, amountCents: Math.round(amountNum * 100), reason: balanceReason }
-      });
+  const loadTransactions = async () => {
+    const d = await api('/api/admin/transactions');
+    if (d.success) setAllTx(d.data);
+  };
 
-      setNotice({ text: `Balance ${balanceAction}ed successfully` });
-      setBalanceAmount('');
-      setBalanceReason('');
-      setShowBalanceAdjust(false);
-      reload();
-      onUpdate();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
+  const loadClients = async () => {
+    const d = await api('/api/admin/clients');
+    if (d.success) setAllClients(d.data);
+  };
+
+  const loadReferrals = async () => {
+    const d = await api('/api/admin/referrals');
+    if (d.success) return d.data;
+    return [];
+  };
+
+  const loadTrades = async () => {
+    const status = tradeStatusFilter;
+    const d = await api('/api/admin/trades' + (status ? '?status=' + status : ''));
+    if (d.success) return d.data;
+    return [];
+  };
+
+  const refreshData = async () => {
+    await loadStats();
+    await loadTransactions();
+    await loadClients();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TRANSACTION ACTIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const openApproveModal = (tx) => {
+    setSelectedTx(tx);
+    setShowApproveModal(true);
+  };
+
+  const confirmApprove = async () => {
+    const d = await post('/api/admin/deposit/approve', { tx_id: selectedTx.id });
+    setShowApproveModal(false);
+    if (!d.success) {
+      showError(d.error);
+      return;
     }
-    setBusy(false);
-  }
+    showSuccess(d.data.message);
+    await refreshData();
+  };
 
-  if (loading) return <div className="ad-overlay" onClick={onClose}><div className="ad-modal" onClick={(e) => e.stopPropagation()}><p>Loading…</p></div></div>;
-  if (error) return <div className="ad-overlay" onClick={onClose}><div className="ad-modal" onClick={(e) => e.stopPropagation()}><p className="ad-error">{error}</p></div></div>;
+  const openRejectModal = (tx) => {
+    setSelectedTx(tx);
+    setRejectReason('');
+    setShowRejectModal(true);
+  };
 
-  const account = data?.account;
-  if (!account) return null;
+  const confirmReject = async () => {
+    const d = await post('/api/admin/deposit/reject', {
+      tx_id: selectedTx.id,
+      reason: rejectReason.trim() || 'Rejected by admin'
+    });
+    setShowRejectModal(false);
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess('Deposit rejected');
+    await refreshData();
+  };
 
-  return (
-    <div className="ad-overlay" onClick={onClose}>
-      <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
-        <h3>Account Details</h3>
+  const openApproveWdrModal = (tx) => {
+    setSelectedTx(tx);
+    setShowApproveWdrModal(true);
+  };
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">ID</span>
-          <span className="ad-detail-value">{account.id}</span>
-        </div>
+  const confirmWdrApprove = async () => {
+    const d = await post('/api/admin/withdrawal/approve', { tx_id: selectedTx.id });
+    setShowApproveWdrModal(false);
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess('Withdrawal approved');
+    await refreshData();
+  };
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Status</span>
-          <span className={`ad-detail-value ${account.status === 'held' ? 'bad' : ''}`}>
-            <Badge value={account.status} />
-            {account.holdReason && <small>{account.holdReason}</small>}
-          </span>
-        </div>
+  const openRejectWdrModal = (tx) => {
+    setSelectedTx(tx);
+    setRejectReason('');
+    setShowRejectWdrModal(true);
+  };
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Role</span>
-          <span className="ad-detail-value"><Badge value={account.role} /></span>
-        </div>
+  const confirmWdrReject = async () => {
+    const d = await post('/api/admin/withdrawal/reject', {
+      tx_id: selectedTx.id,
+      reason: rejectReason.trim() || 'Rejected by admin'
+    });
+    setShowRejectWdrModal(false);
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess('Withdrawal rejected');
+    await refreshData();
+  };
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Balance</span>
-          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
-        </div>
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLIENT ACTIONS
+  // ═══════════════════════════════════════════════════════════════════════════
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Earnings</span>
-          <span className="ad-detail-value" style={{ color: '#5BEE6A' }}>{money(data?.summary?.earnings || 0)}</span>
-        </div>
+  const openEditModal = (client) => {
+    setSelectedClient(client);
+    setEditData({ name: client.name, email: client.email, phone: client.phone });
+    setShowEditModal(true);
+  };
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Created</span>
-          <span className="ad-detail-value">{when(account.createdAt)}</span>
-        </div>
+  const saveClientEdit = async () => {
+    if (!editData.name || !editData.email) {
+      showError('Name and email required');
+      return;
+    }
+    const d = await post(`/api/admin/client/${selectedClient.id}/edit`, editData);
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    setShowEditModal(false);
+    showSuccess('Client updated');
+    await refreshData();
+  };
 
-        {editMode ? (
-          <>
-            <label>Name</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
-            <label>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            <Notice notice={notice} />
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setEditMode(false)}>Cancel</button>
-              <button className="ad-btn" disabled={busy}>{busy ? 'Saving…' : 'Save Changes'}</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Name</span>
-              <span className="ad-detail-value">{account.name}</span>
-            </div>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Email</span>
-              <span className="ad-detail-value">{account.email}</span>
-            </div>
+  const openDeleteModal = (client) => {
+    setSelectedClient(client);
+    setShowDeleteModal(true);
+  };
 
-            {/* ✅ Quick Balance Adjustment */}
-            {!showBalanceAdjust ? (
-              <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-                <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>
-                <button type="button" className="ad-btn" onClick={() => setEditMode(true)}>Edit</button>
-                <button type="button" className="ad-btn ghost" onClick={() => setShowBalanceAdjust(true)}>💰 Adjust Balance</button>
-              </div>
-            ) : (
-              <>
-                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
-                  <label>Action</label>
-                  <select value={balanceAction} onChange={(e) => setBalanceAction(e.target.value)}>
-                    <option value="adjust">Add Balance</option>
-                    <option value="deduct">Deduct Balance</option>
-                    <option value="set">Set Balance</option>
-                  </select>
+  const confirmDeleteClient = async () => {
+    const d = await post(`/api/admin/client/${selectedClient.id}/delete`, { confirm: true });
+    setShowDeleteModal(false);
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess(d.data.message);
+    await refreshData();
+  };
 
-                  <label>Amount (USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={balanceAmount}
-                    onChange={(e) => setBalanceAmount(e.target.value)}
-                    placeholder="0.00"
-                    required
-                  />
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADJUST BALANCE
+  // ═══════════════════════════════════════════════════════════════════════════
 
-                  <label>Reason</label>
-                  <textarea
-                    rows={2}
-                    value={balanceReason}
-                    onChange={(e) => setBalanceReason(e.target.value)}
-                    placeholder="Why are you adjusting this balance?"
-                    required
-                  />
+  const submitAdjust = async () => {
+    if (!adjustClient) {
+      showError('Select a client');
+      return;
+    }
+    if (!adjustAmount) {
+      showError('Enter an amount');
+      return;
+    }
+    if (!adjustNote) {
+      showError('Enter a reason');
+      return;
+    }
 
-                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
-                    <button type="button" className="ad-btn ghost" onClick={() => { setShowBalanceAdjust(false); setBalanceAmount(''); setBalanceReason(''); }}>Cancel</button>
-                    <button type="button" className="ad-btn" onClick={adjustBalance} disabled={busy}>{busy ? 'Adjusting…' : 'Apply'}</button>
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </form>
+    const amount = parseFloat(adjustAmount);
+    const txFields = ['total_deposits', 'total_withdrawals'];
+
+    let d;
+    if (adjustField === 'total_deposits') {
+      if (amount <= 0) {
+        showError('Deposit amount must be positive');
+        return;
+      }
+      d = await post(`/api/admin/client/${adjustClient}/create-deposit-tx`, {
+        amount,
+        method: adjustMethod,
+        note: adjustNote
+      });
+    } else if (adjustField === 'total_withdrawals') {
+      if (amount <= 0) {
+        showError('Withdrawal amount must be positive');
+        return;
+      }
+      d = await post(`/api/admin/client/${adjustClient}/create-withdrawal-tx`, {
+        amount,
+        method: adjustMethod,
+        note: adjustNote
+      });
+    } else {
+      d = await post(`/api/admin/client/${adjustClient}/adjust`, { amount, note: adjustNote });
+    }
+
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess(d.data.message);
+    setAdjustAmount('');
+    setAdjustNote('');
+    await refreshData();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // REFERRAL CREATION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const submitReferral = async () => {
+    if (!refReferrer) {
+      showError('Select a referrer');
+      return;
+    }
+    if (refCreateDeposit && parseFloat(refDepositAmount) <= 0) {
+      showError('Deposit amount must be greater than 0');
+      return;
+    }
+
+    let d;
+    if (refMode === 'existing') {
+      if (!refReferred) {
+        showError('Select a referred client');
+        return;
+      }
+      d = await post('/api/admin/create-referral', {
+        referrer_id: refReferrer,
+        referred_id: refReferred,
+        note: refNote,
+        create_deposit: refCreateDeposit,
+        deposit_amount: parseFloat(refDepositAmount),
+        deposit_method: refDepositMethod
+      });
+    } else {
+      if (!refNewName) {
+        showError('Enter member name');
+        return;
+      }
+      if (!refNewEmail) {
+        showError('Enter email address');
+        return;
+      }
+      if (!refNewPassword) {
+        showError('Enter password (min 6 chars)');
+        return;
+      }
+      if (refNewPassword.length < 6) {
+        showError('Password must be at least 6 characters');
+        return;
+      }
+      d = await post('/api/admin/create-referral-member', {
+        referrer_id: refReferrer,
+        name: refNewName,
+        email: refNewEmail,
+        phone: refNewPhone,
+        password: refNewPassword,
+        note: refNote,
+        create_deposit: refCreateDeposit,
+        deposit_amount: parseFloat(refDepositAmount),
+        deposit_method: refDepositMethod
+      });
+    }
+
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess(d.data.message);
+    setRefReferrer('');
+    setRefReferred('');
+    setRefNewName('');
+    setRefNewEmail('');
+    setRefNewPhone('');
+    setRefNewPassword('');
+    setRefCreateDeposit(false);
+    setRefDepositAmount('');
+    setRefNote('');
+    await refreshData();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LOGOUT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const logout = async () => {
+    await post('/api/auth/logout', {});
+    window.location.href = '/admin';
+  };
+
+  const runTradesNow = async () => {
+    const d = await post('/api/admin/trade/run', {});
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess('Trades completed!');
+    await refreshData();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EFFECTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  useEffect(() => {
+    loadStats();
+    loadTransactions();
+    loadClients();
+    const interval = setInterval(refreshData, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RENDER FUNCTIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const renderDashboard = () => (
+    <div>
+      <h1 className="page-title">Dashboard</h1>
+      <p className="page-subtitle">Platform overview and analytics</p>
+
+      <div className="stats-grid">
+        <StatCard label="Total Clients" value={stats.clients} />
+        <StatCard label="Total Deposits" value={'$' + fmt(stats.deposits)} />
+        <StatCard label="Total Withdrawals" value={'$' + fmt(stats.withdrawals)} />
+        <StatCard label="Pending Deposits" value={stats.pending_deposits} color="#fdba74" />
+        <StatCard label="Total Profit Paid" value={'$' + fmt(stats.total_profit_paid || 0)} color="#4ade80" />
+        <StatCard label="Referral Commissions" value={'$' + fmt(stats.ref_commissions || 0)} color="#d4af37" />
+      </div>
+
+      <div className="grid-2">
+        <Card title="📊 Deposits vs Withdrawals" subtitle="Monthly transaction summary">
+          <div style={{ height: '220px', position: 'relative' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData.deposits}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.15)" />
+                <XAxis dataKey="month" stroke="#9ca3af" />
+                <YAxis stroke="#9ca3af" />
+                <Tooltip contentStyle={{ backgroundColor: '#1a1f3a', border: '1px solid rgba(212, 175, 55, 0.3)' }} />
+                <Legend />
+                <Bar dataKey="deposits" fill="rgba(74,222,128,0.7)" radius={6} />
+                <Bar dataKey="withdrawals" fill="rgba(248,113,113,0.7)" radius={6} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card title="📈 Client Growth" subtitle="Cumulative registrations">
+          <div style={{ height: '220px', position: 'relative' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData.clients}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.15)" />
+                <XAxis dataKey="day" stroke="#9ca3af" />
+                <YAxis stroke="#9ca3af" />
+                <Tooltip contentStyle={{ backgroundColor: '#1a1f3a', border: '1px solid rgba(212, 175, 55, 0.3)' }} />
+                <Line type="monotone" dataKey="clients" stroke="#d4af37" strokeWidth={2} dot={{ fill: '#d4af37', r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </div>
     </div>
   );
-}
 
-function AccountsManagement() {
-  const [{ data, error, loading }, reload] = useLoad(
-    () => api('/admin/accounts'),
-    []
-  );
-  const [selectedId, setSelectedId] = useState(null);
-  const [deleteId, setDeleteId] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const [search, setSearch] = useState('');
+  const renderPendingDeposits = () => {
+    const pending = allTx.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
 
-  const allAccounts = data?.accounts || [];
-  const accounts = allAccounts.filter(a =>
-    a.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.email.toLowerCase().includes(search.toLowerCase()) ||
-    a.id.toLowerCase().includes(search.toLowerCase())
-  );
-
-  async function deleteAccount() {
-    if (!deleteId) return;
-    try {
-      await api(`/admin/accounts/${deleteId}`, {
-        method: 'DELETE',
-        body: { confirm: 'DELETE' },
-      });
-      setNotice({ text: 'Account deleted' });
-      setDeleteId(null);
-      reload();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
+    if (!pending.length) {
+      return <div className="empty">✓ No pending deposits</div>;
     }
-  }
 
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
+    return (
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Amount</th>
+            <th>Method</th>
+            <th>Reference</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map(t => (
+            <tr key={t.id}>
+              <td style={{ color: '#9ca3af', fontSize: '11px' }}>
+                {(t.created_at || '').substring(0, 16).replace('T', ' ')}
+              </td>
+              <td><strong>{escHtml(t.user_name || '—')}</strong></td>
+              <td style={{ color: '#4ade80', fontWeight: 'bold' }}>${fmt(t.amount_usd)}</td>
+              <td>{escHtml(t.method || '—')}</td>
+              <td style={{ fontSize: '11px', color: '#6b7280' }}>{escHtml(t.reference || '—')}</td>
+              <td style={{ display: 'flex', gap: '6px' }}>
+                <button className="btn-sm btn-green" onClick={() => openApproveModal(t)}>✓ Approve</button>
+                <button className="btn-sm btn-danger" onClick={() => openRejectModal(t)}>✗ Reject</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const renderClients = () => {
+    const filtered = allClients.filter(c =>
+      (c.name || '').toLowerCase().includes(clientSearch.toLowerCase()) ||
+      (c.email || '').toLowerCase().includes(clientSearch.toLowerCase())
+    );
+
+    if (!filtered.length) {
+      return <div className="empty">No clients yet</div>;
+    }
+
+    return (
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Balance</th>
+            <th>Equity</th>
+            <th>Deposits</th>
+            <th>Withdrawals</th>
+            <th>Profit</th>
+            <th>Ref Earned</th>
+            <th>Days Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(c => (
+            <tr key={c.id}>
+              <td><strong>{escHtml(c.name || '—')}</strong></td>
+              <td style={{ fontSize: '11px', color: '#6b7280' }}>{escHtml(c.email || '—')}</td>
+              <td style={{ color: '#4ade80', fontWeight: 'bold' }}>{fmtD(c.balance || 0)}</td>
+              <td style={{ color: '#d4af37' }}>{fmtD(c.equity || 0)}</td>
+              <td>{fmtD(c.total_deposits || 0)}</td>
+              <td style={{ color: '#f87171' }}>{fmtD(c.total_withdrawals || 0)}</td>
+              <td>{fmtD(c.total_profit || 0)}</td>
+              <td style={{ color: '#d4af37' }}>{fmtD(c.total_ref_earned || 0)}</td>
+              <td style={{ textAlign: 'center' }}>{c.days_active || 0}</td>
+              <td style={{ display: 'flex', gap: '6px' }}>
+                <button className="btn-sm" style={{ background: 'rgba(212, 175, 55, 0.2)', color: '#d4af37' }} onClick={() => openEditModal(c)}>✏️ Edit</button>
+                <button className="btn-sm btn-danger" onClick={() => openDeleteModal(c)}>🗑️ Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const renderTransactions = () => {
+    const filtered = allTx.filter(t =>
+      (!txSearch || (t.user_name || '').toLowerCase().includes(txSearch.toLowerCase()) || (t.reference || '').toLowerCase().includes(txSearch.toLowerCase())) &&
+      (!txTypeFilter || t.type === txTypeFilter) &&
+      (!txStatusFilter || t.status === txStatusFilter)
+    );
+
+    if (!filtered.length) {
+      return <div className="empty">No transactions</div>;
+    }
+
+    return (
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Method</th>
+            <th>Status</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(t => (
+            <tr key={t.id}>
+              <td style={{ color: '#9ca3af', fontSize: '11px' }}>
+                {(t.created_at || '').substring(0, 16).replace('T', ' ')}
+              </td>
+              <td><strong>{escHtml(t.user_name || '—')}</strong></td>
+              <td>{(t.type || '').replace(/_/g, ' ')}</td>
+              <td style={{ fontWeight: 'bold' }}>${fmt(t.amount_usd)}</td>
+              <td>{escHtml(t.method || '—')}</td>
+              <td>
+                <span className={`badge badge-${t.status === 'COMPLETED' ? 'success' : t.status === 'PENDING' ? 'pending' : 'danger'}`}>
+                  {t.status}
+                </span>
+              </td>
+              <td style={{ fontSize: '11px', color: '#6b7280' }}>{escHtml(t.reference || '—')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
 
   return (
-    <section>
-      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
-        <h2>Account Management</h2>
-        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-      </div>
+    <div style={styles.container}>
+      <style>{globalStyles}</style>
 
-      <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
-        <input
-          placeholder="Search by name, email, or ID"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1 }}
+      {/* SIDEBAR OVERLAY (Mobile) */}
+      <div
+        className="sidebar-overlay"
+        style={{ display: sidebarOpen ? 'block' : 'none' }}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      {/* SIDEBAR */}
+      <Sidebar
+        activePage={activePage}
+        setActivePage={(page) => {
+          setActivePage(page);
+          setSidebarOpen(false);
+        }}
+        onLogout={logout}
+        sidebarOpen={sidebarOpen}
+      />
+
+      {/* MAIN CONTAINER */}
+      <div style={styles.mainContainer}>
+        {/* NAVBAR */}
+        <Navbar
+          pageTitle={getPageTitle(activePage)}
+          schedulerRunning={stats.scheduler_running}
+          tradestoday={stats.trades_today}
+          onMenuClick={() => setSidebarOpen(!sidebarOpen)}
         />
-        {search && (
-          <button className="ad-btn ghost" onClick={() => setSearch('')} style={{ flex: 0 }}>Clear</button>
-        )}
-      </div>
 
-      <Notice notice={notice} />
+        {/* CONTENT */}
+        <div style={styles.content}>
+          {successMsg && <Alert type="success" message={successMsg} />}
+          {errorMsg && <Alert type="error" message={errorMsg} />}
 
-      {/* Mobile Card View */}
-      <div className="ad-accounts-mobile">
-        {accounts.map((a) => (
-          <div key={a.id} className="ad-account-card">
-            <div className="ad-account-card-header">
-              <span className="ad-account-name">{a.name}</span>
-              <Badge value={a.status} />
-            </div>
-            <div className="ad-account-card-body">
-              <div className="ad-account-card-row">
-                <span className="label">Email:</span>
-                <span className="value">{a.email}</span>
+          {activePage === 'dashboard' && renderDashboard()}
+
+          {activePage === 'deposits' && (
+            <Card title="Pending Deposits" subtitle="Approve or reject incoming deposits">
+              {renderPendingDeposits()}
+            </Card>
+          )}
+
+          {activePage === 'clients' && (
+            <Card title="Clients" subtitle="Manage user accounts and balances">
+              <div className="filter-bar">
+                <input
+                  type="text"
+                  placeholder="Search by name or email..."
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                />
               </div>
-              <div className="ad-account-card-row">
-                <span className="label">Total Deposits:</span>
-                <span className="value" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</span>
+              {renderClients()}
+            </Card>
+          )}
+
+          {activePage === 'transactions' && (
+            <Card title="Transactions" subtitle="Complete transaction history">
+              <div className="filter-bar">
+                <input
+                  type="text"
+                  placeholder="Search name, reference..."
+                  value={txSearch}
+                  onChange={(e) => setTxSearch(e.target.value)}
+                />
+                <select value={txTypeFilter} onChange={(e) => setTxTypeFilter(e.target.value)}>
+                  <option value="">All Types</option>
+                  <option value="DEPOSIT">Deposits</option>
+                  <option value="WITHDRAWAL">Withdrawals</option>
+                </select>
+                <select value={txStatusFilter} onChange={(e) => setTxStatusFilter(e.target.value)}>
+                  <option value="">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
               </div>
-              <div className="ad-account-card-row">
-                <span className="label">Current Balance:</span>
-                <span className="value" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</span>
+              {renderTransactions()}
+            </Card>
+          )}
+
+          {activePage === 'adjust' && (
+            <div>
+              <h1 className="page-title">Manage Accounts</h1>
+              <p className="page-subtitle">Adjust balances, create transactions, and manage referrals</p>
+
+              <div className="tab-group">
+                <button
+                  className={`tab-btn ${adjustTab === 'balance' ? 'active' : ''}`}
+                  onClick={() => setAdjustTab('balance')}
+                >
+                  💰 Balance & Transactions
+                </button>
+                <button
+                  className={`tab-btn ${adjustTab === 'referral' ? 'active' : ''}`}
+                  onClick={() => setAdjustTab('referral')}
+                >
+                  🎁 Create Referral
+                </button>
               </div>
-              <div className="ad-account-card-row">
-                <span className="label">Role:</span>
-                <Badge value={a.role} />
-              </div>
-              <div className="ad-account-card-row">
-                <span className="label">Created:</span>
-                <span className="value">{new Date(a.createdAt).toLocaleDateString()}</span>
-              </div>
-            </div>
-            <div className="ad-account-card-actions">
-              <button className="ad-btn sm" onClick={() => setSelectedId(a.id)} style={{ flex: 1 }}>View</button>
-              {a.role !== 'admin' && (
-                <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ flex: 1 }}>Delete</button>
+
+              {adjustTab === 'balance' && (
+                <Card>
+                  <form className="form-wrap" onSubmit={(e) => { e.preventDefault(); submitAdjust(); }}>
+                    <div className="form-group">
+                      <label>Select Client</label>
+                      <select value={adjustClient} onChange={(e) => setAdjustClient(e.target.value)}>
+                        <option value="">— Select client —</option>
+                        {allClients.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.email}) — ${fmt(c.balance)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Field to Adjust</label>
+                      <select value={adjustField} onChange={(e) => setAdjustField(e.target.value)}>
+                        <option value="balance">Balance (direct ledger nudge)</option>
+                        <option value="equity">Equity (direct ledger nudge)</option>
+                        <option value="total_deposits">Total Deposits (creates a real deposit)</option>
+                        <option value="total_withdrawals">Total Withdrawals (creates a real withdrawal)</option>
+                        <option value="total_profit">Trade Profit</option>
+                        <option value="total_ref_earned">Referral Earnings</option>
+                      </select>
+                    </div>
+
+                    {['total_deposits', 'total_withdrawals'].includes(adjustField) && (
+                      <div className="form-group">
+                        <label>Method / Network</label>
+                        <select value={adjustMethod} onChange={(e) => setAdjustMethod(e.target.value)}>
+                          <option value="MANUAL">Manual / Cash</option>
+                          <option value="TRC20">USDT — TRC20</option>
+                          <option value="BEP20">USDT — BEP20</option>
+                          <option value="ERC20">USDT — ERC20</option>
+                          <option value="MPESA">M-Pesa</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label>Amount {['total_deposits', 'total_withdrawals'].includes(adjustField) ? '(positive number — a real transaction record is created)' : '(positive = add, negative = subtract)'}</label>
+                      <input
+                        type="number"
+                        placeholder={['total_deposits', 'total_withdrawals'].includes(adjustField) ? 'e.g. 500' : 'e.g. 500 or -200'}
+                        value={adjustAmount}
+                        onChange={(e) => setAdjustAmount(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Reason / Note</label>
+                      <textarea
+                        placeholder="e.g. Profit credit, Bonus, Correction..."
+                        value={adjustNote}
+                        onChange={(e) => setAdjustNote(e.target.value)}
+                      />
+                    </div>
+
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
+                      Apply Adjustment
+                    </button>
+                  </form>
+                </Card>
+              )}
+
+              {adjustTab === 'referral' && (
+                <Card>
+                  <form className="form-wrap" onSubmit={(e) => { e.preventDefault(); submitReferral(); }}>
+                    <div className="form-group">
+                      <label>🎯 Referrer (the person earning)</label>
+                      <select value={refReferrer} onChange={(e) => setRefReferrer(e.target.value)}>
+                        <option value="">— Select a referrer —</option>
+                        {allClients.map(c => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ padding: '16px', background: 'rgba(212,175,55,0.08)', border: '1px solid var(--border-subtle)', borderRadius: '8px', marginBottom: '16px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '12px', color: '#d4af37' }}>Who is being referred?</div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', background: 'rgba(15,21,25,0.6)', border: '1px solid var(--border-subtle)', borderRadius: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="refMode"
+                          value="existing"
+                          checked={refMode === 'existing'}
+                          onChange={(e) => setRefMode(e.target.value)}
+                        />
+                        <span>Link Existing Client</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', background: 'rgba(15,21,25,0.6)', border: '1px solid var(--border-subtle)', borderRadius: '8px', cursor: 'pointer', marginTop: '8px' }}>
+                        <input
+                          type="radio"
+                          name="refMode"
+                          value="new"
+                          checked={refMode === 'new'}
+                          onChange={(e) => setRefMode(e.target.value)}
+                        />
+                        <span>Create New Member</span>
+                      </label>
+                    </div>
+
+                    {refMode === 'existing' ? (
+                      <div className="form-group">
+                        <label>👤 Select Referred Client</label>
+                        <select value={refReferred} onChange={(e) => setRefReferred(e.target.value)}>
+                          <option value="">— Select client to refer —</option>
+                          {allClients.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.email}) — ${fmt(c.balance)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="form-group">
+                          <label>👤 New Member Name</label>
+                          <input type="text" placeholder="Full name" value={refNewName} onChange={(e) => setRefNewName(e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>📧 Email Address</label>
+                          <input type="email" placeholder="email@example.com" value={refNewEmail} onChange={(e) => setRefNewEmail(e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>📱 Phone Number</label>
+                          <input type="text" placeholder="+254 7xx xxx xxx" value={refNewPhone} onChange={(e) => setRefNewPhone(e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>🔐 Password</label>
+                          <input type="password" placeholder="Min 6 characters" value={refNewPassword} onChange={(e) => setRefNewPassword(e.target.value)} />
+                        </div>
+                      </>
+                    )}
+
+                    <div style={{ padding: '16px', background: 'rgba(212,175,55,0.08)', border: '1px solid var(--border-subtle)', borderRadius: '8px', marginBottom: '16px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', background: 'rgba(15,21,25,0.6)', border: '1px solid var(--border-subtle)', borderRadius: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={refCreateDeposit}
+                          onChange={(e) => setRefCreateDeposit(e.target.checked)}
+                        />
+                        <span>💵 Add Initial Deposit</span>
+                      </label>
+                    </div>
+
+                    {refCreateDeposit && (
+                      <>
+                        <div className="form-group">
+                          <label>Deposit Amount (USD)</label>
+                          <input type="number" placeholder="e.g. 500" min="0" value={refDepositAmount} onChange={(e) => setRefDepositAmount(e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Deposit Method</label>
+                          <select value={refDepositMethod} onChange={(e) => setRefDepositMethod(e.target.value)}>
+                            <option value="MANUAL">Manual / Cash</option>
+                            <option value="TRC20">USDT — TRC20</option>
+                            <option value="BEP20">USDT — BEP20</option>
+                            <option value="ERC20">USDT — ERC20</option>
+                            <option value="MPESA">M-Pesa</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="form-group">
+                      <label>📝 Note</label>
+                      <textarea placeholder="e.g. Test referral, Team member..." value={refNote} onChange={(e) => setRefNote(e.target.value)} />
+                    </div>
+
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
+                      ✓ Create Referral
+                    </button>
+                  </form>
+                </Card>
               )}
             </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop Table View */}
-      <div className="ad-accounts-desktop">
-        <div className="ad-scroll">
-          <table className="ad-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Total Deposits</th>
-                <th>Current Balance</th>
-                <th>Role</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.name}</td>
-                  <td>{a.email}</td>
-                  <td><Badge value={a.status} /></td>
-                  <td className="num" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</td>
-                  <td className="num" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</td>
-                  <td><Badge value={a.role} /></td>
-                  <td>{new Date(a.createdAt).toLocaleDateString()}</td>
-                  <td>
-                    <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)} style={{ width: '100%' }}>View</button>
-                      {a.role !== 'admin' && (
-                        <button className="ad-btn ghost sm danger" onClick={() => setDeleteId(a.id)} style={{ width: '100%', marginTop: '4px' }}>Delete</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {selectedId && (
-        <AccountDetailModal
-          accountId={selectedId}
-          onClose={() => setSelectedId(null)}
-          onUpdate={reload}
-        />
-      )}
-
-      {deleteId && (
-        <div className="ad-overlay" onClick={() => setDeleteId(null)}>
-          <div className="ad-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Delete Account?</h3>
-            <p style={{ color: 'var(--muted)' }}>This will permanently delete this account and all associated data.</p>
-            <div className="ad-row end">
-              <button className="ad-btn ghost" onClick={() => setDeleteId(null)}>Cancel</button>
-              <button className="ad-btn danger" onClick={deleteAccount}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
-// DASHBOARD / ANALYTICS - ✅ FIXED DATA SYNC
-// ============================================================================
-
-function Dashboard() {
-  const [{ data, error, loading }, reload] = useLoad(async () => {
-    const [accounts, queue, ledger] = await Promise.all([
-      api('/admin/accounts'),
-      api('/admin/transactions?status=pending'),
-      api('/admin/trading/ledger'),
-    ]);
-    return { accounts, queue, ledger };
-  }, []);
-
-  // Auto-refresh every 10 seconds to keep data in sync
-  useEffect(() => {
-    const interval = setInterval(() => reload(), 10000);
-    return () => clearInterval(interval);
-  }, [reload]);
-
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
-
-  const acc = data?.accounts?.accounts || [];
-  const txns = data?.queue?.transactions || [];
-  const trades = data?.ledger?.ledger || [];
-
-  const totalMembers = acc.length;
-  // ✅ FIXED: Changed from a.balance to a.totalDeposits
-  const totalDeposits = acc.reduce((sum, a) => sum + a.totalDeposits, 0);
-  const pendingDeposits = txns.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
-  const pendingWithdrawals = txns.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
-  const totalTrades = trades.length;
-  const totalTradeProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
-  const activeDeposits = acc.reduce((sum, a) => sum + (a.pendingTransactions > 0 ? a.balance : 0), 0);
-
-  return (
-    <section>
-      <div className="ad-row" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
-        <h2>System Overview</h2>
-        <button className="ad-btn ghost" onClick={reload}>Refresh Now</button>
-      </div>
-
-      <div className="ad-grid">
-        <StatCard label="Total Members" value={totalMembers} />
-        <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
-        <StatCard label="Held Accounts" value={acc.filter(a => a.status === 'held').length} />
-        <StatCard label="Total Deposits" value={money(totalDeposits)} subtext="from all members" />
-        <StatCard label="Active Deposits" value={money(activeDeposits)} />
-        <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} req`} />
-        <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} req`} />
-        <StatCard label="Total Trades" value={totalTrades} />
-        <StatCard label="Trading Profit" value={money(totalTradeProfit)} />
-        <StatCard label="Pending Review" value={txns.length} subtext="txns" />
-      </div>
-
-      <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '16px' }}>📊 Data auto-refreshes every 10 seconds</p>
-    </section>
-  );
-}
-
-// ============================================================================
-// REFERRALS MANAGEMENT - ENHANCED WITH REFERRED MEMBERS NETWORK
-// ============================================================================
-
-function ReferralsManagement() {
-  const [searchId, setSearchId] = useState('');
-  const [notice, setNotice] = useState(null);
-  const [referralsList, setReferralsList] = useState([]);
-  const [referralsLoading, setReferralsLoading] = useState(false);
-  const [{ data, error, loading }, reload] = useLoad(
-    () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
-    [searchId]
-  );
-
-  async function loadReferralsList(identifier) {
-    if (!identifier) return;
-    setReferralsLoading(true);
-    try {
-      const result = await api(`/admin/referrals/${identifier}/list`);
-      setReferralsList(result.referrals || []);
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-      setReferralsList([]);
-    } finally {
-      setReferralsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (searchId) {
-      loadReferralsList(searchId);
-    } else {
-      setReferralsList([]);
-    }
-  }, [searchId]);
-
-  return (
-    <section>
-      <h2>Referral Management</h2>
-      <div className="ad-row ad-search-row">
-        <input
-          placeholder="Search by member ID or email"
-          value={searchId}
-          onChange={(e) => setSearchId(e.target.value)}
-        />
-        <button className="ad-btn ghost" onClick={reload}>Search</button>
-      </div>
-
-      <Notice notice={notice} />
-      {error && <p className="ad-error">{error}</p>}
-
-      {searchId && loading ? (
-        <p className="ad-empty">Loading…</p>
-      ) : data ? (
-        <div>
-          <div className="ad-grid">
-            <StatCard label="Direct Referrals" value={data.directReferrals} />
-            <StatCard label="Team Total" value={data.teamTotal} />
-            <StatCard label="Current Tier" value={data.tier || 'None'} />
-            <StatCard label="Commissions" value={data.commissions.length} />
-            <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
-          </div>
-
-          <h3>Commission History</h3>
-          <div className="ad-scroll">
-            <table className="ad-table">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Email</th>
-                  <th>Rate</th>
-                  <th>Earned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.commissions.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.referredName}</td>
-                    <td>{c.referredEmail}</td>
-                    <td>{(c.commissionRate * 100).toFixed(0)}%</td>
-                    <td className="num">{money(c.commissionEarned)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* NEW: Referred Members Network */}
-          <h3 style={{ marginTop: '24px' }}>Referred Members Network</h3>
-          {referralsLoading ? (
-            <p className="ad-empty">Loading network…</p>
-          ) : referralsList.length > 0 ? (
-            <div className="ad-scroll">
-              <table className="ad-table">
-                <thead>
-                  <tr>
-                    <th>Member Name</th>
-                    <th>Email</th>
-                    <th>Total Deposits</th>
-                    <th>Joined Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {referralsList.map((member) => (
-                    <tr key={member.id}>
-                      <td><strong>{member.name}</strong></td>
-                      <td>{member.email}</td>
-                      <td className="num" style={{ color: 'var(--accent)' }}>{money(member.totalDeposits)}</td>
-                      <td>{new Date(member.signedUpAt).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="ad-empty">No referred members yet</p>
           )}
         </div>
-      ) : searchId ? (
-        <p className="ad-empty">No referral data found</p>
-      ) : (
-        <p className="ad-empty">Enter a member ID or email to search</p>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
-// DEPOSIT MANAGEMENT - ADD/UPDATE MEMBER DEPOSITS WITH AUTO-SYNC
-// ============================================================================
-
-function DepositManagement() {
-  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
-  const [{ data: auditData }, loadAudit] = useLoad(() => api('/admin/deposits/verify'), []);
-  const [notice, setNotice] = useState(null);
-  const [showAddDeposit, setShowAddDeposit] = useState(false);
-  const [showFixModal, setShowFixModal] = useState(false);
-  const [fixAccountId, setFixAccountId] = useState('');
-  const [fixResults, setFixResults] = useState(null);
-  const [memberId, setMemberId] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
-  const [busy, setBusy] = useState(false);
-
-  // Auto-refresh every 8 seconds to sync with member accounts
-  useEffect(() => {
-    const interval = setInterval(() => reload(), 8000);
-    return () => clearInterval(interval);
-  }, [reload]);
-
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
-
-  const accountList = data?.accounts || [];
-
-  async function addDeposit(e) {
-    e.preventDefault();
-    if (!memberId || !depositAmount) {
-      setNotice({ text: 'Member and deposit amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(depositAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Deposit must be greater than 0');
-
-      await api(`/admin/deposits/add`, {
-        method: 'POST',
-        body: {
-          accountId: memberId,
-          depositAmount: amount,
-          depositDate: depositDate,
-        },
-      });
-
-      setNotice({ text: `✅ Added $${amount.toFixed(2)} deposit for member ${memberId}` });
-      setMemberId('');
-      setDepositAmount('');
-      setDepositDate(new Date().toISOString().split('T')[0]);
-      setShowAddDeposit(false);
-      reload();
-      loadAudit();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function fixMissingBonuses() {
-    if (!fixAccountId) {
-      setNotice({ text: 'Enter account ID', bad: true });
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await api(`/admin/accounts/${fixAccountId}/fix-missing-bonuses`, { method: 'POST' });
-      setFixResults(result);
-      setNotice({ text: `✅ ${result.message}`, bad: false });
-      setTimeout(() => {
-        reload();
-        loadAudit();
-        setShowFixModal(false);
-        setFixAccountId('');
-        setFixResults(null);
-      }, 2000);
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <div style={{ marginBottom: '16px' }}>
-        <h2 style={{ marginBottom: '12px' }}>💰 Deposit Management</h2>
-        <div className="ad-row">
-          <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn" onClick={() => setShowAddDeposit(!showAddDeposit)} style={{ flex: 1 }}>
-            {showAddDeposit ? '✕ Cancel' : '+ Add Deposit'}
-          </button>
-          <button className="ad-btn ghost" onClick={() => setShowFixModal(!showFixModal)} style={{ flex: 1, background: 'rgba(181, 238, 106, 0.1)', borderColor: 'rgba(181, 238, 106, 0.3)' }}>
-            {showFixModal ? '✕ Close' : '🔧 Fix Missing Bonuses'}
-          </button>
-        </div>
       </div>
 
-      <Notice notice={notice} />
-
-      {showAddDeposit && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(212, 175, 55, 0.05)', border: '1px solid rgba(212, 175, 55, 0.2)' }}>
-          <h3>💸 Add Member Deposit</h3>
-          <form onSubmit={addDeposit}>
-            <label>Member</label>
-            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {accountList.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Total Deposits: ${money(acc.totalDeposits)}
-                </option>
-              ))}
-            </select>
-
-            <label>Deposit Amount (USD)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder="0.00"
-              required
-            />
-
-            <label>Deposit Date</label>
-            <input
-              type="date"
-              value={depositDate}
-              onChange={(e) => setDepositDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowAddDeposit(false)}>Cancel</button>
-              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Adding…' : 'Add Deposit & Update Balance'}
-              </button>
-            </div>
-          </form>
-        </div>
+      {/* MODALS */}
+      {showApproveModal && selectedTx && (
+        <Modal
+          title="✓ Approve Deposit"
+          onClose={() => setShowApproveModal(false)}
+          onConfirm={confirmApprove}
+          confirmText="Approve"
+        >
+          <div style={{ background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '14px', marginBottom: '14px', fontSize: '13px', lineHeight: '2' }}>
+            <div><span style={{ color: '#9ca3af' }}>Client:</span> <strong>{selectedTx.user_name}</strong></div>
+            <div><span style={{ color: '#9ca3af' }}>Amount:</span> <span style={{ color: '#4ade80', fontWeight: 'bold' }}>${fmt(selectedTx.amount_usd)}</span></div>
+            <div><span style={{ color: '#9ca3af' }}>Method:</span> <span>{selectedTx.method}</span></div>
+            <div><span style={{ color: '#9ca3af' }}>Reference:</span> <span style={{ fontSize: '11px' }}>{selectedTx.reference}</span></div>
+          </div>
+        </Modal>
       )}
 
-      {showFixModal && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(181, 238, 106, 0.05)', border: '1px solid rgba(181, 238, 106, 0.2)' }}>
-          <h3>🔧 Fix Missing Recharge Bonuses</h3>
-          <p style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '12px' }}>
-            For accounts missing 2.5% recharge bonuses on deposits. Enter the account ID to fix.
-          </p>
-          <div>
-            <label>Account ID</label>
+      {showRejectModal && selectedTx && (
+        <Modal
+          title="✗ Reject Deposit"
+          onClose={() => setShowRejectModal(false)}
+          onConfirm={confirmReject}
+          confirmText="Reject"
+          confirmClass="btn-danger"
+        >
+          <div className="form-group">
+            <label>Reason</label>
+            <textarea
+              placeholder="e.g. Transaction not found..."
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
+          </div>
+        </Modal>
+      )}
+
+      {showEditModal && selectedClient && (
+        <Modal
+          title="✏ Edit Client"
+          onClose={() => setShowEditModal(false)}
+          onConfirm={saveClientEdit}
+          confirmText="Save Changes"
+        >
+          <div className="form-group">
+            <label>Full Name</label>
             <input
               type="text"
-              value={fixAccountId}
-              onChange={(e) => setFixAccountId(e.target.value)}
-              placeholder="Paste account ID here..."
-              required
+              placeholder="Full name"
+              value={editData.name}
+              onChange={(e) => setEditData({ ...editData, name: e.target.value })}
             />
-
-            {fixResults && (
-              <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(91, 238, 106, 0.1)', borderRadius: '6px', border: '1px solid rgba(91, 238, 106, 0.3)' }}>
-                <p style={{ margin: '0 0 8px', color: 'var(--accent)', fontWeight: 'bold' }}>✅ {fixResults.message}</p>
-                <p style={{ margin: '0 0 4px', color: 'var(--muted)', fontSize: '12px' }}>Bonuses Added: <strong>{fixResults.bonusesAdded}</strong> / {fixResults.depositCount}</p>
-                <p style={{ margin: '0 0 4px', color: 'var(--muted)', fontSize: '12px' }}>Total Added: <strong>${fixResults.totalBonusAdded}</strong></p>
-                <p style={{ margin: '0', color: 'var(--muted)', fontSize: '12px' }}>New Balance: <strong>${fixResults.newBalance}</strong></p>
-              </div>
-            )}
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => { setShowFixModal(false); setFixAccountId(''); setFixResults(null); }}>Cancel</button>
-              <button className="ad-btn" onClick={fixMissingBonuses} disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Fixing…' : 'Fix Bonuses'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-
-      <div className="ad-grid">
-        <StatCard label="Total Members" value={accountList.length} />
-        <StatCard label="Active Accounts" value={accountList.filter(a => a.status === 'active').length} />
-        <StatCard label="Total Deposits (All)" value={money(accountList.reduce((sum, a) => sum + a.totalDeposits, 0))} />
-      </div>
-
-      <h3>Member Deposits Overview</h3>
-      <div className="ad-scroll">
-        <table className="ad-table">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>Email</th>
-              <th>Total Deposits</th>
-              <th>Earnings</th>
-              <th>Current Balance</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accountList.map((acc) => (
-              <tr key={acc.id}>
-                <td>{acc.name}</td>
-                <td className="small">{acc.email}</td>
-                <td className="num" style={{ color: 'var(--gold)' }}>${money(acc.totalDeposits)}</td>
-                <td className="num" style={{ color: 'var(--accent)' }}>${money((acc.balance - acc.totalDeposits) || 0)}</td>
-                <td className="num" style={{ color: acc.balance > acc.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(acc.balance)}</td>
-                <td><Badge value={acc.status} /></td>
-                <td>
-                  <button className="ad-btn ghost xs" onClick={() => { setFixAccountId(acc.id); setShowFixModal(true); }} style={{ fontSize: '10px' }}>🔧 Fix</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!accountList.length && <p className="ad-empty">No members found</p>}
-      </div>
-
-      <h3 style={{ marginTop: '40px' }}>📋 Deposit Audit Log</h3>
-      <p style={{ color: '#888', fontSize: '12px', marginBottom: '16px' }}>Complete history of all deposits for each member</p>
-      <div className="ad-scroll">
-        {!auditData?.deposits?.length ? (
-          <p className="ad-empty">No deposits yet</p>
-        ) : (
-          <table className="ad-table">
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Email</th>
-                <th>Deposit Count</th>
-                <th>Total Deposits</th>
-                <th>Deposits</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditData.deposits.map((member) => (
-                <tr key={member.memberId}>
-                  <td>{member.memberName}</td>
-                  <td className="small">{member.memberEmail}</td>
-                  <td className="num">{member.depositCount}</td>
-                  <td className="num" style={{ color: 'var(--gold)', fontWeight: 'bold' }}>${money(member.totalDeposits)}</td>
-                  <td style={{ fontSize: '12px', maxWidth: '300px' }}>
-                    {member.depositTransactions.map((dep, i) => (
-                      <div key={i} style={{ color: '#aaa', marginBottom: '4px' }}>
-                        ${dep.amount} on {dep.date}
-                      </div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// ============================================================================
-// TRADING MANAGEMENT - ENHANCED WITH ADD/UPDATE
-// ============================================================================
-
-function TradingManagement() {
-  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
-  const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
-  const [notice, setNotice] = useState(null);
-  const [showAddTrade, setShowAddTrade] = useState(false);
-  const [showDeductTrade, setShowDeductTrade] = useState(false);
-  const [memberId, setMemberId] = useState('');
-  const [deductMemberId, setDeductMemberId] = useState('');
-  const [profitAmount, setProfitAmount] = useState('');
-  const [deductAmount, setDeductAmount] = useState('');
-  const [profitDate, setProfitDate] = useState(new Date().toISOString().split('T')[0]);
-  const [deductDate, setDeductDate] = useState(new Date().toISOString().split('T')[0]);
-  const [busy, setBusy] = useState(false);
-
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
-
-  const trades = data?.ledger || [];
-  const accountList = members?.accounts || [];
-  const totalProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
-
-  async function applyProfits() {
-    try {
-      await api('/admin/trading/apply-profits', { method: 'POST' });
-      setNotice({ text: 'Daily profits applied successfully' });
-      reload();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-  }
-
-  async function addTrade(e) {
-    e.preventDefault();
-    if (!memberId || !profitAmount) {
-      setNotice({ text: 'Member ID and profit amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const profit = parseFloat(profitAmount);
-      if (isNaN(profit) || profit <= 0) throw new Error('Profit must be greater than 0');
-
-      await api(`/admin/trading/add-trade`, {
-        method: 'POST',
-        body: {
-          accountId: memberId,
-          profitAmount: profit,
-          profitDate: profitDate,
-        },
-      });
-
-      setNotice({ text: `✅ Added $${profit.toFixed(2)} trade for member ${memberId}` });
-      setMemberId('');
-      setProfitAmount('');
-      setProfitDate(new Date().toISOString().split('T')[0]);
-      setShowAddTrade(false);
-      reload();
-      loadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function deductTrade(e) {
-    e.preventDefault();
-    if (!deductMemberId || !deductAmount) {
-      setNotice({ text: 'Member ID and deduct amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(deductAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Deduct amount must be greater than 0');
-
-      await api(`/admin/trading/deduct-trade`, {
-        method: 'POST',
-        body: {
-          accountId: deductMemberId,
-          deductAmount: amount,
-          deductDate: deductDate,
-        },
-      });
-
-      setNotice({ text: `✅ Deducted $${amount.toFixed(2)} trade from member ${deductMemberId}` });
-      setDeductMemberId('');
-      setDeductAmount('');
-      setDeductDate(new Date().toISOString().split('T')[0]);
-      setShowDeductTrade(false);
-      reload();
-      loadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <div style={{ marginBottom: '16px' }}>
-        <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
-        <div className="ad-row">
-          <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Sync Members</button>
-          <button className="ad-btn" onClick={() => setShowAddTrade(!showAddTrade)} style={{ flex: 1 }}>
-            {showAddTrade ? '✕ Cancel' : '+ Add Trade'}
-          </button>
-          <button className="ad-btn ghost danger" onClick={() => setShowDeductTrade(!showDeductTrade)} style={{ flex: 1 }}>
-            {showDeductTrade ? '✕ Cancel' : '➖ Deduct Trade'}
-          </button>
-          <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
-        </div>
-      </div>
-
-      <Notice notice={notice} />
-
-      {showAddTrade && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(181, 238, 106, 0.05)', border: '1px solid rgba(181, 238, 106, 0.2)' }}>
-          <h3>➕ Add New Trade</h3>
-          <form onSubmit={addTrade}>
-            <label>Member</label>
-            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {accountList.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
-                </option>
-              ))}
-            </select>
-
-            <label>Profit Amount (USD)</label>
+          <div className="form-group">
+            <label>Email</label>
             <input
-              type="number"
-              step="0.01"
-              value={profitAmount}
-              onChange={(e) => setProfitAmount(e.target.value)}
-              placeholder="0.00"
-              required
+              type="email"
+              placeholder="email@example.com"
+              value={editData.email}
+              onChange={(e) => setEditData({ ...editData, email: e.target.value })}
             />
-
-            <label>Trade Date</label>
-            <input
-              type="date"
-              value={profitDate}
-              onChange={(e) => setProfitDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowAddTrade(false)}>Cancel</button>
-              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Adding…' : 'Add Trade & Update Member'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {showDeductTrade && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(255, 107, 107, 0.05)', border: '1px solid rgba(255, 107, 107, 0.2)' }}>
-          <h3>➖ Deduct Trade</h3>
-          <form onSubmit={deductTrade}>
-            <label>Member</label>
-            <select value={deductMemberId} onChange={(e) => setDeductMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {(members?.accounts || []).map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
-                </option>
-              ))}
-            </select>
-
-            <label>Deduct Amount (USD)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={deductAmount}
-              onChange={(e) => setDeductAmount(e.target.value)}
-              placeholder="0.00"
-              required
-            />
-
-            <label>Deduct Date</label>
-            <input
-              type="date"
-              value={deductDate}
-              onChange={(e) => setDeductDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowDeductTrade(false)}>Cancel</button>
-              <button className="ad-btn ghost danger" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Deducting…' : 'Deduct & Update Member'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div className="ad-grid">
-        <StatCard label="Total Trades" value={trades.length} />
-        <StatCard label="Total Profit" value={money(totalProfit)} />
-        <StatCard label="Active Members" value={accountList.length} />
-      </div>
-
-      <h3>Recent Activity</h3>
-      <div className="ad-scroll">
-        <table className="ad-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Member</th>
-              <th>Deposit</th>
-              <th>Profit</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trades.map((t) => (
-              <tr key={t.id}>
-                <td>{t.profitDate}</td>
-                <td>{t.accountName}</td>
-                <td className="num">{money(t.depositAmount)}</td>
-                <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
-                <td><Badge value="credited" /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!trades.length && <p className="ad-empty">No trading activity yet</p>}
-      </div>
-    </section>
-  );
-}
-
-// ============================================================================
-// BALANCE MANAGEMENT
-// ============================================================================
-
-function BalanceManagement() {
-  const [memberId, setMemberId] = useState('');
-  const [action, setAction] = useState('adjust');
-  const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState('');
-  const [notice, setNotice] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!memberId || !amount || !reason) {
-      setNotice({ text: 'All fields required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amountNum = parseFloat(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
-        throw new Error('Invalid amount');
-      }
-
-      await api(`/admin/accounts/${memberId}/balance`, {
-        method: 'POST',
-        body: { action, amountCents: Math.round(amountNum * 100), reason }
-      });
-
-      setNotice({ text: `Balance ${action}ed by ${money(amountNum)}` });
-      setMemberId('');
-      setAmount('');
-      setReason('');
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <h2>Adjust Member Balance</h2>
-      <form className="ad-form" onSubmit={submit}>
-        <label>Member ID</label>
-        <input
-          type="text"
-          value={memberId}
-          onChange={(e) => setMemberId(e.target.value)}
-          placeholder="Enter member ID"
-          required
-        />
-
-        <label>Action</label>
-        <select value={action} onChange={(e) => setAction(e.target.value)}>
-          <option value="adjust">Adjust (add)</option>
-          <option value="deduct">Deduct (subtract)</option>
-          <option value="set">Set (replace balance)</option>
-        </select>
-
-        <label>Amount (USD)</label>
-        <input
-          type="number"
-          step="0.01"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="0.00"
-          required
-        />
-
-        <label>Reason</label>
-        <textarea
-          rows={3}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Why are you adjusting this balance?"
-          required
-        />
-
-        <Notice notice={notice} />
-        <button className="ad-btn" disabled={busy} style={{ width: '100%' }}>
-          {busy ? 'Processing…' : `${action.charAt(0).toUpperCase() + action.slice(1)} Balance`}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-// ============================================================================
-// TRANSACTION APPROVAL - ✅ FIXED
-// ============================================================================
-
-function TransactionApproval() {
-  const [{ data, error, loading }, reload] = useLoad(
-    () => api('/admin/transactions?status=pending'),
-    []
-  );
-  const [notice, setNotice] = useState(null);
-  const [actionId, setActionId] = useState(null);
-  const [actionType, setActionType] = useState(null);
-  const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const transactions = data?.transactions || [];
-
-  async function handleAction() {
-    if (!actionId || !actionType) return;
-    setBusy(true);
-    try {
-      await api(`/admin/transactions/${actionId}/${actionType}`, {
-        method: 'POST',
-        body: { note: actionType === 'reject' ? reason : undefined },
-      });
-      setNotice({ text: `Transaction ${actionType}ed successfully` });
-      setActionId(null);
-      setActionType(null);
-      setReason('');
-      reload();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
-
-  const deposits = transactions.filter(t => t.type === 'deposit');
-  const withdrawals = transactions.filter(t => t.type === 'withdrawal');
-
-  return (
-    <section>
-      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
-        <h2>Transaction Approvals</h2>
-        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
-      </div>
-
-      <Notice notice={notice} />
-
-      <div className="ad-grid">
-        <StatCard label="Pending Deposits" value={deposits.length} subtext={`${money(deposits.reduce((sum, t) => sum + t.amount, 0))}`} />
-        <StatCard label="Pending Withdrawals" value={withdrawals.length} subtext={`${money(withdrawals.reduce((sum, t) => sum + t.amount, 0))}`} />
-      </div>
-
-      {deposits.length > 0 && (
-        <>
-          <h3>Pending Deposits</h3>
-          <div className="ad-scroll">
-            <table className="ad-table">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Amount</th>
-                  <th>Ref</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deposits.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.accountName}</td>
-                    <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.reference?.slice(0, 8) || '—'}</code></td>
-                    <td>
-                      <div className="ad-actions-compact">
-                        <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
-                        <button className="ad-btn ghost xs danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
-        </>
-      )}
-
-      {withdrawals.length > 0 && (
-        <>
-          <h3>Pending Withdrawals</h3>
-          <div className="ad-scroll">
-            <table className="ad-table">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Amount</th>
-                  <th>Dest</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withdrawals.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.accountName}</td>
-                    <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.destination?.slice(0, 8) || '—'}</code></td>
-                    <td>
-                      <div className="ad-actions-compact">
-                        <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
-                        <button className="ad-btn ghost xs danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {transactions.length === 0 && (
-        <p className="ad-empty">No pending transactions</p>
-      )}
-
-      {actionId && (
-        <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
-          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
-            <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
-
-            {actionType === 'reject' && (
-              <>
-                <label>Reason for rejection</label>
-                <textarea
-                  rows={3}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Explain why..."
-                  required
-                />
-              </>
-            )}
-
-            <div className="ad-row end" style={{ marginTop: '16px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>Cancel</button>
-              <button className={`ad-btn ${actionType === 'reject' ? 'danger' : ''}`} disabled={busy}>
-                {busy ? 'Processing…' : actionType === 'approve' ? 'Approve' : 'Reject'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
-// SETTINGS / PASSWORD CHANGE
-// ============================================================================
-
-function SettingsManagement({ account }) {
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [notice, setNotice] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-
-  async function handlePasswordChange(e) {
-    e.preventDefault();
-    setNotice(null);
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setNotice({ text: 'All fields required', bad: true });
-      return;
-    }
-
-    if (newPassword.length < 6 || newPassword.length > 128) {
-      setNotice({ text: 'New password must be between 6 and 128 characters', bad: true });
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setNotice({ text: 'Passwords do not match', bad: true });
-      return;
-    }
-
-    if (currentPassword === newPassword) {
-      setNotice({ text: 'New password must be different from current password', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await api('/admin/auth/password', {
-        method: 'POST',
-        body: { currentPassword, newPassword },
-      });
-      setNotice({ text: 'Password changed successfully. Redirecting...', bad: false });
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => {
-        window.location.href = '/admin';
-      }, 2000);
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section>
-      <h2>Settings</h2>
-
-      <div className="ad-card">
-        <h3>Administrator Account</h3>
-        <div className="ad-detail-row" style={{ borderBottom: '1px solid var(--line)', paddingBottom: '12px', marginBottom: '12px' }}>
-          <span className="ad-detail-label">Email</span>
-          <span className="ad-detail-value">{account.email}</span>
-        </div>
-
-        <h3 style={{ marginTop: '20px' }}>Change Password</h3>
-        <form onSubmit={handlePasswordChange}>
-          <label>Current Password</label>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-
-          <label>New Password</label>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            autoComplete="new-password"
-            placeholder="At least 6 characters"
-            required
-          />
-
-          <label>Confirm New Password</label>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-          />
-
-          <div style={{ marginTop: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="form-group">
+            <label>Phone</label>
             <input
-              type="checkbox"
-              id="show-pwd"
-              checked={showPassword}
-              onChange={(e) => setShowPassword(e.target.checked)}
+              type="text"
+              placeholder="+254 7xx xxx xxx"
+              value={editData.phone}
+              onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
             />
-            <label htmlFor="show-pwd" style={{ margin: 0, fontWeight: 'normal', color: 'var(--text)', fontSize: '14px' }}>
-              Show passwords
-            </label>
           </div>
+        </Modal>
+      )}
 
-          <Notice notice={notice} />
-          <button className="ad-btn" disabled={busy} style={{ width: '100%', padding: '12px' }}>
-            {busy ? 'Updating…' : 'Change Password'}
-          </button>
-        </form>
-      </div>
-    </section>
-  );
-}
-
-// ============================================================================
-// MAIN ADMIN DASHBOARD
-// ============================================================================
-
-function Login({ onLogin }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [logo, setLogo] = useState(null);
-
-  useEffect(() => {
-    fetch('/api/public/logo')
-      .then(r => r.ok && r.blob())
-      .then(blob => blob && setLogo(URL.createObjectURL(blob)))
-      .catch(() => {});
-  }, []);
-
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      const data = await api('/admin/auth/login', { method: 'POST', body: { email, password } });
-      onLogin(data.account);
-    } catch (err) {
-      setError(err.message);
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div className="ad-login">
-      <form className="ad-card ad-form" onSubmit={submit}>
-        {logo && <img src={logo} alt="Logo" className="ad-logo" />}
-        <div className="ad-brand"><b>ascend</b> capital <span>Admin</span></div>
-        <h2>Administrator sign in</h2>
-        <label>Username</label>
-        <input type="text" autoComplete="username" placeholder="admin" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <label>Password</label>
-        <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        {error && <p className="ad-error">{error}</p>}
-        <button className="ad-btn" disabled={busy} style={{ width: '100%', padding: '12px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-      </form>
+      {showDeleteModal && selectedClient && (
+        <Modal
+          title="🗑️ Delete Client"
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={confirmDeleteClient}
+          confirmText="Yes, Delete Permanently"
+          confirmClass="btn-danger"
+        >
+          <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: '8px', padding: '14px', marginBottom: '14px', fontSize: '13px' }}>
+            <strong style={{ color: '#fca5a5' }}>⚠️ WARNING: This action cannot be undone!</strong>
+            <p style={{ marginTop: '10px', color: '#d1d5db' }}>All data for <strong>{selectedClient.name}</strong> will be permanently deleted, including:</p>
+            <ul style={{ marginTop: '8px', marginLeft: '20px', color: '#9ca3af' }}>
+              <li>Account balance</li>
+              <li>Transaction history</li>
+              <li>Trade records</li>
+              <li>Referral data</li>
+            </ul>
+          </div>
+        </Modal>
+      )}
     </div>
   );
-}
+};
 
-export default function AdminDashboard() {
-  const [account, setAccount] = useState(undefined);
-  const [tab, setTab] = useState('dashboard');
-  const [logo, setLogo] = useState(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════
 
-  useEffect(() => {
-    api('/admin/auth/me').then((d) => setAccount(d.account)).catch(() => setAccount(null));
-    fetch('/api/public/logo')
-      .then(r => r.ok && r.blob())
-      .then(blob => blob && setLogo(URL.createObjectURL(blob)))
-      .catch(() => {});
-  }, []);
-
-  async function signOut() {
-    await api('/admin/auth/logout', { method: 'POST' }).catch(() => {});
-    setAccount(null);
-  }
-
-  const tabs = [
-    ['dashboard', 'Dashboard'],
-    ['accounts', 'Accounts'],
-    ['transactions', 'Approvals'],
-    ['referrals', 'Referrals'],
-    ['deposits', 'Deposits'],
-    ['trading', 'Trading'],
-    ['balance', 'Balances'],
-    ['settings', 'Settings'],
-  ];
-
-  let body;
-  if (account === undefined) body = <p className="ad-empty">Loading…</p>;
-  else if (!account) body = <Login onLogin={setAccount} />;
-  else if (account.role !== 'admin') {
-    body = (
-      <div className="ad-login">
-        <div className="ad-card ad-form">
-          <h2>Administrator access required</h2>
-          <p className="ad-muted">{account.email} is not an administrator account.</p>
-          <button className="ad-btn" onClick={signOut} style={{ width: '100%', padding: '12px' }}>Sign out</button>
-        </div>
-      </div>
-    );
-  } else {
-    body = (
-      <>
-        <header className="ad-top">
-          <button className="ad-hamburger" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>☰</button>
-          <div className="ad-brand">
-            {logo && <img src={logo} alt="Logo" style={{ height: '28px', marginRight: '6px', verticalAlign: 'middle' }} />}
-            <b>ascend</b> <span className="ad-brand-full">capital</span> <span>Admin</span>
-          </div>
-          <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
-            {tabs.map(([key, label]) => (
-              <button
-                key={key}
-                className={tab === key ? 'on' : ''}
-                onClick={() => { setTab(key); setMobileMenuOpen(false); }}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-          <div className="ad-who">
-            <span>{account.email}</span>
-            <button className="ad-btn ghost sm" onClick={signOut}>Sign out</button>
-          </div>
-        </header>
-        <main className="ad-main">
-          {tab === 'dashboard' && <Dashboard />}
-          {tab === 'accounts' && <AccountsManagement />}
-          {tab === 'transactions' && <TransactionApproval />}
-          {tab === 'referrals' && <ReferralsManagement />}
-          {tab === 'deposits' && <DepositManagement />}
-          {tab === 'trading' && <TradingManagement />}
-          {tab === 'balance' && <BalanceManagement />}
-          {tab === 'settings' && <SettingsManagement account={account} />}
-        </main>
-      </>
-    );
-  }
-
-  return (
-    <div className="ad">
-      <style>{CSS}</style>
-      {body}
+const Sidebar = ({ activePage, setActivePage, onLogout, sidebarOpen }) => (
+  <div style={{ ...styles.sidebar, left: sidebarOpen ? 0 : undefined }}>
+    <div className="sidebar-header">
+      <div className="sidebar-brand">◆ ASCEND CAPITAL</div>
+      <div className="admin-badge">🔐 ADMIN</div>
     </div>
-  );
-}
 
-const CSS = `
-.ad{--bg:#0b100e;--card:#111815;--line:#1f2a24;--text:#e8efe9;--muted:#8a9a90;--accent:#b5ee6a;--bad:#ff8a7a;--warn:#f2c46d;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.45 'DM Sans',system-ui,sans-serif}
-.ad *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-.ad h2,.ad h3{font-family:Manrope,'DM Sans',sans-serif;margin:0}
-.ad h2{font-size:20px}.ad h3{font-size:15px;margin:18px 0 8px}
-.ad-logo{max-height:40px;width:auto;object-fit:contain}
-.ad-hamburger{display:none;background:none;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:8px;margin:-8px}
-.ad-top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card);position:relative}
-.ad-brand{font:600 18px Manrope,sans-serif;display:flex;align-items:center;white-space:nowrap}.ad-brand b{color:var(--accent)}.ad-brand span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:8px}
-.ad-brand-full{display:inline}
-.ad-nav{display:flex;gap:4px;flex:1;flex-wrap:wrap;min-width:100%}
-.ad-nav button{background:none;border:0;color:var(--muted);padding:8px 12px;border-radius:6px;cursor:pointer;font:600 12px inherit;white-space:nowrap;min-height:44px}
-.ad-nav button.on{background:#1a241f;color:var(--text)}
-.ad-who{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
-.ad-main{max-width:1200px;margin:0 auto;padding:16px}
-.ad-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.ad-row.grow{flex:1;margin:0}.ad-row.end{justify-content:flex-end}
-.ad-search-row{gap:8px}
-.ad-search-row input{flex:1;min-width:150px}
-.ad-search-row button{flex:0}
-.ad input,.ad select,.ad textarea{background:#0e1512;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;font:inherit;width:100%;min-height:44px}
-.ad-row input,.ad-row select{width:auto}
-.ad label{display:block;margin:12px 0 6px;color:var(--muted);font-size:12px;font-weight:500}
-.ad-btn{background:var(--accent);color:#0b100e;border:0;border-radius:6px;padding:9px 14px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
-.ad-btn:disabled{opacity:.5;cursor:default}.ad-btn.sm{padding:8px 12px;min-height:40px;font-size:11px}
-.ad-btn.xs{padding:4px 6px;min-height:32px;font-size:10px}
-.ad-btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
-.ad-btn.danger{background:var(--bad)}
-.ad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:16px 0}
-.ad-stat-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
-.ad-stat-label{color:var(--muted);font-size:11px;margin:0 0 4px;text-transform:uppercase}
-.ad-stat-value{font:700 20px Manrope,sans-serif;margin:0;color:var(--accent)}
-.ad-stat-sub{color:var(--muted);font-size:11px;margin:4px 0 0}
-.ad-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);margin:12px 0;-webkit-overflow-scrolling:touch}
-.ad-table{width:100%;border-collapse:collapse;min-width:500px}
-.ad-table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;padding:10px 8px;border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.5px}
-.ad-table td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
-.ad-table tr:last-child td{border-bottom:0}
-.ad-table small{display:block;color:var(--muted);margin-top:2px;font-size:11px}
-.ad-table .num{white-space:nowrap;font-variant-numeric:tabular-nums}
-.ad-account-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
-.ad-account-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-.ad-account-name{font:600 15px 'DM Sans',sans-serif}
-.ad-account-card-body{margin-bottom:12px}
-.ad-account-card-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px}
-.ad-account-card-row .label{color:var(--muted);font-weight:500}
-.ad-account-card-row .value{text-align:right}
-.ad-account-card-actions{display:flex;gap:8px}
-.ad-account-card-actions .ad-btn{flex:1;min-height:40px}
-.ad-accounts-desktop{display:block}
-.ad-accounts-mobile{display:none}
-.ad-actions-compact{display:flex;gap:4px}
-.ad-empty{color:var(--muted);padding:20px;text-align:center;font-size:13px}
-.ad-muted{color:var(--muted)}
-.ad-error{color:var(--bad);margin:8px 0;font-size:13px}
-.ad-notice{background:#16221b;border:1px solid var(--line);border-radius:8px;padding:10px;margin:10px 0;font-size:13px}.ad-notice.bad{color:var(--bad);border-color:#4a2a26;background:#201513}
-.ad-login{min-height:100vh;display:grid;place-items:center;padding:16px}
-.ad-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
-.ad-form{max-width:420px;width:100%}.ad-form .ad-btn{margin-top:16px;width:100%}.ad-form h2{margin:12px 0 8px;font-size:18px}
-.ad-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;justify-content:center;align-items:center;z-index:50;padding:16px;overflow-y:auto}
-.ad-modal{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(440px,95vw);margin:auto}
-.ad-modal h3{margin:0 0 8px;font-size:16px}.ad-modal .ad-row{margin:12px 0 0}
-.ad-detail-row{display:grid;grid-template-columns:120px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:flex-start}
-.ad-detail-label{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
-.ad-detail-value{color:var(--text);font-size:13px}
-.ad-actions{display:flex;gap:6px;flex-wrap:wrap}
-.ad-badge{display:inline-block;background:var(--line);color:var(--text);padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase}
-.ad-badge.active{background:#1a3a2e;color:var(--accent)}
-.ad-badge.held{background:#3a2a20;color:var(--bad)}
-.ad-badge.admin{background:#1a2a3a;color:#5bc0ff}
-.ad-badge.member{background:#1a3a1a;color:#90ee90}
+    <div className="sidebar-nav">
+      <NavItem icon="📊" label="Dashboard" active={activePage === 'dashboard'} onClick={() => setActivePage('dashboard')} />
+      <NavItem icon="📥" label="Pending Deposits" active={activePage === 'deposits'} onClick={() => setActivePage('deposits')} />
+      <NavItem icon="👥" label="Clients" active={activePage === 'clients'} onClick={() => setActivePage('clients')} />
+      <NavItem icon="💱" label="Transactions" active={activePage === 'transactions'} onClick={() => setActivePage('transactions')} />
+      <NavItem icon="⚙️" label="Manage Accounts" active={activePage === 'adjust'} onClick={() => setActivePage('adjust')} />
+    </div>
 
-@media (max-width:768px){
-  .ad-hamburger{display:block}
-  .ad-brand-full{display:none}
-  .ad-top{gap:12px;padding:10px 12px}
-  .ad-top nav{display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border-bottom:1px solid var(--line);flex-direction:column;padding:8px;gap:0;min-width:unset}
-  .ad-top nav.open{display:flex}
-  .ad-who{font-size:11px;gap:6px;order:3;width:100%}
-  .ad-brand{font-size:16px;order:2;flex:1}
-  .ad-nav button{width:100%;text-align:left;padding:10px 8px}
-  .ad-main{padding:12px}
-  .ad h2{font-size:18px}
-  .ad h3{font-size:14px;margin:16px 0 6px}
-  .ad-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0}
-  .ad-stat-card{padding:12px}
-  .ad-stat-value{font-size:18px}
-  .ad-stat-label{font-size:10px}
-  .ad-row{gap:8px;margin-bottom:12px}
-  .ad input,.ad select,.ad textarea{padding:12px;font-size:16px;min-height:48px}
-  .ad-btn{padding:10px 14px;min-height:48px;font-size:12px}
-  .ad-btn.sm{min-height:40px;padding:8px 10px;font-size:11px}
-  .ad-accounts-desktop{display:none}
-  .ad-accounts-mobile{display:block}
-  .ad-card{padding:16px}
-  .ad-detail-row{grid-template-columns:90px 1fr;gap:10px;padding:8px 0}
-  .ad-detail-label{font-size:10px}
-  .ad-detail-value{font-size:12px}
-  .ad-notice{padding:10px;font-size:12px;margin:8px 0}
-  .ad-error{font-size:12px;margin:6px 0}
-  .ad-empty{padding:16px;font-size:12px}
-  .ad-scroll{margin:10px 0}
-  .ad-modal{width:95vw;padding:16px}
-  .ad-modal h3{font-size:15px;margin:0 0 6px}
-  .ad-actions{gap:4px}
-  .ad-badge{padding:2px 6px;font-size:9px}
-  label{margin:12px 0 6px !important}
-}
+    <div className="sidebar-footer">
+      <button onClick={onLogout}>Logout</button>
+    </div>
+  </div>
+);
 
-@media (max-width:480px){
-  .ad-hamburger{font-size:20px;padding:6px}
-  .ad-top{padding:8px}
-  .ad-brand{font-size:14px;order:2;margin-left:auto;margin-right:auto;flex:1}
-  .ad-who{order:3;width:100%;font-size:10px;justify-content:space-between}
-  .ad-main{padding:10px}
-  .ad h2{font-size:16px;margin-bottom:12px}
-  .ad h3{font-size:13px;margin:12px 0 6px}
-  .ad-grid{grid-template-columns:1fr;gap:8px}
-  .ad-stat-card{padding:10px}
-  .ad-stat-value{font-size:16px}
-  .ad-stat-label{font-size:9px}
-  .ad-row{gap:6px;margin-bottom:10px}
-  .ad-row.ad-search-row input{min-width:0}
-  .ad input,.ad select,.ad textarea{padding:10px;font-size:16px;min-height:44px}
-  .ad-btn{padding:8px 10px;min-height:44px;font-size:11px}
-  .ad-btn.sm{min-height:36px;padding:6px 8px;font-size:10px}
-  .ad-btn.xs{min-height:28px;padding:3px 5px;font-size:9px}
-  .ad-form{max-width:100%}
-  .ad-card{padding:12px;border-radius:8px}
-  .ad-account-card{padding:12px}
-  .ad-account-card-header{margin-bottom:10px;padding-bottom:10px}
-  .ad-account-name{font-size:13px}
-  .ad-account-card-body{margin-bottom:10px}
-  .ad-account-card-row{font-size:12px;padding:4px 0}
-  .ad-account-card-actions{gap:6px}
-  .ad-account-card-actions .ad-btn{min-height:36px;font-size:10px}
-  .ad-login{padding:12px}
-  .ad-modal{width:95vw;padding:14px;border-radius:8px}
-  .ad-modal h3{font-size:14px;margin:0 0 6px}
-  .ad-detail-row{grid-template-columns:70px 1fr;gap:8px;padding:6px 0;font-size:11px}
-  .ad-detail-label{font-size:9px}
-  .ad-detail-value{font-size:11px}
-  .ad-table{font-size:10px}
-  .ad-table th{padding:6px 4px;font-size:8px}
-  .ad-table td{padding:6px 4px;font-size:10px}
-  .ad-table small{font-size:8px}
-  .ad-notice{padding:8px;margin:6px 0;font-size:11px}
-  .ad-error{font-size:11px;margin:4px 0}
-  .ad-empty{padding:12px;font-size:10px}
-  .ad-muted{font-size:11px}
-  label{margin:10px 0 4px !important;font-size:12px}
-  section{padding:0}
-}
+const NavItem = ({ icon, label, active, onClick }) => (
+  <div
+    onClick={onClick}
+    style={{
+      padding: '14px 20px',
+      margin: '4px 10px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      fontSize: '13px',
+      fontWeight: '500',
+      color: active ? '#d4af37' : '#9ca3af',
+      background: active ? 'rgba(212, 175, 55, 0.15)' : 'transparent',
+      borderLeft: active ? '3px solid #d4af37' : '3px solid transparent',
+      paddingLeft: active ? '17px' : '20px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      transition: 'all 0.2s',
+    }}
+  >
+    <span style={{ fontSize: '16px', width: '20px', textAlign: 'center' }}>{icon}</span>
+    <span>{label}</span>
+  </div>
+);
 
-@media (max-width:360px){
-  .ad-hamburger{font-size:18px}
-  .ad-brand{font-size:12px}
-  .ad-brand span{font-size:8px}
-  .ad h2{font-size:14px}
-  .ad h3{font-size:12px}
-  .ad-stat-value{font-size:14px}
-  .ad-stat-label{font-size:8px}
-  .ad-btn{padding:6px 8px;min-height:40px;font-size:10px}
-  .ad-nav button{font-size:11px;padding:8px 6px;min-height:40px}
-  .ad input,.ad select,.ad textarea{padding:8px;min-height:40px;font-size:15px}
-}
+const Navbar = ({ pageTitle, schedulerRunning, tradestoday, onMenuClick }) => (
+  <div style={styles.navbar}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+      <button onClick={onMenuClick} style={{ display: 'none', background: 'none', border: 'none', color: '#e8e8e8', fontSize: '24px', cursor: 'pointer', padding: '8px' }} id="menuBtn">☰</button>
+      <div style={{ fontSize: '14px', fontWeight: '600', color: '#e8e8e8' }}>{pageTitle}</div>
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', padding: '6px 12px', borderRadius: '20px', border: '1px solid rgba(212, 175, 55, 0.3)', color: '#9ca3af', background: 'rgba(212, 175, 55, 0.05)' }}>
+        <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: schedulerRunning ? '#4ade80' : 'rgba(212, 175, 55, 0.4)', boxShadow: schedulerRunning ? '0 0 6px #4ade80' : 'none' }} />
+        <span>{schedulerRunning ? `Scheduler: running (${tradestoday} trades today)` : 'Scheduler: not running'}</span>
+      </span>
+    </div>
+  </div>
+);
+
+const Card = ({ title, subtitle, children }) => (
+  <div className="card">
+    {title && <div className="card-title">{title}</div>}
+    {subtitle && <div className="card-subtitle">{subtitle}</div>}
+    {children}
+  </div>
+);
+
+const StatCard = ({ label, value, color }) => (
+  <div className="stat-card">
+    <div className="stat-label">{label}</div>
+    <div className="stat-value" style={color ? { color } : {}}>{value}</div>
+  </div>
+);
+
+const Alert = ({ type, message }) => (
+  <div className={`alert alert-${type} show`}>
+    {type === 'success' ? '✓ ' : '✗ '}{message}
+  </div>
+);
+
+const Modal = ({ title, children, onClose, onConfirm, confirmText, confirmClass }) => (
+  <div className="modal-overlay show" onClick={onClose}>
+    <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <h3>{title}</h3>
+      {children}
+      <div className="modal-btns">
+        <button className="btn btn-sm" style={{ background: 'rgba(107,114,128,0.2)', color: '#d1d5db' }} onClick={onClose}>Cancel</button>
+        <button className={`btn btn-sm ${confirmClass || 'btn-primary'}`} onClick={onConfirm}>{confirmText}</button>
+      </div>
+    </div>
+  </div>
+);
+
+const getPageTitle = (page) => {
+  const titles = {
+    dashboard: 'Dashboard',
+    deposits: 'Pending Deposits',
+    clients: 'Clients',
+    transactions: 'Transactions',
+    adjust: 'Manage Accounts'
+  };
+  return titles[page] || 'Dashboard';
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STYLES
+// ═══════════════════════════════════════════════════════════════════════════
+
+const globalStyles = `
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary-gold: #d4af37;
+    --gold-bright: #f0d96e;
+    --dark-bg: #0a0e27;
+    --card-bg: #1a1f3a;
+    --field-bg: #10142c;
+    --accent-green: #4ade80;
+    --accent-red: #f87171;
+    --text-light: #e8e8e8;
+    --text-muted: #9ca3af;
+    --border-subtle: rgba(212, 175, 55, 0.15);
+  }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--dark-bg);
+    color: var(--text-light);
+  }
+
+  .page-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .page-subtitle {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 24px;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 30px;
+  }
+
+  .stat-card {
+    background: rgba(30,41,59,0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+    transition: all 0.2s;
+  }
+
+  .stat-card:hover {
+    border-color: rgba(212, 175, 55, 0.3);
+    background: rgba(30,41,59,0.8);
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--primary-gold), var(--gold-bright));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .card {
+    background: rgba(30,41,59,0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+    margin-bottom: 20px;
+    transition: all 0.2s;
+  }
+
+  .card:hover {
+    border-color: rgba(212, 175, 55, 0.25);
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-light);
+    margin-bottom: 4px;
+  }
+
+  .card-subtitle {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 16px;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(15,21,25,0.6);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-light);
+    border-radius: 8px;
+    font-size: 13px;
+    transition: all 0.2s;
+  }
+
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-gold);
+    background: rgba(15,21,25,0.8);
+    box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
+  }
+
+  .form-group textarea {
+    resize: vertical;
+    height: 80px;
+  }
+
+  .form-wrap {
+    max-width: 500px;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--primary-gold), var(--gold-bright));
+    color: var(--dark-bg);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+  }
+
+  .btn-sm {
+    padding: 8px 14px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .btn-green {
+    background: rgba(74,222,128,0.2);
+    color: #86efac;
+    border: 1px solid rgba(74,222,128,0.3);
+  }
+
+  .btn-green:hover {
+    background: rgba(74,222,128,0.3);
+  }
+
+  .btn-danger {
+    background: rgba(248,113,113,0.2);
+    color: #fca5a5;
+    border: 1px solid rgba(248,113,113,0.3);
+  }
+
+  .btn-danger:hover {
+    background: rgba(248,113,113,0.3);
+  }
+
+  .alert {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    display: none;
+    animation: slideIn 0.25s ease;
+  }
+
+  .alert.show {
+    display: block;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .alert-success {
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.3);
+    color: #86efac;
+  }
+
+  .alert-error {
+    background: rgba(248,113,113,0.1);
+    border: 1px solid rgba(248,113,113,0.3);
+    color: #fca5a5;
+  }
+
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .tbl th {
+    padding: 12px;
+    text-align: left;
+    color: var(--text-muted);
+    background: rgba(212, 175, 55, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
+  .tbl td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(148,163,184,0.05);
+  }
+
+  .tbl tr:hover {
+    background: rgba(212, 175, 55, 0.06);
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .badge-success {
+    background: rgba(74,222,128,0.2);
+    color: #86efac;
+  }
+
+  .badge-pending {
+    background: rgba(251,146,60,0.2);
+    color: #fdba74;
+  }
+
+  .badge-danger {
+    background: rgba(248,113,113,0.2);
+    color: #fca5a5;
+  }
+
+  .badge-info {
+    background: rgba(212, 175, 55, 0.2);
+    color: var(--primary-gold);
+  }
+
+  .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6b7280;
+  }
+
+  .filter-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .filter-bar input, .filter-bar select {
+    background: rgba(15,21,25,0.6);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-light);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    transition: all 0.2s;
+  }
+
+  .filter-bar input:focus, .filter-bar select:focus {
+    border-color: var(--primary-gold);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.1);
+  }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .modal-overlay.show {
+    display: flex;
+  }
+
+  .modal {
+    background: rgba(30,41,59,0.95);
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    border-radius: 12px;
+    padding: 28px;
+    width: 480px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    backdrop-filter: blur(10px);
+  }
+
+  .modal h3 {
+    background: linear-gradient(135deg, var(--primary-gold), var(--gold-bright));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 18px;
+    font-size: 15px;
+  }
+
+  .modal-btns {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+    justify-content: flex-end;
+  }
+
+  .tab-group {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .tab-btn {
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+  }
+
+  .tab-btn:hover {
+    color: var(--gold-bright);
+  }
+
+  .tab-btn.active {
+    color: var(--primary-gold);
+    border-bottom-color: var(--primary-gold);
+  }
+
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 999;
+  }
+
+  @media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  }
+
+  @media (max-width: 480px) {
+    .page-title { font-size: 20px; }
+    .stats-grid { grid-template-columns: 1fr; }
+    .stat-value { font-size: 18px; }
+    .modal { width: 95vw; padding: 16px; }
+  }
 `;
+
+const styles = {
+  container: {
+    display: 'flex',
+    height: '100vh',
+    overflow: 'hidden',
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    background: '#0a0e27',
+    color: '#e8e8e8'
+  },
+  sidebar: {
+    width: '260px',
+    background: 'linear-gradient(180deg, #151a27 0%, #0f1419 100%)',
+    borderRight: '1px solid rgba(212, 175, 55, 0.15)',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '2px 0 8px rgba(0,0,0,0.3)',
+    overflowY: 'auto'
+  },
+  mainContainer: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden'
+  },
+  navbar: {
+    background: 'linear-gradient(135deg, #151a27 0%, #0f1419 100%)',
+    padding: '16px 40px',
+    borderBottom: '1px solid rgba(212, 175, 55, 0.15)',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+  },
+  content: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '30px 40px'
+  }
+};
+
+export default AdminDashboard;
