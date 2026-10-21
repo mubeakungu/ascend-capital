@@ -1993,9 +1993,6 @@ function App() {
               </div>
             </article>
           </section>
-
-          {/* ✅ ADD: Comprehensive Wallet Breakdown - All Earnings */}
-          {account && comprehensiveWallet && (
             <section style={{ background: 'rgba(212, 175, 55, 0.08)', border: '2px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '24px', marginBottom: '20px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <div style={{ fontSize: '12px', color: '#D4AF37', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px', marginBottom: '8px' }}>💼 COMPLETE WALLET BREAKDOWN</div>
@@ -2110,9 +2107,6 @@ function App() {
                   </div>
                 </div>
               </div>
-            </section>
-          )}
-
           {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
 
           {account && totalDeposits > 0 && (
