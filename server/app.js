@@ -1308,6 +1308,31 @@ export async function createApp() {
     }
   });
 
+  // ✅ NEW: DEBUG ENDPOINT - See raw referral data for troubleshooting
+  app.get('/api/referrals/debug', requireAccount, async (request, response) => {
+    try {
+      const rawSignups = await sql`
+        SELECT rs.id, rs.referrer_id, rs.referred_account_id, a.name, a.email, rs.signed_up_at
+        FROM referral_signups rs
+        JOIN accounts a ON a.id = rs.referred_account_id
+        WHERE rs.referrer_id = ${request.account.id}
+      `;
+
+      const countTest = await sql`
+        SELECT COUNT(*) AS total FROM referral_signups
+        WHERE referrer_id = ${request.account.id}
+      `;
+
+      return response.json({
+        directCount: countTest[0]?.total || 0,
+        referrals: rawSignups,
+      });
+    } catch (error) {
+      console.error('Error in debug endpoint:', error);
+      return response.status(500).json({ error: 'Debug error.' });
+    }
+  });
+
   app.get('/api/referrals/list', requireAccount, async (request, response) => {
     const referrals = await sql`
       SELECT
