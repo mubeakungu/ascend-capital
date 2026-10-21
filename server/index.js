@@ -1831,6 +1831,46 @@ export async function createApp() {
   });
 
   // ✅ NEW: COMPREHENSIVE WALLET - All earnings aggregated
+  // ✅ NEW: Get all transaction history for member (audit trail)
+  app.get('/api/wallet/transactions', requireAccount, async (request, response) => {
+    try {
+      const transactions = await sql`
+        SELECT id, type, amount_cents, reference, status, created_at
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND status = 'approved'
+        ORDER BY created_at DESC
+        LIMIT 500
+      `;
+
+      const formatted = transactions.map(tx => ({
+        id: tx.id,
+        type: tx.type
+          .replace('_', ' ')
+          .replace(/\b\w/g, l => l.toUpperCase())
+          .replace('Trading Profit', 'Trading Profit')
+          .replace('Tier Reward', 'Tier Reward')
+          .replace('Tier Salary', 'Weekly Salary')
+          .replace('Referral Commission', 'Referral Bonus'),
+        amount: tx.amount_cents / 100,
+        reference: tx.reference,
+        status: tx.status,
+        date: new Date(tx.created_at).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }),
+      }));
+
+      return response.json({
+        ok: true,
+        transactions: formatted
+      });
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      return response.status(500).json({ error: 'Failed to fetch transactions' });
+    }
+  });
+
   app.get('/api/wallet/comprehensive', requireAccount, async (request, response) => {
     try {
       // Get all transaction-based earnings (deposits, withdrawals, and all earning types)
