@@ -1569,6 +1569,21 @@ export async function createApp() {
         return response.status(400).json({ error: 'Minimum transaction amount is $50.' });
       }
 
+      // ✅ Check Prime Hour time window (3:45 AM - 4:15 AM EAT/UTC+3)
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+      const currentMinutes = hours * 60 + minutes;
+      const primeStart = 3 * 60 + 45;  // 3:45 AM = 225 minutes
+      const primeEnd = 4 * 60 + 15;    // 4:15 AM = 255 minutes
+      const isPrimeHourActive = currentMinutes >= primeStart && currentMinutes < primeEnd;
+
+      if (!isPrimeHourActive) {
+        return response.status(403).json({
+          error: 'Prime Hour is only available from 3:45 AM to 4:15 AM EAT. Check back during this window.'
+        });
+      }
+
       // Get referral stats for qualification check
       const directCount = await getDirectReferralCount(sql, request.account.id);
       const tradingDays = await sql`
@@ -1579,17 +1594,29 @@ export async function createApp() {
 
       const tradingDaysCount = tradingDays[0]?.days || 0;
 
-      // Prime Hour qualification: 1+ direct referral AND 3+ days trading
-      if (type === 'deposit') {
-        if (directCount < 1) {
-          return response.status(403).json({
-            error: 'You must have at least 1 referral to access Prime Hour deposits.'
-          });
-        }
+      // ✅ Check if referral has DEPOSITED (not just signed up)
+      const referralDeposits = await sql`
+        SELECT COUNT(DISTINCT rs.referred_account_id) AS count
+        FROM referral_signups rs
+        JOIN transactions t ON t.account_id = rs.referred_account_id
+        WHERE rs.referrer_id = ${request.account.id}
+        AND t.type = 'deposit'
+        AND t.status = 'approved'
+      `;
 
+      const hasReferralWithDeposit = referralDeposits[0]?.count > 0;
+
+      // Prime Hour qualification: 3+ days trading AND 1+ referral who DEPOSITED
+      if (type === 'deposit') {
         if (tradingDaysCount < 3) {
           return response.status(403).json({
             error: 'You must have traded for at least 3 days on Ascend to access Prime Hour.'
+          });
+        }
+
+        if (!hasReferralWithDeposit) {
+          return response.status(403).json({
+            error: 'You must have at least 1 referral who has made a deposit to access Prime Hour deposits.'
           });
         }
       }
