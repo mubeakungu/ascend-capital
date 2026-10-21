@@ -1827,6 +1827,98 @@ export async function createApp() {
     });
   });
 
+  // ✅ NEW: COMPREHENSIVE WALLET - All earnings aggregated
+  app.get('/api/wallet/comprehensive', requireAccount, async (request, response) => {
+    try {
+      // Get all transaction-based earnings
+      const txEarnings = await sql`
+        SELECT
+          type,
+          COUNT(*) AS count,
+          COALESCE(SUM(amount_cents), 0) AS total_cents
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND status = 'approved'
+          AND type IN ('tier_reward', 'trading_profit', 'tier_salary', 'referral_commission')
+        GROUP BY type
+      `;
+
+      // Get referral commission details
+      const refCommissions = await sql`
+        SELECT COALESCE(SUM(commission_cents), 0) AS total_cents
+        FROM referral_commissions
+        WHERE referrer_id = ${request.account.id}
+      `;
+
+      // Get deposits
+      const deposits = await sql`
+        SELECT COALESCE(SUM(amount_cents), 0) AS total_cents
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+      `;
+
+      // Get withdrawals
+      const withdrawals = await sql`
+        SELECT COALESCE(SUM(amount_cents), 0) AS total_cents
+        FROM transactions
+        WHERE account_id = ${request.account.id} AND type = 'withdrawal' AND status = 'approved'
+      `;
+
+      // Calculate earnings by type
+      const earningsByType = {};
+      for (const row of txEarnings) {
+        earningsByType[row.type] = {
+          count: row.count,
+          amount: row.total_cents / 100,
+        };
+      }
+
+      // Add referral commission from separate table
+      const refCommissionAmount = refCommissions[0]?.total_cents || 0;
+      earningsByType['referral_commission'] = {
+        count: earningsByType['referral_commission']?.count || 0,
+        amount: (earningsByType['referral_commission']?.amount || 0) + (refCommissionAmount / 100),
+      };
+
+      // Calculate totals
+      const totalDeposits = (deposits[0]?.total_cents || 0) / 100;
+      const totalWithdrawals = (withdrawals[0]?.total_cents || 0) / 100;
+
+      const totalEarnings = Object.values(earningsByType).reduce((sum, type) => sum + type.amount, 0);
+      const totalIncome = totalDeposits + totalEarnings;
+      const walletBalance = totalIncome - totalWithdrawals;
+
+      return response.json({
+        wallet: {
+          totalIncome,
+          totalDeposits,
+          totalWithdrawals,
+          walletBalance,
+          availableToWithdraw: Math.max(0, walletBalance),
+        },
+        earnings: {
+          tradingProfit: earningsByType['trading_profit'] || { count: 0, amount: 0 },
+          tierRewards: earningsByType['tier_reward'] || { count: 0, amount: 0 },
+          weeklySalary: earningsByType['tier_salary'] || { count: 0, amount: 0 },
+          referralCommissions: earningsByType['referral_commission'] || { count: 0, amount: 0 },
+          totalEarnings,
+        },
+        breakdown: {
+          'Trading Profit': earningsByType['trading_profit']?.amount || 0,
+          'Tier Rewards': earningsByType['tier_reward']?.amount || 0,
+          'Weekly Salary': earningsByType['tier_salary']?.amount || 0,
+          'Referral Commissions': earningsByType['referral_commission']?.amount || 0,
+          'Total Earnings': totalEarnings,
+          'Total Deposits': totalDeposits,
+          'Total Withdrawals': totalWithdrawals,
+          'Net Wallet': walletBalance,
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching comprehensive wallet:', error);
+      return response.status(500).json({ error: 'Failed to fetch wallet data.' });
+    }
+  });
+
   // =========================================================================
   // ADMIN ENDPOINTS
   // =========================================================================
