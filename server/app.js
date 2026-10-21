@@ -1796,6 +1796,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIXED: /api/transactions GET endpoint with corrected balance calculation
   app.get('/api/transactions', requireAccount, async (request, response) => {
     const rows = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
@@ -1810,32 +1811,50 @@ export async function createApp() {
     const lastDepositTime = accountRow[0]?.last_deposit_time || null;
     const earningsStatus = calculateEarningsStatus(lastDepositTime);
 
-    // ✅ FIX: Get the actual approved balance (includes ALL earnings)
+    // ✅ FIX: Get ONLY the original deposits (type='deposit', not earnings)
+    const depositRow = await sql`
+      SELECT COALESCE(SUM(amount_cents), 0) AS total_deposits
+      FROM transactions
+      WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+    `;
+    const totalDepositsCents = depositRow[0]?.total_deposits || 0;
+    const totalDeposits = totalDepositsCents / 100;
+
+    // ✅ Get the actual approved balance (includes ALL earnings)
     const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
 
-    // ✅ FIX: Calculate dailyIncome based on ORIGINAL DEPOSIT only, not total balance
+    // ✅ FIX: Match ORIGINAL DEPOSIT amount to DEPOSIT_PLANS (not total balance)
     let dailyIncome = 0;
     if (earningsStatus.earningsActive && lastDepositTime) {
-      // Get original deposit amount (not including earnings)
-      const depositRow = await sql`
-        SELECT COALESCE(SUM(amount_cents), 0) AS total
-        FROM transactions
-        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
-      `;
-      const originalDepositAmount = (depositRow[0]?.total || 0) / 100;
-
-      // Match ORIGINAL DEPOSIT to deposit plans, not total balance
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === originalDepositAmount);
+      // This now correctly matches the original deposit amount, not the total balance
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
     return response.json({
+      // Total wallet balance (deposits + earnings - withdrawals)
       balance: approvedBalance,
+      
+      // Original deposits only (for "Total deposits" / "Active investments" display)
+      totalDeposits: totalDeposits,
+      
+      // Available to withdraw
+      availableBalance: approvedBalance,
+      
+      // Pending withdrawals
       pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
+      
+      // Transaction list
       transactions: rows.map((row) => transactionView(row)),
+      
+      // Deposit tracking
       lastDepositTime,
+      
+      // Earnings activation status
       earningsActive: earningsStatus.earningsActive,
       earningsStartTime: earningsStatus.earningsStartTime,
+      
+      // Daily income based on ORIGINAL deposit (now correctly calculated!)
       dailyIncome,
     });
   });
