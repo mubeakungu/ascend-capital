@@ -102,6 +102,385 @@ function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText
 }
 
 // ============================================================================
+// MEMBER CONTROL PANEL (UNIFIED ADMIN TOOL)
+// ============================================================================
+
+function MemberControlPanel() {
+  const [searchEmail, setSearchEmail] = useState('');
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [memberData, setMemberData] = useState(null);
+  const [walletData, setWalletData] = useState(null);
+  const [referrals, setReferrals] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  // EDIT STATES
+  const [editTrade, setEditTrade] = useState(false);
+  const [tradeAmount, setTradeAmount] = useState('');
+  const [tradeDate, setTradeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [tradeType, setTradeType] = useState('add');
+
+  const [editDeposit, setEditDeposit] = useState(false);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [editBalance, setEditBalance] = useState(false);
+  const [balanceAction, setBalanceAction] = useState('adjust');
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [balanceReason, setBalanceReason] = useState('');
+
+  const [busy, setBusy] = useState(false);
+
+  async function searchMember() {
+    if (!searchEmail.trim()) {
+      setNotice({ text: 'Enter email to search', bad: true });
+      return;
+    }
+
+    setLoading(true);
+    setNotice(null);
+    try {
+      const accountsRes = await api('/admin/accounts');
+      const member = accountsRes.accounts.find(
+        a => a.email.toLowerCase() === searchEmail.toLowerCase() ||
+             a.id.toLowerCase() === searchEmail.toLowerCase() ||
+             a.name.toLowerCase().includes(searchEmail.toLowerCase())
+      );
+
+      if (!member) {
+        setNotice({ text: 'Member not found', bad: true });
+        setLoading(false);
+        return;
+      }
+
+      setSelectedMember(member);
+      setMemberData(member);
+
+      try {
+        setWalletData({
+          totalDeposits: member.totalDeposits,
+          balance: member.balance,
+          totalEarnings: member.balance - member.totalDeposits,
+          availableToWithdraw: member.balance,
+        });
+      } catch (err) {
+        console.error('Wallet fetch error:', err);
+      }
+
+      try {
+        const refRes = await api(`/admin/referrals/${member.id}/list`);
+        setReferrals(refRes.referrals || []);
+      } catch (err) {
+        console.error('Referral fetch error:', err);
+        setReferrals([]);
+      }
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function addTrade() {
+    if (!tradeAmount) {
+      setNotice({ text: 'Enter trade amount', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const amount = parseFloat(tradeAmount);
+      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
+
+      if (tradeType === 'add') {
+        await api('/admin/trading/add-trade', {
+          method: 'POST',
+          body: { accountId: selectedMember.id, profitAmount: amount, profitDate: tradeDate },
+        });
+        setNotice({ text: `✅ Added $${amount.toFixed(2)} trade` });
+      } else {
+        await api('/admin/trading/deduct-trade', {
+          method: 'POST',
+          body: { accountId: selectedMember.id, deductAmount: amount, deductDate: tradeDate },
+        });
+        setNotice({ text: `✅ Deducted $${amount.toFixed(2)} trade` });
+      }
+
+      setEditTrade(false);
+      setTradeAmount('');
+      setTradeDate(new Date().toISOString().split('T')[0]);
+      await searchMember();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  async function addDeposit() {
+    if (!depositAmount) {
+      setNotice({ text: 'Enter deposit amount', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const amount = parseFloat(depositAmount);
+      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
+
+      await api('/admin/deposits/add', {
+        method: 'POST',
+        body: { accountId: selectedMember.id, depositAmount: amount, depositDate },
+      });
+      setNotice({ text: `✅ Added $${amount.toFixed(2)} deposit` });
+
+      setEditDeposit(false);
+      setDepositAmount('');
+      setDepositDate(new Date().toISOString().split('T')[0]);
+      await searchMember();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  async function adjustBalance() {
+    if (!balanceAmount || !balanceReason) {
+      setNotice({ text: 'Amount and reason required', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const amount = parseFloat(balanceAmount);
+      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
+
+      await api(`/admin/accounts/${selectedMember.id}/balance`, {
+        method: 'POST',
+        body: { action: balanceAction, amountCents: Math.round(amount * 100), reason: balanceReason },
+      });
+      setNotice({ text: `✅ Balance ${balanceAction}ed by $${amount.toFixed(2)}` });
+
+      setEditBalance(false);
+      setBalanceAmount('');
+      setBalanceReason('');
+      await searchMember();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <h2>👤 Member Control Panel</h2>
+      <p style={{ color: 'var(--muted)', marginBottom: '16px' }}>Search, view, and manage any member's account in one place</p>
+
+      <div className="ad-card" style={{ marginBottom: '20px' }}>
+        <h3>Search Member</h3>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <input
+            type="text"
+            placeholder="Enter email, ID, or name..."
+            value={searchEmail}
+            onChange={(e) => setSearchEmail(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && searchMember()}
+            disabled={loading}
+            style={{ flex: 1 }}
+          />
+          <button onClick={searchMember} disabled={loading} className="ad-btn" style={{ flex: 0 }}>
+            {loading ? 'Searching...' : 'Search'}
+          </button>
+        </div>
+      </div>
+
+      {notice && <Notice notice={notice} />}
+
+      {selectedMember && memberData && walletData && (
+        <>
+          <div className="ad-card">
+            <h3>Member Information</h3>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Name</span>
+              <span className="ad-detail-value">{memberData.name}</span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Email</span>
+              <span className="ad-detail-value">{memberData.email}</span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Status</span>
+              <span className="ad-detail-value"><Badge value={memberData.status} /></span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Member Since</span>
+              <span className="ad-detail-value">{new Date(memberData.createdAt).toLocaleDateString()}</span>
+            </div>
+          </div>
+
+          <div className="ad-grid">
+            <StatCard label="Total Deposits" value={money(walletData.totalDeposits)} />
+            <StatCard label="Earnings" value={money(walletData.totalEarnings)} />
+            <StatCard label="Total Balance" value={money(walletData.balance)} subtext="(deposits + earnings)" />
+          </div>
+
+          <div className="ad-grid">
+            {/* ADD/DEDUCT TRADE */}
+            <div className="ad-card">
+              <h3>Manage Trades</h3>
+              {!editTrade ? (
+                <button onClick={() => setEditTrade(true)} className="ad-btn" style={{ width: '100%' }}>
+                  + Add/Deduct Trade
+                </button>
+              ) : (
+                <form>
+                  <label>Type</label>
+                  <select value={tradeType} onChange={(e) => setTradeType(e.target.value)}>
+                    <option value="add">Add Trade Profit</option>
+                    <option value="deduct">Deduct Trade Loss</option>
+                  </select>
+                  <label>Amount (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tradeAmount}
+                    onChange={(e) => setTradeAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label>Trade Date</label>
+                  <input
+                    type="date"
+                    value={tradeDate}
+                    onChange={(e) => setTradeDate(e.target.value)}
+                  />
+                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
+                    <button type="button" onClick={() => setEditTrade(false)} className="ad-btn ghost">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={addTrade} disabled={busy} className="ad-btn">
+                      {busy ? 'Processing...' : 'Save Trade'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* ADD DEPOSIT */}
+            <div className="ad-card">
+              <h3>Add Deposit</h3>
+              {!editDeposit ? (
+                <button onClick={() => setEditDeposit(true)} className="ad-btn" style={{ width: '100%' }}>
+                  + Add Deposit
+                </button>
+              ) : (
+                <form>
+                  <label>Amount (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label>Deposit Date</label>
+                  <input
+                    type="date"
+                    value={depositDate}
+                    onChange={(e) => setDepositDate(e.target.value)}
+                  />
+                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
+                    <button type="button" onClick={() => setEditDeposit(false)} className="ad-btn ghost">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={addDeposit} disabled={busy} className="ad-btn">
+                      {busy ? 'Processing...' : 'Add Deposit'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* ADJUST BALANCE */}
+            <div className="ad-card">
+              <h3>Adjust Balance</h3>
+              {!editBalance ? (
+                <button onClick={() => setEditBalance(true)} className="ad-btn" style={{ width: '100%' }}>
+                  ⚙️ Adjust Balance
+                </button>
+              ) : (
+                <form>
+                  <label>Action</label>
+                  <select value={balanceAction} onChange={(e) => setBalanceAction(e.target.value)}>
+                    <option value="adjust">Add</option>
+                    <option value="deduct">Subtract</option>
+                    <option value="set">Set Exact Amount</option>
+                  </select>
+                  <label>Amount (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={balanceAmount}
+                    onChange={(e) => setBalanceAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label>Reason</label>
+                  <textarea
+                    value={balanceReason}
+                    onChange={(e) => setBalanceReason(e.target.value)}
+                    placeholder="Why are you adjusting this balance?"
+                    rows={2}
+                  />
+                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
+                    <button type="button" onClick={() => setEditBalance(false)} className="ad-btn ghost">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={adjustBalance} disabled={busy} className="ad-btn">
+                      {busy ? 'Processing...' : 'Apply'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* REFERRALS */}
+            <div className="ad-card">
+              <h3>Referrals ({referrals?.length || 0})</h3>
+              {referrals && referrals.length > 0 ? (
+                <div className="ad-scroll" style={{ maxHeight: '300px' }}>
+                  <table className="ad-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Deposits</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {referrals.map((ref) => (
+                        <tr key={ref.id}>
+                          <td>{ref.name}</td>
+                          <td className="num" style={{ color: 'var(--gold)' }}>{money(ref.totalDeposits)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="ad-empty">No referred members</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {!selectedMember && !loading && (
+        <div className="ad-card" style={{ textAlign: 'center', padding: '40px' }}>
+          <p style={{ color: 'var(--muted)' }}>👆 Search for a member to manage their account</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
 // ACCOUNT MANAGEMENT
 // ============================================================================
 
@@ -444,7 +823,6 @@ function Dashboard() {
   const trades = data?.ledger?.ledger || [];
 
   const totalMembers = acc.length;
-  // ✅ FIXED: Changed from a.balance to a.totalDeposits
   const totalDeposits = acc.reduce((sum, a) => sum + a.totalDeposits, 0);
   const pendingDeposits = txns.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
   const pendingWithdrawals = txns.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
@@ -564,7 +942,6 @@ function ReferralsManagement() {
             </table>
           </div>
 
-          {/* NEW: Referred Members Network */}
           <h3 style={{ marginTop: '24px' }}>Referred Members Network</h3>
           {referralsLoading ? (
             <p className="ad-empty">Loading network…</p>
@@ -1468,6 +1845,7 @@ export default function AdminDashboard() {
   const tabs = [
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
+    ['member-control', 'Member Control'],
     ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
     ['deposits', 'Deposits'],
@@ -1517,6 +1895,7 @@ export default function AdminDashboard() {
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
+          {tab === 'member-control' && <MemberControlPanel />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'deposits' && <DepositManagement />}
