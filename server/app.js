@@ -338,7 +338,7 @@ export async function createApp() {
       email TEXT NOT NULL UNIQUE,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      phone TEXT UNIQUE,
+      phone TEXT,
       pin TEXT,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
@@ -745,9 +745,17 @@ export async function createApp() {
         bonusType = 'first_deposit_bonus_2.5%';
       }
     } else {
-      // ✅ RECHARGE BONUS: 2.5% of THIS deposit (not the first deposit)
+      const firstDeposit = await sql`
+        SELECT amount_cents FROM transactions
+        WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved'
+        ORDER BY created_at ASC
+        LIMIT 1
+      `;
+
+      if (firstDeposit.length === 0) return null;
+
       commissionRate = 0.025;
-      commissionCents = Math.round(tx.amount_cents * commissionRate);
+      commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
       bonusType = 'recharge_bonus_2.5%';
 
       if (!referrerId) {
@@ -1007,13 +1015,6 @@ export async function createApp() {
       const email = input.email.trim().toLowerCase();
       const existing = await sql`SELECT id FROM accounts WHERE email = ${email}`;
       if (existing.length > 0) return response.status(409).json({ error: 'An account with this email already exists.' });
-
-      // ✅ Check for duplicate phone number
-      const phone = input.phone?.trim() || null;
-      if (phone) {
-        const existingPhone = await sql`SELECT id FROM accounts WHERE phone = ${phone}`;
-        if (existingPhone.length > 0) return response.status(409).json({ error: 'An account with this phone number already exists.' });
-      }
 
       const salt = randomBytes(16);
       const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
@@ -1795,7 +1796,6 @@ export async function createApp() {
     }
   });
 
-  // ✅ FIXED: /api/transactions GET endpoint with corrected balance calculation
   app.get('/api/transactions', requireAccount, async (request, response) => {
     const rows = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
@@ -1810,50 +1810,22 @@ export async function createApp() {
     const lastDepositTime = accountRow[0]?.last_deposit_time || null;
     const earningsStatus = calculateEarningsStatus(lastDepositTime);
 
-    // ✅ FIX: Get ONLY the original deposits (type='deposit', not earnings)
-    const depositRow = await sql`
-      SELECT COALESCE(SUM(amount_cents), 0) AS total_deposits
-      FROM transactions
-      WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
-    `;
-    const totalDepositsCents = depositRow[0]?.total_deposits || 0;
-    const totalDeposits = totalDepositsCents / 100;
-
-    // ✅ Get the actual approved balance (includes ALL earnings)
+    // ✅ FIX: Get the actual approved balance (includes ALL earnings)
     const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
 
-    // ✅ FIX: Match ORIGINAL DEPOSIT amount to DEPOSIT_PLANS (not total balance)
     let dailyIncome = 0;
     if (earningsStatus.earningsActive && lastDepositTime) {
-      // This now correctly matches the original deposit amount, not the total balance
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === approvedBalance);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
     return response.json({
-      // Total wallet balance (deposits + earnings - withdrawals)
       balance: approvedBalance,
-      
-      // Original deposits only (for "Total deposits" / "Active investments" display)
-      totalDeposits: totalDeposits,
-      
-      // Available to withdraw
-      availableBalance: approvedBalance,
-      
-      // Pending withdrawals
       pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
-      
-      // Transaction list
       transactions: rows.map((row) => transactionView(row)),
-      
-      // Deposit tracking
       lastDepositTime,
-      
-      // Earnings activation status
       earningsActive: earningsStatus.earningsActive,
       earningsStartTime: earningsStatus.earningsStartTime,
-      
-      // Daily income based on ORIGINAL deposit (now correctly calculated!)
       dailyIncome,
     });
   });
@@ -1912,39 +1884,27 @@ export async function createApp() {
         GROUP BY type
       `;
 
-      // Build transaction breakdown by type - ONLY count known earning types
-      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
+      // Build transaction breakdown by type
       const txByType = {};
       let totalDepositsCents = 0;
       let totalWithdrawalsCents = 0;
       let totalEarningsCents = 0;
 
-      console.log('🔍 [COMPREHENSIVE WALLET] Account:', request.account.id, '| All Transactions:', JSON.stringify(allTransactions));
-
       for (const row of allTransactions) {
-        // 🔧 FIX: Parse total_cents as integer (database returns as string)
-        const amountCents = parseInt(row.total_cents, 10) || 0;
-
         txByType[row.type] = {
           count: row.count,
-          amount_cents: amountCents,
-          amount: amountCents / 100,
+          amount_cents: row.total_cents,
+          amount: row.total_cents / 100,
         };
 
         if (row.type === 'deposit') {
-          totalDepositsCents += amountCents;
-          console.log(`  ✅ DEPOSIT: +${(amountCents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
+          totalDepositsCents += row.total_cents;
         } else if (row.type === 'withdrawal') {
-          totalWithdrawalsCents += amountCents;
-          console.log(`  ✅ WITHDRAWAL: +${(amountCents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
-        } else if (knownEarningTypes.includes(row.type)) {
-          // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
-          totalEarningsCents += amountCents;
-          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(amountCents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
+          totalWithdrawalsCents += row.total_cents;
         } else {
-          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(amountCents / 100).toFixed(2)}`);
+          // All other types are earnings: trading_profit, tier_reward, tier_salary, referral_commission
+          totalEarningsCents += row.total_cents;
         }
-        // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
 
       // Calculate wallet totals
@@ -1953,8 +1913,6 @@ export async function createApp() {
       const totalEarnings = totalEarningsCents / 100;
       const totalIncome = totalDeposits + totalEarnings;
       const walletBalance = totalIncome - totalWithdrawals;
-
-      console.log(`💰 [COMPREHENSIVE WALLET FINAL] Deposits: $${totalDeposits.toFixed(2)} | Earnings: $${totalEarnings.toFixed(2)} | Balance: $${walletBalance.toFixed(2)}`);
 
       return response.json({
         // Root-level properties for frontend wallet display
@@ -1989,82 +1947,6 @@ export async function createApp() {
     } catch (error) {
       console.error('Error fetching comprehensive wallet:', error);
       return response.status(500).json({ error: 'Failed to fetch wallet data.' });
-    }
-  });
-
-  // 🔍 DEBUG: Show ALL transactions (individual records) to check for duplicates or inflation
-  app.get('/api/debug/all-transactions', requireAccount, async (request, response) => {
-    try {
-      // Get ALL individual transactions (not grouped)
-      const allTx = await sql`
-        SELECT
-          id,
-          type,
-          amount_cents,
-          reference,
-          status,
-          created_at
-        FROM transactions
-        WHERE account_id = ${request.account.id}
-        ORDER BY created_at DESC
-        LIMIT 100
-      `;
-
-      // Group by type for summary
-      const summary = {};
-      let totalDepositsCents = 0;
-      let totalWithdrawalsCents = 0;
-      let totalEarningsCents = 0;
-
-      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
-
-      for (const tx of allTx) {
-        // 🔧 FIX: Parse amount_cents as integer (database returns as string)
-        const amountCents = parseInt(tx.amount_cents, 10) || 0;
-
-        if (!summary[tx.type]) {
-          summary[tx.type] = { count: 0, totalCents: 0 };
-        }
-        summary[tx.type].count += 1;
-        summary[tx.type].totalCents += amountCents;
-
-        if (tx.type === 'deposit') {
-          totalDepositsCents += amountCents;
-        } else if (tx.type === 'withdrawal') {
-          totalWithdrawalsCents += amountCents;
-        } else if (knownEarningTypes.includes(tx.type)) {
-          totalEarningsCents += amountCents;
-        }
-      }
-
-      return response.json({
-        accountId: request.account.id,
-        accountName: request.account.name,
-        totalTransactions: allTx.length,
-        summary: Object.keys(summary).reduce((acc, type) => {
-          acc[type] = {
-            count: summary[type].count,
-            amount: (summary[type].totalCents / 100).toFixed(2)
-          };
-          return acc;
-        }, {}),
-        calculation: {
-          totalDeposits: (totalDepositsCents / 100).toFixed(2),
-          totalEarnings: (totalEarningsCents / 100).toFixed(2),
-          totalWithdrawals: (totalWithdrawalsCents / 100).toFixed(2),
-          expectedBalance: ((totalDepositsCents + totalEarningsCents - totalWithdrawalsCents) / 100).toFixed(2)
-        },
-        recentTransactions: allTx.map(tx => ({
-          id: tx.id,
-          type: tx.type,
-          amount: (tx.amount_cents / 100).toFixed(2),
-          reference: tx.reference,
-          date: tx.created_at
-        }))
-      });
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      return response.status(500).json({ error: 'Failed to fetch transactions.' });
     }
   });
 
