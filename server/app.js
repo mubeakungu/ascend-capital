@@ -2410,13 +2410,14 @@ export async function createApp() {
     }
   });
 
-  // ✅ NEW: Admin endpoint to add/adjust deposits for members
-  app.post('/api/admin/deposits/adjust', adminLimiter, requireAdminSession, async (request, response, next) => {
+  // ✅ NEW: Admin endpoint to add/adjust member balance
+  app.post('/api/admin/accounts/:accountId/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
-      const { accountId, action, amount } = request.body ?? {};
+      const { accountId } = request.params;
+      const { action, amount } = request.body ?? {};
 
-      if (!accountId || !action || !amount) {
-        return response.status(400).json({ error: 'accountId, action, and amount are required.' });
+      if (!action || !amount) {
+        return response.status(400).json({ error: 'action and amount are required.' });
       }
 
       if (!['add', 'deduct'].includes(action)) {
