@@ -761,65 +761,45 @@ export async function createApp() {
 
     const referrerId = referralSignup[0]?.referrer_id;
 
-    let commissionCents;
-    let commissionRate;
-    let beneficiaryId = referrerId;
-    let bonusType;
+    const now = new Date().toISOString();
+    const results = [];
 
-    if (isFirstDeposit) {
-      if (referrerId) {
-        commissionRate = 0.05;
-        commissionCents = Math.round(tx.amount_cents * commissionRate);
-        bonusType = 'referral_bonus_5%';
-      } else {
-        commissionRate = 0.025;
-        commissionCents = Math.round(tx.amount_cents * commissionRate);
-        beneficiaryId = tx.account_id;
-        bonusType = 'first_deposit_bonus_2.5%';
-      }
-    } else {
-      const firstDeposit = await sql`
-        SELECT amount_cents FROM transactions
-        WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved'
-        ORDER BY created_at ASC
-        LIMIT 1
-      `;
-
-      if (firstDeposit.length === 0) return null;
-
-      commissionRate = 0.025;
-      commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
-      bonusType = 'recharge_bonus_2.5%';
-
-      if (!referrerId) {
-        beneficiaryId = tx.account_id;
-      }
-    }
-
-    const commissionId = randomBytes(16).toString('hex');
     try {
-      const now = new Date().toISOString();
+      // ✅ LOGIC:
+      // 1. If referrer exists: 5% commission to referrer (always)
+      // 2. 2.5% deposit bonus to the depositor (always)
 
-      // ✅ INSERT commission record
-      await sql`
-        INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
-        VALUES (${commissionId}, ${beneficiaryId}, ${transactionId}, ${tx.account_id}, ${commissionCents}, ${commissionRate}, ${now})
-      `;
+      // Step 1: 5% commission to referrer (if they exist)
+      if (referrerId) {
+        const referrerCommissionCents = Math.round(tx.amount_cents * 0.05);
+        const commissionId = randomBytes(16).toString('hex');
+        const commissionTxId = randomBytes(16).toString('hex');
 
-      // ✅ ADD: Credit commission directly to Ascend wallet as approved transaction
-      const commissionTxId = randomBytes(16).toString('hex');
-      const reference = bonusType === 'referral_bonus_5%'
-        ? `Referral bonus (5%) from ${tx.account_id}`
-        : bonusType === 'first_deposit_bonus_2.5%'
-        ? `First deposit bonus (2.5%)`
-        : `Recharge bonus (2.5%)`;
+        await sql`
+          INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
+          VALUES (${commissionId}, ${referrerId}, ${transactionId}, ${tx.account_id}, ${referrerCommissionCents}, 0.05, ${now})
+        `;
+
+        await sql`
+          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+          VALUES (${commissionTxId}, ${referrerId}, 'referral_commission', ${referrerCommissionCents}, 'Referral commission (5%)', 'approved', ${now})
+        `;
+
+        results.push({ type: 'referrer_commission', amount: referrerCommissionCents / 100, beneficiary: referrerId });
+      }
+
+      // Step 2: 2.5% deposit bonus to the depositor (always)
+      const depositBonusCents = Math.round(tx.amount_cents * 0.025);
+      const bonusTxId = randomBytes(16).toString('hex');
 
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'approved', ${now})
+        VALUES (${bonusTxId}, ${tx.account_id}, 'referral_commission', ${depositBonusCents}, 'Deposit bonus (2.5%)', 'approved', ${now})
       `;
 
-      return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId, commissionTxId };
+      results.push({ type: 'deposit_bonus', amount: depositBonusCents / 100, beneficiary: tx.account_id });
+
+      return results;
     } catch (error) {
       console.error('Failed to apply referral commission:', error);
       return null;
