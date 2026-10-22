@@ -2053,6 +2053,11 @@ export async function createApp() {
         GROUP BY type
       `;
 
+      // 🔍 DEBUG LOG: Show what the database query returned
+      console.log('=== COMPREHENSIVE WALLET DEBUG ===');
+      console.log('Account ID:', request.account.id);
+      console.log('Raw allTransactions from DB:', JSON.stringify(allTransactions, null, 2));
+
       // Build transaction breakdown by type - ONLY count known earning types
       const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
       const txByType = {};
@@ -2061,6 +2066,8 @@ export async function createApp() {
       let totalEarningsCents = 0;
 
       for (const row of allTransactions) {
+        console.log(`Processing row: type=${row.type}, count=${row.count}, total_cents=${row.total_cents}`);
+
         txByType[row.type] = {
           count: row.count,
           amount_cents: row.total_cents,
@@ -2073,10 +2080,16 @@ export async function createApp() {
           totalWithdrawalsCents += row.total_cents;
         } else if (knownEarningTypes.includes(row.type)) {
           // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
+          console.log(`  Adding ${row.total_cents} to earnings (type: ${row.type})`);
           totalEarningsCents += row.total_cents;
         }
         // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
+
+      console.log('totalDepositsCents:', totalDepositsCents);
+      console.log('totalWithdrawalsCents:', totalWithdrawalsCents);
+      console.log('totalEarningsCents:', totalEarningsCents);
+      console.log('=== END DEBUG ===');
 
       // Calculate wallet totals
       const totalDeposits = totalDepositsCents / 100;
