@@ -13,7 +13,7 @@ import {
 } from './referral-rewards-enhancement-v2.js';
 
 const scryptAsync = promisify(scrypt);
-const SESSION_COOKIE = 'ascend_session';
+const SESSION_COOKIE = 'ascend_session_v2';
 const ADMIN_SESSION_COOKIE = 'ascend_admin_session';
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_BYTES = 64;
