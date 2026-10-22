@@ -2,6 +2,7 @@ import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'no
 import { promisify } from 'node:util';
 import postgres from 'postgres';
 import express from 'express';
+import nodemailer from 'nodemailer';
 import {
   initializeTierRewardsTable,
   checkAndCreditTierReward,
@@ -20,7 +21,7 @@ const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
 const PIN_PATTERN = /^\d{6}$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission'];
+const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission', 'deposit_bonus'];
 const TX_STATUSES = ['pending', 'approved', 'rejected'];
 const MAX_TX_AMOUNT = 10_000_000;
 const ADMIN_USERNAME = 'admin';
@@ -86,6 +87,36 @@ const TIER_REQUIREMENTS_DETAILED = [
   { direct: 13, team: 700 },        // Star 8: 13 direct AND 700 team
   { direct: 14, team: 1000 },       // Crown Leader: 14 direct AND 1,000 team
 ];
+
+// Email configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER || 'your-email@gmail.com',
+    pass: process.env.EMAIL_PASSWORD || 'your-app-password',
+  },
+});
+
+// Function to send password reset email
+async function sendPasswordResetEmail(email, resetToken) {
+  const resetLink = `https://ascend-capital.onrender.com/reset-password?token=${resetToken}`;
+  const mailOptions = {
+    from: process.env.EMAIL_USER || 'noreply@ascendcapital.com',
+    to: email,
+    subject: 'Ascend Capital - Password Reset Request',
+    html: `
+      <h2>Password Reset Request</h2>
+      <p>You requested to reset your Ascend Capital password.</p>
+      <p><a href="${resetLink}" style="background-color: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Password</a></p>
+      <p>Or copy this link: ${resetLink}</p>
+      <p>This link expires in 1 hour.</p>
+      <p>If you didn't request this, please ignore this email.</p>
+    `,
+  };
+  
+  return transporter.sendMail(mailOptions);
+}
+
 
 function accountView(row) {
   return {
@@ -915,22 +946,21 @@ export async function createApp() {
     }
   }
 
-  // ✅ DISABLED FUNCTION - DO NOT USE
-  // function scheduleDailyTradingProfits() {
-  //   const now = new Date();
-  //   const tomorrow = new Date(now);
-  //   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  //   tomorrow.setUTCHours(0, 0, 0, 0);
-  //
-  //   const timeUntilMidnight = tomorrow.getTime() - now.getTime();
-  //
-  //   setTimeout(() => {
-  //     applyDailyTradingProfits();
-  //     setInterval(() => {
-  //       applyDailyTradingProfits();
-  //     }, 24 * 60 * 60 * 1000);
-  //   }, timeUntilMidnight);
-  // }
+  function scheduleDailyTradingProfits() {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+
+    const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+
+    setTimeout(() => {
+      applyDailyTradingProfits();
+      setInterval(() => {
+        applyDailyTradingProfits();
+      }, 24 * 60 * 60 * 1000);
+    }, timeUntilMidnight);
+  }
 
   function scheduleWeeklySalaries() {
     const now = new Date();
@@ -951,8 +981,8 @@ export async function createApp() {
 
   await seedInitialAdmin();
   scheduleWeeklySalaries();
-  // ✅ COMPLETELY DISABLED: No automatic daily trading. Users MUST manually claim via /api/trading/claim-daily-trade during 1:00 PM - 1:30 PM EAT
-  // DO NOT UNCOMMENT: scheduleDailyTradingProfits();
+  // ✅ DISABLED: Daily trading profits are now claimed MANUALLY only via /api/trading/claim-daily-trade
+  // scheduleDailyTradingProfits();
 
   // =========================================================================
   // PUBLIC ENDPOINTS
@@ -1071,6 +1101,115 @@ export async function createApp() {
       return next(error);
     }
   });
+
+  // ✅ NEW: POST /api/auth/forgot-password - Generate password reset token
+  app.post('/api/auth/forgot-password', async (request, response) => {
+    const { email } = request.body;
+
+    if (!email || !EMAIL_PATTERN.test(email)) {
+      return response.status(400).json({ error: 'Invalid email' });
+    }
+
+    try {
+      const row = await sql`SELECT id FROM accounts WHERE LOWER(email) = LOWER(${email})`;
+      
+      if (row.length === 0) {
+        // Don't reveal if email exists (security best practice)
+        return response.status(200).json({ message: 'If account exists, reset link sent to email' });
+      }
+
+      const accountId = row[0].id;
+      const resetToken = randomBytes(32).toString('hex');
+      const resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await sql`
+        UPDATE accounts 
+        SET password_reset_token = ${resetTokenHash}, password_reset_expires = ${expiresAt}
+        WHERE id = ${accountId}
+      `;
+
+      // Send email with reset link
+      await sendPasswordResetEmail(email, resetToken);
+      
+      return response.status(200).json({ message: 'Password reset link sent to email' });
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      return response.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  // ✅ NEW: POST /api/auth/reset-password - Validate token and update password
+  app.post('/api/auth/reset-password', async (request, response) => {
+    const { token, newPassword } = request.body;
+
+    if (!token || !newPassword) {
+      return response.status(400).json({ error: 'Missing token or password' });
+    }
+
+    if (newPassword.length < 8) {
+      return response.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    try {
+      const resetTokenHash = createHash('sha256').update(token).digest('hex');
+      const now = new Date();
+
+      const row = await sql`
+        SELECT id FROM accounts 
+        WHERE password_reset_token = ${resetTokenHash} 
+        AND password_reset_expires > ${now}
+      `;
+
+      if (row.length === 0) {
+        return response.status(400).json({ error: 'Invalid or expired reset token' });
+      }
+
+      const accountId = row[0].id;
+      const salt = randomBytes(16);
+      const hash = await scryptAsync(newPassword, salt, PASSWORD_BYTES);
+
+      await sql`
+        UPDATE accounts 
+        SET hashed_password = ${Buffer.concat([salt, hash])}, 
+            password_reset_token = NULL,
+            password_reset_expires = NULL,
+            must_change_password = FALSE
+        WHERE id = ${accountId}
+      `;
+
+      return response.status(200).json({ message: 'Password reset successful' });
+    } catch (err) {
+      console.error('Reset password error:', err);
+      return response.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  // ✅ NEW: GET /api/auth/validate-reset-token - Check if reset token is valid
+  app.get('/api/auth/validate-reset-token', async (request, response) => {
+    const { token } = request.query;
+
+    if (!token) {
+      return response.status(400).json({ valid: false });
+    }
+
+    try {
+      const resetTokenHash = createHash('sha256').update(token).digest('hex');
+      const now = new Date();
+
+      const row = await sql`
+        SELECT id FROM accounts 
+        WHERE password_reset_token = ${resetTokenHash} 
+        AND password_reset_expires > ${now}
+      `;
+
+      return response.status(200).json({ valid: row.length > 0 });
+    } catch (err) {
+      console.error('Token validation error:', err);
+      return response.status(500).json({ valid: false });
+    }
+  });
+
 
   app.get('/api/auth/me', async (request, response) => {
     const account = await getCurrentAccountAsync(request, SESSION_COOKIE);
