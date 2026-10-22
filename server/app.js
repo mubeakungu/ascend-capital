@@ -537,7 +537,6 @@ export async function createApp() {
   }
 
   async function approvedBalanceCents(accountId) {
-    // ✅ FIXED: Only count APPROVED transactions (excludes pending referral commissions)
     const row = await sql`
       SELECT COALESCE(SUM(CASE
         WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
@@ -784,7 +783,7 @@ export async function createApp() {
 
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'pending', ${now})
+        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'approved', ${now})
       `;
 
       return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId, commissionTxId };
@@ -916,21 +915,22 @@ export async function createApp() {
     }
   }
 
-  function scheduleDailyTradingProfits() {
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    tomorrow.setUTCHours(0, 0, 0, 0);
-
-    const timeUntilMidnight = tomorrow.getTime() - now.getTime();
-
-    setTimeout(() => {
-      applyDailyTradingProfits();
-      setInterval(() => {
-        applyDailyTradingProfits();
-      }, 24 * 60 * 60 * 1000);
-    }, timeUntilMidnight);
-  }
+  // ✅ DISABLED FUNCTION - DO NOT USE
+  // function scheduleDailyTradingProfits() {
+  //   const now = new Date();
+  //   const tomorrow = new Date(now);
+  //   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  //   tomorrow.setUTCHours(0, 0, 0, 0);
+  //
+  //   const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+  //
+  //   setTimeout(() => {
+  //     applyDailyTradingProfits();
+  //     setInterval(() => {
+  //       applyDailyTradingProfits();
+  //     }, 24 * 60 * 60 * 1000);
+  //   }, timeUntilMidnight);
+  // }
 
   function scheduleWeeklySalaries() {
     const now = new Date();
@@ -951,8 +951,8 @@ export async function createApp() {
 
   await seedInitialAdmin();
   scheduleWeeklySalaries();
-  // ✅ DISABLED: Daily trading profits are now claimed MANUALLY only via /api/trading/claim-daily-trade
-  // scheduleDailyTradingProfits();
+  // ✅ COMPLETELY DISABLED: No automatic daily trading. Users MUST manually claim via /api/trading/claim-daily-trade during 1:00 PM - 1:30 PM EAT
+  // DO NOT UNCOMMENT: scheduleDailyTradingProfits();
 
   // =========================================================================
   // PUBLIC ENDPOINTS
