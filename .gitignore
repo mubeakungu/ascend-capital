@@ -5,3 +5,5 @@ ascend-capital-project.zip
 .env
 .env.*
 !.env.example
+id_rsa 
+id_rsa.pub 
