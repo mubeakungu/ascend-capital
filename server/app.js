@@ -1442,10 +1442,14 @@ export async function createApp() {
 
       const referralCode = await sql`SELECT code FROM referral_codes WHERE account_id = ${request.account.id}`;
 
+      // ✅ FIXED: Show BOTH referral commission rate (5% baseline) AND tier rate
+      const referralCommissionRate = directCount > 0 ? 0.05 : 0; // 5% on referral deposits
+
       return response.json({
         referralCode: referralCode[0]?.code || null,
         tier: tierName,
-        commissionRate: commissionRate,
+        referralCommissionRate: referralCommissionRate, // 5% on referral deposits (always)
+        tierCommissionRate: commissionRate, // Additional tier-based rate (0% for Unranked)
         directReferrals: directCount,
         directVolume: directVolume / 100,
         commissionsEarned: commissionCount,
