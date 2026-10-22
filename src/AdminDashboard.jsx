@@ -110,6 +110,13 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     () => api(`/admin/accounts/${accountId}/activity`),
     [accountId]
   );
+  const [{ data: walletData }, loadWallet] = useLoad(
+    () => fetch(`/api/wallet/comprehensive`, {
+      credentials: 'same-origin',
+      headers: { 'X-Account-ID': accountId }
+    }).then(r => r.json()).catch(() => ({})),
+    [accountId]
+  );
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -171,10 +178,36 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
           <span className="ad-detail-value"><Badge value={account.role} /></span>
         </div>
 
-        <div className="ad-detail-row">
-          <span className="ad-detail-label">Balance</span>
-          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
-        </div>
+        {walletData ? (
+          <>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Total Deposits</span>
+              <span className="ad-detail-value" style={{ color: 'var(--gold)' }}>{money(walletData.totalDeposits || 0)}</span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Total Earnings</span>
+              <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(walletData.totalEarnings || 0)}</span>
+            </div>
+            {(walletData.earnings?.referralCommissions?.amount > 0 || walletData.earnings?.tradingProfit?.amount > 0) && (
+              <div className="ad-detail-row" style={{ paddingLeft: '20px', fontSize: '12px' }}>
+                <span className="ad-detail-label">Breakdown:</span>
+                <span className="ad-detail-value" style={{ color: 'var(--muted)' }}>
+                  {walletData.earnings?.referralCommissions?.amount > 0 && `Ref: $${walletData.earnings.referralCommissions.amount.toFixed(2)} `}
+                  {walletData.earnings?.tradingProfit?.amount > 0 && `Trade: $${walletData.earnings.tradingProfit.amount.toFixed(2)}`}
+                </span>
+              </div>
+            )}
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Current Balance</span>
+              <span className="ad-detail-value" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>{money(walletData.balance || 0)}</span>
+            </div>
+          </>
+        ) : (
+          <div className="ad-detail-row">
+            <span className="ad-detail-label">Balance</span>
+            <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
+          </div>
+        )}
 
         <div className="ad-detail-row">
           <span className="ad-detail-label">Created</span>
@@ -284,12 +317,18 @@ function AccountsManagement() {
                 <span className="value">{a.email}</span>
               </div>
               <div className="ad-account-card-row">
-                <span className="label">Total Deposits:</span>
+                <span className="label">Deposits:</span>
                 <span className="value" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</span>
               </div>
               <div className="ad-account-card-row">
-                <span className="label">Current Balance:</span>
-                <span className="value" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</span>
+                <span className="label">Earnings:</span>
+                <span className="value" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : '#888' }}>
+                  +${money(Math.max(0, a.balance - a.totalDeposits))}
+                </span>
+              </div>
+              <div className="ad-account-card-row">
+                <span className="label" style={{ fontWeight: 'bold' }}>Total Balance:</span>
+                <span className="value" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>${money(a.balance)}</span>
               </div>
               <div className="ad-account-card-row">
                 <span className="label">Role:</span>
@@ -319,8 +358,9 @@ function AccountsManagement() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Status</th>
-                <th>Total Deposits</th>
-                <th>Current Balance</th>
+                <th>Deposits</th>
+                <th>Earnings</th>
+                <th>Balance</th>
                 <th>Role</th>
                 <th>Created</th>
                 <th>Actions</th>
@@ -333,7 +373,8 @@ function AccountsManagement() {
                   <td>{a.email}</td>
                   <td><Badge value={a.status} /></td>
                   <td className="num" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</td>
-                  <td className="num" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(a.balance)}</td>
+                  <td className="num" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : '#888' }}>+${money(Math.max(0, a.balance - a.totalDeposits))}</td>
+                  <td className="num" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>${money(a.balance)}</td>
                   <td><Badge value={a.role} /></td>
                   <td>{new Date(a.createdAt).toLocaleDateString()}</td>
                   <td>
