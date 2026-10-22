@@ -537,6 +537,7 @@ export async function createApp() {
   }
 
   async function approvedBalanceCents(accountId) {
+    // ✅ FIXED: Only count APPROVED transactions (excludes pending referral commissions)
     const row = await sql`
       SELECT COALESCE(SUM(CASE
         WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
@@ -783,7 +784,7 @@ export async function createApp() {
 
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'approved', ${now})
+        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'pending', ${now})
       `;
 
       return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId, commissionTxId };
