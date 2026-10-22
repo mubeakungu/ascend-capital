@@ -500,6 +500,7 @@ function ReferralsManagement() {
 
 function TradingManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
+  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
   const [notice, setNotice] = useState(null);
   const [showAddTrade, setShowAddTrade] = useState(false);
   const [tradeMemberId, setTradeMemberId] = useState('');
@@ -507,6 +508,8 @@ function TradingManagement() {
   const [profitAmount, setProfitAmount] = useState('');
   const [depositAmount, setDepositAmount] = useState('');
   const [tradeBusy, setTradeBusy] = useState(false);
+
+  const members = membersData?.accounts || [];
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
@@ -601,14 +604,19 @@ function TradingManagement() {
         <div className="ad-overlay" onClick={() => setShowAddTrade(false)}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleAddTrade}>
             <h3>Add Trade</h3>
-            <label>Member ID</label>
-            <input
-              type="text"
+            <label>Select Member</label>
+            <select
               value={tradeMemberId}
               onChange={(e) => setTradeMemberId(e.target.value)}
-              placeholder="Member account ID"
               required
-            />
+            >
+              <option value="">-- Choose a member --</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.email})
+                </option>
+              ))}
+            </select>
             <label>Trade Date</label>
             <input
               type="date"
