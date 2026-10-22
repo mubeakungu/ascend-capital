@@ -851,7 +851,7 @@ function App() {
     try {
       const result = await requestApi('/api/transactions');
       setBalance(result.balance || 0);
-      setTotalDeposits(result.balance || 0);
+      setTotalDeposits(result.totalDeposits || 0);
 
       if (result.lastDepositTime) {
         setLastDepositTime(result.lastDepositTime);
