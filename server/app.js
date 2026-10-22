@@ -338,7 +338,7 @@ export async function createApp() {
       email TEXT NOT NULL UNIQUE,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      phone TEXT,
+      phone TEXT UNIQUE,
       pin TEXT,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
@@ -745,17 +745,9 @@ export async function createApp() {
         bonusType = 'first_deposit_bonus_2.5%';
       }
     } else {
-      const firstDeposit = await sql`
-        SELECT amount_cents FROM transactions
-        WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved'
-        ORDER BY created_at ASC
-        LIMIT 1
-      `;
-
-      if (firstDeposit.length === 0) return null;
-
+      // ✅ RECHARGE BONUS: 2.5% of THIS deposit (not the first deposit)
       commissionRate = 0.025;
-      commissionCents = Math.round(firstDeposit[0].amount_cents * commissionRate);
+      commissionCents = Math.round(tx.amount_cents * commissionRate);
       bonusType = 'recharge_bonus_2.5%';
 
       if (!referrerId) {
@@ -1015,6 +1007,13 @@ export async function createApp() {
       const email = input.email.trim().toLowerCase();
       const existing = await sql`SELECT id FROM accounts WHERE email = ${email}`;
       if (existing.length > 0) return response.status(409).json({ error: 'An account with this email already exists.' });
+
+      // ✅ Check for duplicate phone number
+      const phone = input.phone?.trim() || null;
+      if (phone) {
+        const existingPhone = await sql`SELECT id FROM accounts WHERE phone = ${phone}`;
+        if (existingPhone.length > 0) return response.status(409).json({ error: 'An account with this phone number already exists.' });
+      }
 
       const salt = randomBytes(16);
       const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
@@ -1796,6 +1795,7 @@ export async function createApp() {
     }
   });
 
+  // ✅ FIXED: /api/transactions GET endpoint with corrected balance calculation
   app.get('/api/transactions', requireAccount, async (request, response) => {
     const rows = await sql`
       SELECT t.*, a.name AS account_name, a.email AS account_email
@@ -1810,22 +1810,50 @@ export async function createApp() {
     const lastDepositTime = accountRow[0]?.last_deposit_time || null;
     const earningsStatus = calculateEarningsStatus(lastDepositTime);
 
-    // ✅ FIX: Get the actual approved balance (includes ALL earnings)
+    // ✅ FIX: Get ONLY the original deposits (type='deposit', not earnings)
+    const depositRow = await sql`
+      SELECT COALESCE(SUM(amount_cents), 0) AS total_deposits
+      FROM transactions
+      WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
+    `;
+    const totalDepositsCents = depositRow[0]?.total_deposits || 0;
+    const totalDeposits = totalDepositsCents / 100;
+
+    // ✅ Get the actual approved balance (includes ALL earnings)
     const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
 
+    // ✅ FIX: Match ORIGINAL DEPOSIT amount to DEPOSIT_PLANS (not total balance)
     let dailyIncome = 0;
     if (earningsStatus.earningsActive && lastDepositTime) {
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === approvedBalance);
+      // This now correctly matches the original deposit amount, not the total balance
+      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
     return response.json({
+      // Total wallet balance (deposits + earnings - withdrawals)
       balance: approvedBalance,
+      
+      // Original deposits only (for "Total deposits" / "Active investments" display)
+      totalDeposits: totalDeposits,
+      
+      // Available to withdraw
+      availableBalance: approvedBalance,
+      
+      // Pending withdrawals
       pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
+      
+      // Transaction list
       transactions: rows.map((row) => transactionView(row)),
+      
+      // Deposit tracking
       lastDepositTime,
+      
+      // Earnings activation status
       earningsActive: earningsStatus.earningsActive,
       earningsStartTime: earningsStatus.earningsStartTime,
+      
+      // Daily income based on ORIGINAL deposit (now correctly calculated!)
       dailyIncome,
     });
   });
@@ -1884,27 +1912,39 @@ export async function createApp() {
         GROUP BY type
       `;
 
-      // Build transaction breakdown by type
+      // Build transaction breakdown by type - ONLY count known earning types
+      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
       const txByType = {};
       let totalDepositsCents = 0;
       let totalWithdrawalsCents = 0;
       let totalEarningsCents = 0;
 
+      console.log('🔍 [COMPREHENSIVE WALLET] Account:', request.account.id, '| All Transactions:', JSON.stringify(allTransactions));
+
       for (const row of allTransactions) {
+        // 🔧 FIX: Parse total_cents as integer (database returns as string)
+        const amountCents = parseInt(row.total_cents, 10) || 0;
+
         txByType[row.type] = {
           count: row.count,
-          amount_cents: row.total_cents,
-          amount: row.total_cents / 100,
+          amount_cents: amountCents,
+          amount: amountCents / 100,
         };
 
         if (row.type === 'deposit') {
-          totalDepositsCents += row.total_cents;
+          totalDepositsCents += amountCents;
+          console.log(`  ✅ DEPOSIT: +${(amountCents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
         } else if (row.type === 'withdrawal') {
-          totalWithdrawalsCents += row.total_cents;
+          totalWithdrawalsCents += amountCents;
+          console.log(`  ✅ WITHDRAWAL: +${(amountCents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
+        } else if (knownEarningTypes.includes(row.type)) {
+          // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
+          totalEarningsCents += amountCents;
+          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(amountCents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
         } else {
-          // All other types are earnings: trading_profit, tier_reward, tier_salary, referral_commission
-          totalEarningsCents += row.total_cents;
+          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(amountCents / 100).toFixed(2)}`);
         }
+        // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
       }
 
       // Calculate wallet totals
@@ -1913,6 +1953,8 @@ export async function createApp() {
       const totalEarnings = totalEarningsCents / 100;
       const totalIncome = totalDeposits + totalEarnings;
       const walletBalance = totalIncome - totalWithdrawals;
+
+      console.log(`💰 [COMPREHENSIVE WALLET FINAL] Deposits: $${totalDeposits.toFixed(2)} | Earnings: $${totalEarnings.toFixed(2)} | Balance: $${walletBalance.toFixed(2)}`);
 
       return response.json({
         // Root-level properties for frontend wallet display
@@ -1947,6 +1989,82 @@ export async function createApp() {
     } catch (error) {
       console.error('Error fetching comprehensive wallet:', error);
       return response.status(500).json({ error: 'Failed to fetch wallet data.' });
+    }
+  });
+
+  // 🔍 DEBUG: Show ALL transactions (individual records) to check for duplicates or inflation
+  app.get('/api/debug/all-transactions', requireAccount, async (request, response) => {
+    try {
+      // Get ALL individual transactions (not grouped)
+      const allTx = await sql`
+        SELECT
+          id,
+          type,
+          amount_cents,
+          reference,
+          status,
+          created_at
+        FROM transactions
+        WHERE account_id = ${request.account.id}
+        ORDER BY created_at DESC
+        LIMIT 100
+      `;
+
+      // Group by type for summary
+      const summary = {};
+      let totalDepositsCents = 0;
+      let totalWithdrawalsCents = 0;
+      let totalEarningsCents = 0;
+
+      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
+
+      for (const tx of allTx) {
+        // 🔧 FIX: Parse amount_cents as integer (database returns as string)
+        const amountCents = parseInt(tx.amount_cents, 10) || 0;
+
+        if (!summary[tx.type]) {
+          summary[tx.type] = { count: 0, totalCents: 0 };
+        }
+        summary[tx.type].count += 1;
+        summary[tx.type].totalCents += amountCents;
+
+        if (tx.type === 'deposit') {
+          totalDepositsCents += amountCents;
+        } else if (tx.type === 'withdrawal') {
+          totalWithdrawalsCents += amountCents;
+        } else if (knownEarningTypes.includes(tx.type)) {
+          totalEarningsCents += amountCents;
+        }
+      }
+
+      return response.json({
+        accountId: request.account.id,
+        accountName: request.account.name,
+        totalTransactions: allTx.length,
+        summary: Object.keys(summary).reduce((acc, type) => {
+          acc[type] = {
+            count: summary[type].count,
+            amount: (summary[type].totalCents / 100).toFixed(2)
+          };
+          return acc;
+        }, {}),
+        calculation: {
+          totalDeposits: (totalDepositsCents / 100).toFixed(2),
+          totalEarnings: (totalEarningsCents / 100).toFixed(2),
+          totalWithdrawals: (totalWithdrawalsCents / 100).toFixed(2),
+          expectedBalance: ((totalDepositsCents + totalEarningsCents - totalWithdrawalsCents) / 100).toFixed(2)
+        },
+        recentTransactions: allTx.map(tx => ({
+          id: tx.id,
+          type: tx.type,
+          amount: (tx.amount_cents / 100).toFixed(2),
+          reference: tx.reference,
+          date: tx.created_at
+        }))
+      });
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      return response.status(500).json({ error: 'Failed to fetch transactions.' });
     }
   });
 
@@ -2228,6 +2346,173 @@ export async function createApp() {
     } catch (error) {
       console.error('Error in balance reconciliation:', error);
       return response.status(500).json({ error: 'Failed to check balance reconciliation.' });
+    }
+  });
+
+  // ✅ NEW: Fix missing recharge bonuses for an account
+  app.post('/api/admin/accounts/:id/fix-missing-bonuses', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const accountId = request.params.id;
+
+      // Get all approved deposits for this account
+      const deposits = await sql`
+        SELECT id, amount_cents, created_at
+        FROM transactions
+        WHERE account_id = ${accountId} AND type = 'deposit' AND status = 'approved'
+        ORDER BY created_at ASC
+      `;
+
+      if (deposits.length === 0) {
+        return response.status(404).json({ error: 'No approved deposits found for this account.' });
+      }
+
+      // Check which deposits already have bonuses
+      const bonusesExist = await sql`
+        SELECT transaction_id FROM referral_commissions
+        WHERE referred_account_id = ${accountId}
+      `;
+
+      const existingBonusesForDeposits = new Set(bonusesExist.map(b => b.transaction_id));
+
+      let addedCount = 0;
+      let totalBonusAdded = 0;
+      const results = [];
+
+      // For each deposit without a bonus, create one
+      for (const deposit of deposits) {
+        if (!existingBonusesForDeposits.has(deposit.id)) {
+          // Calculate 2.5% bonus
+          const bonusCents = Math.round(deposit.amount_cents * 0.025);
+          const bonusId = randomBytes(16).toString('hex');
+          const commissionId = randomBytes(16).toString('hex');
+          const txId = randomBytes(16).toString('hex');
+          const now = new Date().toISOString();
+
+          try {
+            // Create referral commission record
+            await sql`
+              INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
+              VALUES (${commissionId}, ${accountId}, ${deposit.id}, ${accountId}, ${bonusCents}, 0.025, ${now})
+            `;
+
+            // Create bonus transaction (auto-credited)
+            await sql`
+              INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+              VALUES (${txId}, ${accountId}, 'referral_commission', ${bonusCents}, 'Recharge bonus (2.5%)', 'approved', ${now})
+            `;
+
+            addedCount++;
+            totalBonusAdded += bonusCents;
+            results.push({
+              depositAmount: (deposit.amount_cents / 100).toFixed(2),
+              bonusAdded: (bonusCents / 100).toFixed(2),
+              status: 'Added'
+            });
+          } catch (err) {
+            results.push({
+              depositAmount: (deposit.amount_cents / 100).toFixed(2),
+              status: 'Failed',
+              error: err.message
+            });
+          }
+        } else {
+          results.push({
+            depositAmount: (deposit.amount_cents / 100).toFixed(2),
+            status: 'Already Has Bonus'
+          });
+        }
+      }
+
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      await recordAudit(request, 'admin.fix_missing_bonuses', accountId, {
+        depositCount: deposits.length,
+        bonusesAdded: addedCount,
+        totalBonusAdded: totalBonusAdded / 100,
+      });
+
+      return response.json({
+        ok: true,
+        accountId,
+        message: `Fixed ${addedCount} missing bonuses (+$${(totalBonusAdded / 100).toFixed(2)})`,
+        depositCount: deposits.length,
+        bonusesAdded: addedCount,
+        totalBonusAdded: (totalBonusAdded / 100).toFixed(2),
+        newBalance: newBalance.toFixed(2),
+        details: results,
+      });
+    } catch (error) {
+      console.error('Error fixing missing bonuses:', error);
+      return next(error);
+    }
+  });
+
+  // ✅ NEW: Remove duplicate transactions for an account
+  app.post('/api/admin/accounts/:id/remove-duplicates', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const accountId = request.params.id;
+
+      // Find duplicate transactions (same type, amount, created within 1 minute)
+      const duplicates = await sql`
+        SELECT t1.id, t1.type, t1.amount_cents, t1.created_at,
+               COUNT(*) as duplicate_count
+        FROM transactions t1
+        WHERE t1.account_id = ${accountId}
+        GROUP BY t1.type, t1.amount_cents, DATE_TRUNC('minute', t1.created_at)
+        HAVING COUNT(*) > 1
+      `;
+
+      if (duplicates.length === 0) {
+        return response.json({
+          ok: true,
+          message: 'No duplicate transactions found.',
+          removedCount: 0,
+        });
+      }
+
+      let removedCount = 0;
+
+      // For each group of duplicates, keep the first and remove the rest
+      for (const dup of duplicates) {
+        const duplicateTransactions = await sql`
+          SELECT id, created_at
+          FROM transactions
+          WHERE account_id = ${accountId}
+            AND type = ${dup.type}
+            AND amount_cents = ${dup.amount_cents}
+            AND DATE_TRUNC('minute', created_at) = DATE_TRUNC('minute', ${dup.created_at}::timestamp)
+          ORDER BY created_at ASC
+        `;
+
+        // Keep first, delete the rest
+        for (let i = 1; i < duplicateTransactions.length; i++) {
+          try {
+            await sql`DELETE FROM transactions WHERE id = ${duplicateTransactions[i].id}`;
+            removedCount++;
+          } catch (err) {
+            console.error(`Failed to delete duplicate ${duplicateTransactions[i].id}:`, err);
+          }
+        }
+      }
+
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      await recordAudit(request, 'admin.remove_duplicates', accountId, {
+        duplicateGroupsFound: duplicates.length,
+        transactionsRemoved: removedCount,
+      });
+
+      return response.json({
+        ok: true,
+        accountId,
+        message: `Removed ${removedCount} duplicate transactions`,
+        duplicateGroupsFound: duplicates.length,
+        removedCount,
+        newBalance: newBalance.toFixed(2),
+      });
+    } catch (error) {
+      console.error('Error removing duplicates:', error);
+      return next(error);
     }
   });
 
