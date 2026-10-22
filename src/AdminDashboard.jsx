@@ -119,34 +119,66 @@ const AdminDashboard = () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   const loadStats = async () => {
-    const d = await api('/api/admin/stats');
-    if (!d.success) {
+    try {
+      // Load accounts for client count
+      const accountsRes = await api('/api/admin/accounts');
+      const accounts = accountsRes || [];
+
+      // Load transactions for stats
+      const txRes = await api('/api/admin/transactions');
+      const transactions = txRes || [];
+
+      // Load trading ledger
+      const tradingRes = await api('/api/admin/trading/ledger');
+      const tradingData = tradingRes || {};
+
+      // Calculate stats from data
+      const deposits = transactions.filter(t => t.type === 'deposit' && t.status === 'approved');
+      const withdrawals = transactions.filter(t => t.type === 'withdrawal' && t.status === 'approved');
+      const pendingDeposits = transactions.filter(t => t.type === 'deposit' && t.status === 'pending');
+      const referralCommissions = transactions.filter(t => t.type === 'referral_commission' && t.status === 'approved');
+
+      const totalDeposits = deposits.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const totalWithdrawals = withdrawals.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const totalProfit = (tradingData.total_profit_cents || 0) / 100;
+      const totalCommissions = referralCommissions.reduce((sum, t) => sum + (t.amount || 0), 0);
+
+      setStats({
+        clients: accounts.length,
+        deposits: totalDeposits,
+        withdrawals: totalWithdrawals,
+        pending_deposits: pendingDeposits.length,
+        total_profit_paid: totalProfit,
+        trades_today: (tradingData.trades_today || 0),
+        ref_commissions: totalCommissions,
+        total_referrals: (tradingData.total_referrals || 0),
+        scheduler_running: true
+      });
+    } catch (error) {
+      console.error('Error loading stats:', error);
       window.location.href = '/admin';
-      return;
     }
-    setStats(d.data);
   };
 
   const loadTransactions = async () => {
     const d = await api('/api/admin/transactions');
-    if (d.success) setAllTx(d.data);
+    if (d) setAllTx(d);
   };
 
   const loadClients = async () => {
-    const d = await api('/api/admin/clients');
-    if (d.success) setAllClients(d.data);
+    const d = await api('/api/admin/accounts');
+    if (d) setAllClients(d);
   };
 
   const loadReferrals = async () => {
     const d = await api('/api/admin/referrals');
-    if (d.success) return d.data;
+    if (d) return d;
     return [];
   };
 
   const loadTrades = async () => {
-    const status = tradeStatusFilter;
-    const d = await api('/api/admin/trades' + (status ? '?status=' + status : ''));
-    if (d.success) return d.data;
+    const d = await api('/api/admin/trading/ledger');
+    if (d) return d || [];
     return [];
   };
 
@@ -166,13 +198,13 @@ const AdminDashboard = () => {
   };
 
   const confirmApprove = async () => {
-    const d = await post('/api/admin/deposit/approve', { tx_id: selectedTx.id });
+    const d = await post(`/api/admin/transactions/${selectedTx.id}/approve`, { note: 'Approved by admin' });
     setShowApproveModal(false);
-    if (!d.success) {
+    if (d.error) {
       showError(d.error);
       return;
     }
-    showSuccess(d.data.message);
+    showSuccess('Transaction approved');
     await refreshData();
   };
 
@@ -183,16 +215,15 @@ const AdminDashboard = () => {
   };
 
   const confirmReject = async () => {
-    const d = await post('/api/admin/deposit/reject', {
-      tx_id: selectedTx.id,
-      reason: rejectReason.trim() || 'Rejected by admin'
+    const d = await post(`/api/admin/transactions/${selectedTx.id}/reject`, {
+      note: rejectReason.trim() || 'Rejected by admin'
     });
     setShowRejectModal(false);
-    if (!d.success) {
+    if (d.error) {
       showError(d.error);
       return;
     }
-    showSuccess('Deposit rejected');
+    showSuccess('Transaction rejected');
     await refreshData();
   };
 
@@ -202,9 +233,9 @@ const AdminDashboard = () => {
   };
 
   const confirmWdrApprove = async () => {
-    const d = await post('/api/admin/withdrawal/approve', { tx_id: selectedTx.id });
+    const d = await post(`/api/admin/transactions/${selectedTx.id}/approve`, { note: 'Approved by admin' });
     setShowApproveWdrModal(false);
-    if (!d.success) {
+    if (d.error) {
       showError(d.error);
       return;
     }
@@ -219,12 +250,11 @@ const AdminDashboard = () => {
   };
 
   const confirmWdrReject = async () => {
-    const d = await post('/api/admin/withdrawal/reject', {
-      tx_id: selectedTx.id,
-      reason: rejectReason.trim() || 'Rejected by admin'
+    const d = await post(`/api/admin/transactions/${selectedTx.id}/reject`, {
+      note: rejectReason.trim() || 'Rejected by admin'
     });
     setShowRejectWdrModal(false);
-    if (!d.success) {
+    if (d.error) {
       showError(d.error);
       return;
     }
@@ -488,7 +518,7 @@ const AdminDashboard = () => {
   );
 
   const renderPendingDeposits = () => {
-    const pending = allTx.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
+    const pending = allTx.filter(t => t.type === 'deposit' && t.status === 'pending');
 
     if (!pending.length) {
       return <div className="empty">✓ No pending deposits</div>;
@@ -611,7 +641,7 @@ const AdminDashboard = () => {
               <td style={{ fontWeight: 'bold' }}>${fmt(t.amount_usd)}</td>
               <td>{escHtml(t.method || '—')}</td>
               <td>
-                <span className={`badge badge-${t.status === 'COMPLETED' ? 'success' : t.status === 'PENDING' ? 'pending' : 'danger'}`}>
+                <span className={`badge badge-${t.status === 'approved' ? 'success' : t.status === 'pending' ? 'pending' : 'danger'}`}>
                   {t.status}
                 </span>
               </td>

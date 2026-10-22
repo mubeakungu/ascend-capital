@@ -18,7 +18,7 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
         setLoading(true);
         setError(null);
 
-        const response = await fetch(`/api/deposits/${depositId}/claimable-profit`, {
+        const response = await fetch('/api/trading/can-claim-today', {
           method: 'GET',
           credentials: 'include',
         });
@@ -28,7 +28,10 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
         }
 
         const data = await response.json();
-        setClaimable(data);
+        setClaimable({
+          claimableProfit: data.dailyProfitAmount || 0,
+          alreadyClaimedToday: !data.canClaimToday,
+        });
       } catch (err) {
         setError(err.message);
         console.error('Error fetching claimable profit:', err);
@@ -37,10 +40,8 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
       }
     };
 
-    if (depositId) {
-      fetchClaimable();
-    }
-  }, [depositId]);
+    fetchClaimable();
+  }, []);
 
   // Claim profit handler
   const handleClaimProfit = async () => {
@@ -49,7 +50,7 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
       setError(null);
       setSuccess(false);
 
-      const response = await fetch(`/api/deposits/${depositId}/claim-profit`, {
+      const response = await fetch('/api/trading/claim-daily-trade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -62,8 +63,8 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
       }
 
       setSuccess(true);
-      setClaimable({ ...claimable, alreadyClaimedToday: true, claimableProfit: 0 });
-      onClaimed(data.amount);
+      setClaimable({ claimableProfit: 0, alreadyClaimedToday: true });
+      onClaimed(data.earnedAmount);
 
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(false), 3000);
@@ -71,11 +72,18 @@ export default function ClaimProfitButton({ depositId, onClaimed = () => {} }) {
       // Refresh claimable amount
       setTimeout(() => {
         const fetchClaimable = async () => {
-          const res = await fetch(`/api/deposits/${depositId}/claimable-profit`, {
-            credentials: 'include',
-          });
-          const updated = await res.json();
-          setClaimable(updated);
+          try {
+            const res = await fetch('/api/trading/can-claim-today', {
+              credentials: 'include',
+            });
+            const updated = await res.json();
+            setClaimable({
+              claimableProfit: updated.dailyProfitAmount || 0,
+              alreadyClaimedToday: !updated.canClaimToday,
+            });
+          } catch (err) {
+            console.error('Error refreshing claimable:', err);
+          }
         };
         fetchClaimable();
       }, 1000);

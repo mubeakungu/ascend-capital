@@ -1,3291 +1,2483 @@
-import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
-import { promisify } from 'node:util';
-import postgres from 'postgres';
-import express from 'express';
-import {
-  initializeTierRewardsTable,
-  checkAndCreditTierReward,
-  getTierProgression,
-  getDirectReferralCount,
-  getTeamTotal,
-  TIER_REQUIREMENTS,
-} 
+import React, { useEffect, useState } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import DownloadAndroidButton from './components/DownloadAndroidButton';
 
-const scryptAsync = promisify(scrypt);
-const SESSION_COOKIE = 'ascend_session';
-const ADMIN_SESSION_COOKIE = 'ascend_admin_session';
-const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
-const PASSWORD_BYTES = 64;
-const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_PATTERN = /^[0-9+\-\s()]{7,20}$/;
-const PIN_PATTERN = /^\d{6}$/;
-const TX_TYPES = ['deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission'];
-const TX_STATUSES = ['pending', 'approved', 'rejected'];
-const MAX_TX_AMOUNT = 10_000_000;
-const ADMIN_USERNAME = 'admin';
-const DEFAULT_INITIAL_ADMIN_PASSWORD = 'Admin@123';
-
-// Earnings activation settings
-const EARNINGS_ACTIVATION_HOUR = parseInt(process.env.EARNINGS_ACTIVATION_HOUR ?? '10', 10);
-const EARNINGS_ACTIVATION_MINUTE = parseInt(process.env.EARNINGS_ACTIVATION_MINUTE ?? '0', 10);
-
-// Referral tier commission rates
-const REFERRAL_COMMISSION_RATES = [
-  0.05,  // Star 1: 5%
-  0.06,  // Star 2: 6%
-  0.07,  // Star 3: 7%
-  0.08,  // Star 4: 8%
-  0.10,  // Star 5: 10%
-  0.12,  // Star 6: 12%
-  0.14,  // Star 7: 14%
-  0.16,  // Star 8: 16%
-  0.18,  // Crown Leader: 18%
+const plans = [
+  { deposit: 300, earning: '8', dailyIncome: 8 },
+  { deposit: 400, earning: '11', dailyIncome: 11 },
+  { deposit: 500, earning: '15', dailyIncome: 15 },
+  { deposit: 750, earning: '25', dailyIncome: 25 },
+  { deposit: 1000, earning: '35', dailyIncome: 35 },
+  { deposit: 2000, earning: '70', dailyIncome: 70 },
+  { deposit: 5000, earning: '180', dailyIncome: 180 },
+  { deposit: 10000, earning: '370', dailyIncome: 370 },
+  { deposit: 20000, earning: '750', dailyIncome: 750 },
+  { deposit: 35000, earning: '1,400', dailyIncome: 1400 },
 ];
 
-// Weekly tier salaries
-const TIER_SALARIES = [
-  0,        // Star 1: $0 (no salary)
-  100,      // Star 2: $100/week
-  200,      // Star 3: $200/week
-  300,      // Star 4: $300/week
-  450,      // Star 5: $450/week
-  900,      // Star 6: $900/week
-  1500,     // Star 7: $1,500/week
-  2500,     // Star 8: $2,500/week
-  5000,     // Crown Leader: $5,000/week
+const ranks = [
+  { name: 'Star 1', direct: 5, team: 0, reward: '$80', weeklySalary: null },
+  { name: 'Star 2', direct: 7, team: 13, reward: '$150', weeklySalary: '$100' },
+  { name: 'Star 3', direct: 8, team: 25, reward: '$250', weeklySalary: '$200' },
+  { name: 'Star 4', direct: 9, team: 40, reward: '$400', weeklySalary: '$300' },
+  { name: 'Star 5', direct: 10, team: 70, reward: '$700', weeklySalary: '$450' },
+  { name: 'Star 6', direct: 11, team: 150, reward: '$1,000', weeklySalary: '$900' },
+  { name: 'Star 7', direct: 12, team: 400, reward: '$2,500 + house', weeklySalary: '$1,500' },
+  { name: 'Star 8', direct: 13, team: 700, reward: '$4,500 + Mazda CX-5', weeklySalary: '$2,500' },
+  { name: 'Crown Leader', direct: 14, team: 1000, reward: '$7,000 + Mercedes-Benz E300', weeklySalary: '$5,000' },
 ];
 
-const TIER_NAMES = [
-  'Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5',
-  'Star 6', 'Star 7', 'Star 8', 'Crown Leader',
+const navItems = [
+  { id: 'overview', label: 'Overview', icon: 'grid' },
+  { id: 'deposits', label: 'Deposit plans', icon: 'chart' },
+  { id: 'referrals', label: 'Referrals & ranks', icon: 'users' },
 ];
 
-// Deposit plans: amount → daily profit
-const DEPOSIT_PLANS = [
-  { deposit: 300, dailyProfit: 8 },
-  { deposit: 400, dailyProfit: 11 },
-  { deposit: 500, dailyProfit: 15.5 },
-  { deposit: 750, dailyProfit: 25 },
-  { deposit: 1000, dailyProfit: 35 },
-  { deposit: 2000, dailyProfit: 70 },
-  { deposit: 5000, dailyProfit: 180 },
-  { deposit: 10000, dailyProfit: 370 },
-  { deposit: 20000, dailyProfit: 750 },
-  { deposit: 35000, dailyProfit: 1400 },
-];
+function generateTradingData() {
+  const today = new Date();
+  const data = [];
+  const currencies = [
+    { name: 'EUR/USD', baseProfit: 1.2 },
+    { name: 'GBP/USD', baseProfit: 1.5 },
+    { name: 'XAU/USD', baseProfit: 2.1 },
+    { name: 'BTC/USD', baseProfit: 3.2 },
+  ];
 
-const TIER_REQUIREMENTS_DETAILED = [
-  { direct: 5, team: 0 },           // Star 1: 5 direct (no team req)
-  { direct: 7, team: 13 },          // Star 2: 7 direct AND 13 team
-  { direct: 8, team: 25 },          // Star 3: 8 direct AND 25 team
-  { direct: 9, team: 40 },          // Star 4: 9 direct AND 40 team
-  { direct: 10, team: 70 },         // Star 5: 10 direct AND 70 team
-  { direct: 11, team: 150 },        // Star 6: 11 direct AND 150 team
-  { direct: 12, team: 400 },        // Star 7: 12 direct AND 400 team
-  { direct: 13, team: 700 },        // Star 8: 13 direct AND 700 team
-  { direct: 14, team: 1000 },       // Crown Leader: 14 direct AND 1,000 team
-];
+  for (let i = 14; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    const dayStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-function accountView(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone ?? null,
-    role: row.role ?? 'member',
-    status: row.status ?? 'active',
-    mustChangePassword: Boolean(row.must_change_password),
-    createdAt: row.created_at,
-  };
-}
-
-function transactionView(row, { admin = false } = {}) {
-  const typeMap = {
-    'tier_reward': 'Tier Reward',
-    'trading_profit': 'Trading Profit',
-    'tier_salary': 'Weekly Salary',
-  };
-
-  const view = {
-    id: row.id,
-    type: typeMap[row.type] || row.type,
-    amount: row.amount_cents / 100,
-    reference: row.reference,
-    status: row.status,
-    createdAt: row.created_at,
-    reviewedAt: row.reviewed_at ?? null,
-    reviewNote: row.review_note ?? '',
-    isTierReward: row.type === 'tier_reward',
-    isTradingProfit: row.type === 'trading_profit',
-    isTierSalary: row.type === 'tier_salary',
-  };
-  if (admin) {
-    view.accountId = row.account_id;
-    view.accountName = row.account_name;
-    view.accountEmail = row.account_email;
-    view.reviewedBy = row.reviewed_by ?? null;
+    const dataPoint = { date: dayStr };
+    currencies.forEach(currency => {
+      const volatility = (Math.random() - 0.5) * 0.4;
+      const profit = currency.baseProfit * (1 + volatility) * (1 + i * 0.02);
+      dataPoint[currency.name.replace('/', '')] = Math.round(profit * 100) / 100;
+    });
+    data.push(dataPoint);
   }
-  return view;
+  return data;
 }
 
-function readCookie(request, name) {
-  const prefix = `${name}=`;
-  const value = request.headers.cookie
-    ?.split(';')
-    .map((cookie) => cookie.trim())
-    .find((cookie) => cookie.startsWith(prefix))
-    ?.slice(prefix.length);
-
-  return value ? decodeURIComponent(value) : null;
-}
-
-function setSessionCookie(response, token, secure, cookieName = SESSION_COOKIE) {
-  response.append(
-    'Set-Cookie',
-    `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DURATION_SECONDS}${secure ? '; Secure' : ''}`,
-  );
-}
-
-function clearSessionCookie(response, secure, cookieName = SESSION_COOKIE) {
-  response.append(
-    'Set-Cookie',
-    `${cookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`,
-  );
-}
-
-function hashToken(token) {
-  return createHash('sha256').update(token).digest('hex');
-}
-
-function passwordError(password) {
-  if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
-    return 'Password must be between 6 and 128 characters.';
-  }
-  return null;
-}
-
-function validationMessage({ name, email, password, phone, pin }, requireName) {
-  if (requireName && (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80)) {
-    return 'Name must be between 2 and 80 characters.';
-  }
-  if (typeof email !== 'string' || email.length > 254 || !EMAIL_PATTERN.test(email.trim())) {
-    return 'Enter a valid email address.';
-  }
-  if (phone && (typeof phone !== 'string' || !PHONE_PATTERN.test(phone.trim()))) {
-    return 'Enter a valid phone number.';
-  }
-  if (pin && (typeof pin !== 'string' || !PIN_PATTERN.test(pin))) {
-    return 'PIN must be exactly 6 digits.';
-  }
-  return passwordError(password);
-}
-
-function loginMessage({ email, password }) {
-  const identifier = typeof email === 'string' ? email.trim().toLowerCase() : '';
-  if (identifier !== ADMIN_USERNAME && (identifier.length > 254 || !EMAIL_PATTERN.test(identifier))) {
-    return 'Enter a valid email address or username.';
-  }
-  return typeof password === 'string' && password.length > 0 && password.length <= 128 ? null : 'Enter your password.';
-}
-
-async function hashPassword(password) {
-  const salt = randomBytes(16);
-  const hash = await scryptAsync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
-  return { salt: salt.toString('hex'), hash: hash.toString('hex') };
-}
-
-function cleanText(value, { min, max }) {
-  if (typeof value !== 'string') return null;
-  const text = value.trim();
-  if (text.length < min || text.length > max) return null;
-  return text;
-}
-
-function parseAmountCents(value) {
-  const number = typeof value === 'string' ? Number(value.trim()) : value;
-  if (typeof number !== 'number' || !Number.isFinite(number) || number <= 0 || number > MAX_TX_AMOUNT) return null;
-  const cents = Math.round(number * 100);
-  if (Math.abs(number * 100 - cents) > 1e-6) return null;
-  return cents;
-}
-
-function createRateLimiter({ limit, windowMs }) {
-  const attempts = new Map();
-  let nextCleanup = 0;
-
-  return (request, response, next) => {
-    const now = Date.now();
-    if (now >= nextCleanup) {
-      for (const [ip, entry] of attempts) {
-        if (entry.resetAt <= now) attempts.delete(ip);
-      }
-      nextCleanup = now + windowMs;
-    }
-
-    const ip = request.ip;
-    let entry = attempts.get(ip);
-    if (!entry || entry.resetAt <= now) {
-      entry = { count: 0, resetAt: now + windowMs };
-      attempts.set(ip, entry);
-    }
-
-    entry.count += 1;
-    if (entry.count > limit) {
-      response.set('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
-      return response.status(429).json({ error: 'Too many account requests. Try again later.' });
-    }
-    return next();
-  };
-}
-
-function calculateEarningsStatus(lastDepositTime) {
-  if (!lastDepositTime) {
-    return {
-      earningsActive: false,
-      earningsStartTime: null,
-    };
-  }
-
-  const depositDate = new Date(lastDepositTime);
-  const nextDay = new Date(depositDate);
-  nextDay.setDate(nextDay.getDate() + 1);
-  nextDay.setHours(EARNINGS_ACTIVATION_HOUR, EARNINGS_ACTIVATION_MINUTE, 0, 0);
-
+function getTimeGreeting() {
   const now = new Date();
-  const isActive = now >= nextDay;
+  const hours = now.getHours();
 
-  const timeStr = isActive ? null : nextDay.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
+  if (hours >= 5 && hours < 12) {
+    return 'Good morning';
+  } else if (hours >= 12 && hours < 13) {
+    return 'Good noon';
+  } else if (hours >= 13 && hours < 18) {
+    return 'Good afternoon';
+  } else {
+    return 'Good evening';
+  }
+}
 
-  return {
-    earningsActive: isActive,
-    earningsStartTime: timeStr,
+function maskAddress(address) {
+  if (!address || address.length < 12) return address;
+  return address.slice(0, 4) + '•'.repeat(address.length - 8) + address.slice(-4);
+}
+
+function Icon({ name, size = 18 }) {
+  const paths = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    chart: <><path d="M3 3v18h18" /><path d="m7 14 4-4 4 3 6-7" /></>,
+    users: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    arrow: <><path d="M7 17 17 7M7 7h10v10" /></>,
+    wallet: <><rect x="3" y="5" width="18" height="15" rx="2" /><path d="M3 9h18M16 15h.01" /><path d="M6 5V3h12v2" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    withdraw: <><path d="M12 19V5M5 12l7-7 7 7" /></>,
+    copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
+    check: <path d="m5 12 4 4L19 6" />,
+    close: <><path d="m18 6-12 12M6 6l12 12" /></>,
+    shield: <><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11" /><path d="m9 12 2 2 4-4" /></>,
+    spark: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /><path d="m19 14 1.3 2.7L23 18l-2.7 1.3L19 22l-1.3-2.7L15 18l2.7-1.3L19 14Z" /></>,
+    menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+    trending: <><path d="M3 3v18h18" /><polyline points="7 14 11 10 15 14 19 8" /></>,
+    link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
   };
+
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function generateReferralCode() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-function getTierByDirectReferrals(directCount) {
-  if (directCount < 1) return -1;
-  if (directCount < 3) return 0;
-  if (directCount < 6) return 1;
-  if (directCount < 10) return 2;
-  if (directCount < 15) return 3;
-  if (directCount < 25) return 4;
-  if (directCount < 40) return 5;
-  if (directCount < 60) return 6;
-  if (directCount < 100) return 7;
-  return 8;
-}
-
-function getTierByProgress(directCount, teamTotal) {
-  for (let i = TIER_REQUIREMENTS_DETAILED.length - 1; i >= 0; i--) {
-    const req = TIER_REQUIREMENTS_DETAILED[i];
-    const directMet = directCount >= req.direct;
-    // Star 1 has team: 0 (no team requirement), others require BOTH conditions to be met
-    const teamMet = req.team === 0 || teamTotal >= req.team;
-
-    if (directMet && teamMet) return i;
-  }
-  return -1;
-}
-
-function getDailyProfitForDeposit(depositCents) {
-  const depositAmount = depositCents / 100;
-  for (let i = DEPOSIT_PLANS.length - 1; i >= 0; i--) {
-    if (depositAmount >= DEPOSIT_PLANS[i].deposit) {
-      return DEPOSIT_PLANS[i].dailyProfit;
-    }
-  }
-  return 0;
-}
-
-// ✅ HELPER FUNCTION: Find account by ID or email
-async function findAccountByIdentifier(sql, identifier) {
-  // Try to find by ID first (faster)
-  let account = await sql`SELECT id, name, email FROM accounts WHERE id = ${identifier}`;
-
-  if (account.length === 0) {
-    // If not found by ID, try by email (case-insensitive)
-    const emailLower = identifier.toLowerCase().trim();
-    account = await sql`SELECT id, name, email FROM accounts WHERE LOWER(email) = ${emailLower}`;
-  }
-
-  return account.length > 0 ? account[0] : null;
-}
-
-export async function createApp() {
-  const sql = postgres(process.env.DATABASE_URL);
-
-  // Initialize tables
-  await sql`
-    CREATE TABLE IF NOT EXISTS accounts (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password_salt TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      phone TEXT UNIQUE,
-      pin TEXT,
-      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
-      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'held')),
-      hold_reason TEXT,
-      held_at TEXT,
-      must_change_password INTEGER NOT NULL DEFAULT 0,
-      last_deposit_time TEXT,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS sessions (
-      token_hash TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      expires_at BIGINT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission')),
-      amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
-      reference TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
-      created_at TEXT NOT NULL,
-      reviewed_by TEXT,
-      reviewed_at TEXT,
-      review_note TEXT
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS transactions_account_idx ON transactions(account_id, created_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions(status, created_at)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS audit_log (
-      id SERIAL PRIMARY KEY,
-      actor_id TEXT,
-      actor_email TEXT,
-      action TEXT NOT NULL,
-      target_id TEXT,
-      detail TEXT,
-      ip TEXT,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS referral_codes (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      code TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS referral_codes_account_idx ON referral_codes(account_id)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS referral_signups (
-      id TEXT PRIMARY KEY,
-      referrer_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
-      referral_code TEXT REFERENCES referral_codes(code) ON DELETE SET NULL,
-      referred_account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
-      signed_up_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS referral_signups_referrer_idx ON referral_signups(referrer_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS referral_signups_referred_idx ON referral_signups(referred_account_id)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS referral_commissions (
-      id TEXT PRIMARY KEY,
-      referrer_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-      referred_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      commission_cents INTEGER NOT NULL CHECK(commission_cents > 0),
-      commission_rate REAL NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS referral_commissions_referrer_idx ON referral_commissions(referrer_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS referral_commissions_transaction_idx ON referral_commissions(transaction_id)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS trading_ledger (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      deposit_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-      profit_cents INTEGER NOT NULL CHECK(profit_cents > 0),
-      profit_date TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date)`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS weekly_salary_payments (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      tier_index INTEGER NOT NULL,
-      tier_name TEXT NOT NULL,
-      salary_cents INTEGER NOT NULL CHECK(salary_cents > 0),
-      payment_week TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'credited' CHECK(status IN ('pending', 'credited', 'held')),
-      credited_at TEXT,
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_account_idx ON weekly_salary_payments(account_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS weekly_salary_payments_week_idx ON weekly_salary_payments(payment_week)`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS weekly_salary_payments_unique_idx ON weekly_salary_payments(account_id, payment_week)`;
-
-  // ✅ ADD: Prime Hour Wallet table
-  await sql`
-    CREATE TABLE IF NOT EXISTS prime_hour_wallets (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
-      balance_cents INTEGER NOT NULL DEFAULT 0 CHECK(balance_cents >= 0),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS prime_hour_wallets_account_idx ON prime_hour_wallets(account_id)`;
-
-  // ✅ ADD: Prime Hour transactions table
-  await sql`
-    CREATE TABLE IF NOT EXISTS prime_hour_transactions (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal')),
-      amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
-      reference TEXT,
-      status TEXT NOT NULL DEFAULT 'approved' CHECK(status IN ('pending', 'approved', 'rejected')),
-      created_at TEXT NOT NULL
-    );
-  `;
-
-  await sql`CREATE INDEX IF NOT EXISTS prime_hour_transactions_account_idx ON prime_hour_transactions(account_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS prime_hour_transactions_created_idx ON prime_hour_transactions(created_at)`;
-
-  await initializeTierRewardsTable(sql);
-
-  const app = express();
-  const secureCookie = process.env.NODE_ENV === 'production';
-  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? (secureCookie ? 1 : 0));
-  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
-    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
-  }
-  const authRateLimit = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
-  const passwordRateLimit = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
-  const updateRateLimit = createRateLimiter({ limit: 30, windowMs: 15 * 60 * 1000 });
-
-  app.disable('x-powered-by');
-  app.set('trust proxy', trustProxyHops);
-  app.use((request, response, next) => {
-    response.set({
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'same-origin',
-      'X-Frame-Options': 'DENY',
-    });
-
-    if (request.path.startsWith('/api/') && ['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
-      const origin = request.get('origin');
-      if (origin && origin !== `${request.protocol}://${request.get('host')}`) {
-        return response.status(403).json({ error: 'Request origin is not allowed.' });
-      }
-      if (!request.is('application/json')) {
-        return response.status(415).json({ error: 'Content-Type must be application/json.' });
-      }
-    }
-    return next();
+async function requestApi(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
   });
-  app.use(express.json({ limit: '10kb', strict: true }));
+  if (response.status === 204) return null;
 
-  function recordAudit(request, action, targetId, detail = {}) {
-    return sql`
-      INSERT INTO audit_log (actor_id, actor_email, action, target_id, detail, ip, created_at)
-      VALUES (${request.account?.id ?? null}, ${request.account?.email ?? null}, ${action}, ${targetId ?? null}, ${JSON.stringify(detail)}, ${request.ip ?? null}, ${new Date().toISOString()})
-    `;
-  }
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'The account request failed.');
+  return result;
+}
 
-  async function approvedBalanceCents(accountId) {
-    const row = await sql`
-      SELECT COALESCE(SUM(CASE
-        WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
-        WHEN type = 'withdrawal' THEN -amount_cents
-        ELSE 0
-      END), 0) AS balance
-      FROM transactions
-      WHERE account_id = ${accountId} AND status = 'approved'
-    `;
-    return row[0]?.balance || 0;
-  }
+function PasswordToggleInput({ label, value, onChange, error, required = false, showPassword, onToggle, autoComplete = 'current-password' }) {
+  return (
+    <label className="account-field" style={{position: 'relative'}}>
+      {label}
+      <input
+        type={showPassword ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        minLength={6}
+        maxLength={128}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        style={{paddingRight: '40px'}}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={showPassword ? 'Hide password' : 'Show password'}
+        tabIndex={-1}
+        style={{
+          position: 'absolute',
+          right: '12px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#6b7280',
+          transition: 'color 0.2s ease',
+          marginTop: '22px'
+        }}
+        onMouseEnter={(e) => e.target.style.color = '#374151'}
+        onMouseLeave={(e) => e.target.style.color = '#6b7280'}
+      >
+        {showPassword ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        )}
+      </button>
+    </label>
+  );
+}
 
-  async function pendingWithdrawalsCents(accountId) {
-    const row = await sql`
-      SELECT COALESCE(SUM(amount_cents), 0) AS total
-      FROM transactions
-      WHERE account_id = ${accountId} AND type = 'withdrawal' AND status = 'pending'
-    `;
-    return row[0]?.total || 0;
-  }
+function AuthPage({ mode, name, email, password, phone, pin, error, storageMode, referralCode, onNameChange, onEmailChange, onPasswordChange, onPhoneChange, onPinChange, onSubmit, onNavigate, showPassword, onTogglePasswordVisibility }) {
+  const registering = mode === 'register';
 
-  async function getTransaction(id) {
-    const row = await sql`
-      SELECT t.*, a.name AS account_name, a.email AS account_email
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id
-      WHERE t.id = ${id}
-    `;
-    return row[0];
-  }
+  return (
+    <main className="standalone-shell">
+      <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
+        <img src="/ascend-logo.jpg" alt="Ascend Capital" className="brand-logo" style={{width: '40px', height: '40px', borderRadius: '50%'}} />
+        <span className="brand-name">ascend<span>capital</span></span>
+      </a>
+      <section className="standalone-card">
+        <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
+        <h1>{registering ? 'Create your account' : 'Welcome back'}<span className="title-period">.</span></h1>
+        <p className="standalone-description">Sign in to manage your member profile and process real transactions.</p>
+        {registering && referralCode && (
+          <div className="referral-notice" role="note">
+            <Icon name="link" size={16} />
+            <div>
+              <strong>Referral code detected</strong>
+              <span>You're registering with referral code: <code>{referralCode}</code></span>
+            </div>
+          </div>
+        )}
+        {storageMode === 'ephemeral' && <div className="storage-warning" role="note"><strong>Temporary account storage</strong><span>This free hosting setup can erase account data when the service restarts. Do not reuse a password from another service.</span></div>}
+        <form onSubmit={onSubmit}>
+          {registering && <label className="account-field">Full name<input type="text" autoComplete="name" minLength={2} maxLength={80} value={name} onChange={(event) => onNameChange(event.target.value)} required /></label>}
+          <label className="account-field">Email address<input type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => onEmailChange(event.target.value)} required /></label>
+          {registering && (
+            <>
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px'}}>
+                <label className="account-field">Phone<input type="tel" autoComplete="tel" placeholder="+254 7XX XXX XXX" value={phone} onChange={(event) => onPhoneChange(event.target.value)} /></label>
+                <label className="account-field">PIN (6 digits)<input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={pin} onChange={(event) => onPinChange(event.target.value)} /></label>
+              </div>
+            </>
+          )}
+          <>
+            <PasswordToggleInput
+              label="Password"
+              value={password}
+              onChange={onPasswordChange}
+              showPassword={showPassword}
+              onToggle={onTogglePasswordVisibility}
+              autoComplete={registering ? 'new-password' : 'current-password'}
+              required
+            />
+            {registering && <span className="field-hint">Use at least 6 characters.</span>}
+          </>
+          {error && <div className="modal-message" role="alert">{error}</div>}
+          <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
+        </form>
+        <button className="account-switch" onClick={() => onNavigate(registering ? '/login' : '/register')}>{registering ? 'Already registered? Sign in' : 'New here? Create an account'}</button>
+        <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transactions</p>
+      </section>
+    </main>
+  );
+}
 
-  async function getCurrentAccountAsync(request, cookieName = SESSION_COOKIE, requireAdminRole = false) {
-    const token = readCookie(request, cookieName);
-    if (!token) return null;
+function AdminPage({ account, accountLoading, onNavigate }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [editedName, setEditedName] = useState('');
+  const [saving, setSaving] = useState(false);
 
-    const tokenHash = hashToken(token);
-    const now = Date.now();
-
-    await sql`DELETE FROM sessions WHERE expires_at <= ${now}`;
-
-    const rows = await sql`
-      SELECT accounts.id, accounts.name, accounts.email, accounts.phone, accounts.created_at, accounts.role, accounts.status,
-        accounts.must_change_password
-      FROM sessions
-      JOIN accounts ON accounts.id = sessions.account_id
-      WHERE sessions.token_hash = ${tokenHash} AND sessions.expires_at > ${now} AND accounts.status = 'active'
-    `;
-
-    if (rows.length === 0) return null;
-    const row = rows[0];
-    if (requireAdminRole && row.role !== 'admin') return null;
-    return row;
-  }
-
-  async function requireAccount(request, response, next) {
-    const account = await getCurrentAccountAsync(request);
-    if (!account) return response.status(401).json({ error: 'Sign in to continue.' });
-    request.account = account;
-    return next();
-  }
-
-  async function requireAdminSession(request, response, next) {
-    const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
-    if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
-    request.account = account;
-    return next();
-  }
-
-  async function seedInitialAdmin() {
-    const password = process.env.INITIAL_ADMIN_PASSWORD || DEFAULT_INITIAL_ADMIN_PASSWORD;
-    if (password.length > 128) throw new Error('INITIAL_ADMIN_PASSWORD must be at most 128 characters.');
-
-    const resetRequested = process.env.RESET_ADMIN_PASSWORD === 'true';
-    const existing = await sql`SELECT id FROM accounts WHERE email = ${ADMIN_USERNAME}`;
-
-    if (existing.length > 0 && !resetRequested) {
-      await sql`UPDATE accounts SET role = 'admin' WHERE id = ${existing[0].id}`;
-      return;
+  useEffect(() => {
+    if (accountLoading) return undefined;
+    if (account?.role !== 'admin') {
+      setLoading(false);
+      return undefined;
     }
 
-    const salt = randomBytes(16);
-    const passwordHash = scryptSync(password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
+    let cancelled = false;
+    requestApi('/api/admin/accounts')
+      .then(({ accounts: members }) => {
+        if (!cancelled) setAccounts(members);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [account, accountLoading]);
 
-    if (existing.length > 0) {
-      await sql`
-        UPDATE accounts
-        SET role = 'admin', status = 'active', password_salt = ${salt.toString('hex')}, password_hash = ${passwordHash.toString('hex')}, must_change_password = 1
-        WHERE id = ${existing[0].id}
-      `;
-      await sql`DELETE FROM sessions WHERE account_id = ${existing[0].id}`;
-      await recordAudit({}, 'admin.password_reset_switch', existing[0].id, {});
-      return;
-    }
-
-    const id = randomBytes(16).toString('hex');
-    await sql`
-      INSERT INTO accounts (id, name, email, password_salt, password_hash, created_at, role, must_change_password)
-      VALUES (${id}, 'Administrator', ${ADMIN_USERNAME}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${new Date().toISOString()}, 'admin', 1)
-    `;
-  }
-
-  async function createAccountSession(accountId, response) {
-    const token = randomBytes(32).toString('base64url');
-    const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
-    await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${accountId}, ${expiresAt})`;
-    setSessionCookie(response, token, secureCookie);
-  }
-
-  async function trackReferralSignup(accountId, referralCode) {
-    if (!referralCode || typeof referralCode !== 'string') return;
-    const codeRecord = await sql`SELECT account_id FROM referral_codes WHERE code = ${referralCode}`;
-
-    if (codeRecord.length === 0) return;
-
-    const id = randomBytes(16).toString('hex');
+  async function saveName(id) {
+    setError('');
+    setSaving(true);
     try {
-      await sql`
-        INSERT INTO referral_signups (id, referrer_id, referral_code, referred_account_id, signed_up_at)
-        VALUES (${id}, ${codeRecord[0].account_id}, ${referralCode.toUpperCase()}, ${accountId}, ${new Date().toISOString()})
-      `;
+      const result = await requestApi(`/api/admin/accounts/${encodeURIComponent(id)}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: editedName }),
+      });
+      setAccounts((current) => current.map((member) => member.id === id ? result.account : member));
+      setEditingId('');
+      setEditedName('');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-      const directCount = await getDirectReferralCount(sql, codeRecord[0].account_id);
-      const teamTotal = await getTeamTotal(sql, codeRecord[0].account_id);
-      const tier = getTierByProgress(directCount, teamTotal);
+  return (
+    <main className="standalone-shell">
+      <a className="brand standalone-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/'); }}>
+        <img src="/ascend-logo.jpg" alt="Ascend Capital" className="brand-logo" style={{width: '40px', height: '40px', borderRadius: '50%'}} />
+        <span className="brand-name">ascend<span>capital</span></span>
+      </a>
+      <section className="admin-page-card">
+        <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT ADMINISTRATION</div>
+        <h1>Manage member profiles<span className="title-period">.</span></h1>
+        <p className="standalone-description">Administrators can view member accounts and update member display names. This area has no deposit, withdrawal, wallet, payout, or fund-approval controls.</p>
+        <div className="admin-restriction"><Icon name="shield" size={16} /><span>Profile administration only · Financial operations are not supported.</span></div>
+        {accountLoading || loading ? <p className="admin-empty">Loading account directory…</p>
+          : account?.role !== 'admin' ? <div className="modal-message">Sign in with an administrator account to manage member profiles.</div>
+            : error && accounts.length === 0 ? <div className="modal-message" role="alert">{error}</div>
+              : (
+                <>
+                  {error && <div className="modal-message" role="alert">{error}</div>}
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead><tr><th>MEMBER</th><th>EMAIL</th><th>ROLE</th><th>CREATED</th><th>ACTION</th></tr></thead>
+                      <tbody>{accounts.map((member) => (
+                        <tr key={member.id}>
+                          <td>{editingId === member.id
+                            ? <input className="admin-name-input" aria-label={`Name for ${member.email}`} value={editedName} onChange={(event) => setEditedName(event.target.value)} maxLength={80} />
+                            : member.name}</td>
+                          <td>{member.email}</td>
+                          <td><span className={`admin-role ${member.role === 'admin' ? 'admin-role-active' : ''}`}>{member.role}</span></td>
+                          <td>{new Date(member.createdAt).toLocaleDateString()}</td>
+                          <td>{member.role === 'admin' ? <span className="admin-protected">Protected</span> : editingId === member.id
+                            ? <button className="admin-action" disabled={saving} onClick={() => saveName(member.id)}>{saving ? 'Saving…' : 'Save'}</button>
+                            : <button className="admin-action" onClick={() => { setEditingId(member.id); setEditedName(member.name); }}>Edit name</button>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  {accounts.length === 0 && <p className="admin-empty">No member accounts yet.</p>}
+                </>
+              )}
+        <button className="button button-secondary admin-back" onClick={() => onNavigate('/')}>Return to dashboard</button>
+      </section>
+    </main>
+  );
+}
 
-      if (tier >= 0) {
-        const tierReward = await checkAndCreditTierReward(sql, codeRecord[0].account_id);
-        if (tierReward) {
-          await recordAudit({}, 'referral.tier_reward_credited', codeRecord[0].account_id, {
-            tierIndex: tierReward.tierId,
-            tierName: tierReward.tierName,
-            amountUSD: tierReward.amountCents / 100,
-            directCount,
-            teamTotal,
-          });
+// ✅ NEW COMPONENT: Display referred members with their details
+function ReferredMembersList() {
+  const [referrals, setReferrals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    requestApi('/api/referrals/list')
+      .then(({ referrals: members }) => {
+        if (!cancelled) {
+          setReferrals(Array.isArray(members) ? members : []);
         }
-      }
-
-      const directReferrerOf = await sql`
-        SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${codeRecord[0].account_id}
-      `;
-
-      if (directReferrerOf.length > 0 && directReferrerOf[0].referrer_id) {
-        const grandDirect = await getDirectReferralCount(sql, directReferrerOf[0].referrer_id);
-        const grandTeam = await getTeamTotal(sql, directReferrerOf[0].referrer_id);
-        const grandTier = getTierByProgress(grandDirect, grandTeam);
-
-        if (grandTier >= 0) {
-          const grandParentTierReward = await checkAndCreditTierReward(sql, directReferrerOf[0].referrer_id);
-          if (grandParentTierReward) {
-            await recordAudit({}, 'referral.tier_reward_credited', directReferrerOf[0].referrer_id, {
-              tierIndex: grandParentTierReward.tierId,
-              tierName: grandParentTierReward.tierName,
-              amountUSD: grandParentTierReward.amountCents / 100,
-              directCount: grandDirect,
-              teamTotal: grandTeam,
-            });
-          }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
         }
-      }
-    } catch (error) {
-      // Ignore duplicate referral signups
-    }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center', color: '#aaa' }}>
+        <p>Loading your network…</p>
+      </div>
+    );
   }
 
-  async function applyReferralCommission(transactionId) {
-    const txRows = await sql`
-      SELECT t.*, a.id AS account_id
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id
-      WHERE t.id = ${transactionId}
-    `;
+  return (
+    <div>
+      <div style={{ marginBottom: '12px' }}>
+        <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>YOUR NETWORK</span>
+        <h3 style={{ marginTop: '4px', marginBottom: '0' }}>Referred members</h3>
+      </div>
+      {referrals.length === 0 && (
+        <div style={{ padding: '20px', textAlign: 'center', color: '#aaa', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', marginBottom: '20px' }}>
+          <p>No referrals yet. Share your referral code to start building your network!</p>
+        </div>
+      )}
+      {referrals.length > 0 && (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px', margin: '16px 0' }}>
+        {referrals.map((member) => (
+          <div
+            key={member.id}
+            style={{
+              background: 'rgba(212, 175, 55, 0.05)',
+              border: '1px solid rgba(212, 175, 55, 0.15)',
+              borderRadius: '8px',
+              padding: '14px',
+            }}
+          >
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-light)', marginBottom: '3px' }}>
+                {member.name}
+              </div>
+              <div style={{ fontSize: '11px', color: '#999', wordBreak: 'break-all' }}>
+                {member.email}
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid rgba(212, 175, 55, 0.1)', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px' }}>
+                <span style={{ color: '#aaa' }}>Deposits</span>
+                <span style={{ fontWeight: '600', color: 'var(--gold)' }}>
+                  ${member.totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                <span style={{ color: '#888' }}>Joined</span>
+                <span style={{ color: '#bbb' }}>
+                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      )}
+    </div>
+  );
+}
 
-    if (txRows.length === 0) return null;
-    const tx = txRows[0];
+function TradingGraph({ balance, totalDeposits }) {
+  const data = generateTradingData();
+  const hasDeposits = totalDeposits > 0;
 
-    if (tx.type !== 'deposit' || tx.status !== 'approved') return null;
+  return (
+    <section className="trading-graph-section">
+      <div className="section-heading">
+        <div><div className="eyebrow"><span className="eyebrow-line" /> MARKET PERFORMANCE</div><h2>Currency trading profits</h2><p className="section-subtitle">Daily profit tracking across major currency pairs linked to your deposits.</p></div>
+        <span className="count-tag">15 days <span className="count-dot" /></span>
+      </div>
+      {hasDeposits ? (
+        <div className="graph-container">
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+              <defs>
+                <linearGradient id="colorEUR" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#D4AF37" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#D4AF37" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorGBP" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#005299" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#005299" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorXAU" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#E8C547" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#E8C547" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorBTC" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#FF9900" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#FF9900" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(212, 175, 55, 0.2)" />
+              <XAxis dataKey="date" stroke="#888" style={{ fontSize: '12px' }} />
+              <YAxis stroke="#888" style={{ fontSize: '12px' }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #D4AF37', borderRadius: '8px' }}
+                labelStyle={{ color: '#D4AF37' }}
+                formatter={(value) => `$${value.toFixed(2)}`}
+              />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} />
+              <Line type="monotone" dataKey="EURUSD" stroke="#D4AF37" strokeWidth={2} dot={false} name="EUR/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="GBPUSD" stroke="#005299" strokeWidth={2} dot={false} name="GBP/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="XAUUSD" stroke="#E8C547" strokeWidth={2} dot={false} name="XAU/USD" isAnimationActive={true} />
+              <Line type="monotone" dataKey="BTCUSD" stroke="#FF9900" strokeWidth={2} dot={false} name="BTC/USD" isAnimationActive={true} />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="graph-stats">
+            <div className="stat-item">
+              <span className="stat-label">Linked deposit</span>
+              <span className="stat-value">${totalDeposits.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">15-day avg profit</span>
+              <span className="stat-value gold">+$45.32</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Best performer</span>
+              <span className="stat-value">BTC/USD</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="graph-placeholder">
+          <Icon name="chart" size={48} />
+          <p>Make a deposit to see your trading performance across currency pairs.</p>
+        </div>
+      )}
+    </section>
+  );
+}
 
-    const previousDeposits = await sql`
-      SELECT COUNT(*) AS cnt FROM transactions
-      WHERE account_id = ${tx.account_id} AND type = 'deposit' AND status = 'approved' AND created_at < ${tx.created_at}
-    `;
+function App() {
+  const [route, setRoute] = useState(() => window.location.pathname);
+  const [activeNav, setActiveNav] = useState('overview');
+  const [modal, setModal] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [destination, setDestination] = useState('');
+  const [demoActivity, setDemoActivity] = useState([]);
+  const [binanceWalletAddress, setBinanceWalletAddress] = useState('');
+  const [walletAddressLoading, setWalletAddressLoading] = useState(true);
+  const [walletAddressError, setWalletAddressError] = useState('');
+  const [walletCopied, setWalletCopied] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [account, setAccount] = useState(null);
+  const [storageMode, setStorageMode] = useState('checking');
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [accountDialog, setAccountDialog] = useState(false);
+  const [accountMode, setAccountMode] = useState(() => window.location.pathname === '/register' ? 'register' : 'login');
+  const [accountName, setAccountName] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [accountPhone, setAccountPhone] = useState('');
+  const [accountPin, setAccountPin] = useState('');
+  const [accountError, setAccountError] = useState('');
+  const [accountMessage, setAccountMessage] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  const [balance, setBalance] = useState(0);
+  const [totalDeposits, setTotalDeposits] = useState(0);
+  const [dailyIncome, setDailyIncome] = useState(0);
+  const [referralEarnings, setReferralEarnings] = useState(0);
+  const [referralBonusFromThisDeposit, setReferralBonusFromThisDeposit] = useState(0);
+  const [transactionLoading, setTransactionLoading] = useState(false);
+  const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
+  const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
+  const [weeklyData, setWeeklyData] = useState(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [referralStats, setReferralStats] = useState(null);
+  const [referralStatsLoading, setReferralStatsLoading] = useState(false);
+  const [earningsActive, setEarningsActive] = useState(false);
+  const [earningsStartTime, setEarningsStartTime] = useState(null);
+  const [lastDepositTime, setLastDepositTime] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAccountPassword, setShowAccountPassword] = useState(false);
+  const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
+  // ✅ ADD: New state variables for daily trade claim
+  const [canClaimTrade, setCanClaimTrade] = useState(false);
+  const [claimTradeLoading, setClaimTradeLoading] = useState(false);
+  const [tradeClaimMessage, setTradeClaimMessage] = useState('');
+  const [isTradingHourActive, setIsTradingHourActive] = useState(false);
+  const [nextTradingTime, setNextTradingTime] = useState('');
+  // ✅ ADD: Prime Hour Wallet states
+  const [primeHourBalance, setPrimeHourBalance] = useState(0);
+  const [primeHourModal, setPrimeHourModal] = useState(null);
+  const [primeHourLoading, setPrimeHourLoading] = useState(false);
+  const [primeHourMessage, setPrimeHourMessage] = useState('');
+  // ✅ ADD: Comprehensive Wallet states (all earnings aggregated)
+  const [comprehensiveWallet, setComprehensiveWallet] = useState(null);
+  const [comprehensiveWalletLoading, setComprehensiveWalletLoading] = useState(false);
 
-    const isFirstDeposit = previousDeposits[0].cnt === 0;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeGreeting(getTimeGreeting());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-    const referralSignup = await sql`
-      SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${tx.account_id} LIMIT 1
-    `;
+  useEffect(() => {
+    function checkPrimeHour() {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
 
-    const referrerId = referralSignup[0]?.referrer_id;
+      const currentMinutes = hours * 60 + minutes;
+      const primeStart = 3 * 60 + 45;
+      const primeEnd = 4 * 60 + 15;
 
-    let commissionCents;
-    let commissionRate;
-    let beneficiaryId = referrerId;
-    let bonusType;
-
-    if (isFirstDeposit) {
-      if (referrerId) {
-        commissionRate = 0.05;
-        commissionCents = Math.round(tx.amount_cents * commissionRate);
-        bonusType = 'referral_bonus_5%';
-      } else {
-        commissionRate = 0.025;
-        commissionCents = Math.round(tx.amount_cents * commissionRate);
-        beneficiaryId = tx.account_id;
-        bonusType = 'first_deposit_bonus_2.5%';
-      }
-    } else {
-      // ✅ RECHARGE BONUS: 2.5% of THIS deposit (not the first deposit)
-      commissionRate = 0.025;
-      commissionCents = Math.round(tx.amount_cents * commissionRate);
-      bonusType = 'recharge_bonus_2.5%';
-
-      if (!referrerId) {
-        beneficiaryId = tx.account_id;
-      }
+      setIsPrimeHourActive(currentMinutes >= primeStart && currentMinutes < primeEnd);
     }
 
-    const commissionId = randomBytes(16).toString('hex');
-    try {
-      const now = new Date().toISOString();
+    checkPrimeHour();
+    const interval = setInterval(checkPrimeHour, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
-      // ✅ INSERT commission record
-      await sql`
-        INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
-        VALUES (${commissionId}, ${beneficiaryId}, ${transactionId}, ${tx.account_id}, ${commissionCents}, ${commissionRate}, ${now})
-      `;
+  // ✅ ADD: Check trading hours (1:00 PM - 1:30 PM EAT)
+  useEffect(() => {
+    function checkTradingHours() {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
 
-      // ✅ ADD: Credit commission directly to Ascend wallet as approved transaction
-      const commissionTxId = randomBytes(16).toString('hex');
-      const reference = bonusType === 'referral_bonus_5%'
-        ? `Referral bonus (5%) from ${tx.account_id}`
-        : bonusType === 'first_deposit_bonus_2.5%'
-        ? `First deposit bonus (2.5%)`
-        : `Recharge bonus (2.5%)`;
+      const currentMinutes = hours * 60 + minutes;
+      const tradingStart = 13 * 60; // 1:00 PM (13:00 in 24-hour format)
+      const tradingEnd = 13 * 60 + 30; // 1:30 PM (13:30 in 24-hour format)
 
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${commissionTxId}, ${beneficiaryId}, 'referral_commission', ${commissionCents}, ${reference}, 'approved', ${now})
-      `;
+      const isActive = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
+      setIsTradingHourActive(isActive);
 
-      return { commissionId, amount: commissionCents / 100, bonusType, beneficiaryId, commissionTxId };
-    } catch (error) {
-      console.error('Failed to apply referral commission:', error);
-      return null;
-    }
-  }
+      if (!isActive) {
+        // Calculate next trading time
+        let nextTime = new Date(now);
+        if (currentMinutes >= tradingEnd) {
+          // Trading window passed for today, set for tomorrow at 1:00 PM
+          nextTime.setDate(nextTime.getDate() + 1);
+          nextTime.setHours(13, 0, 0, 0);
+        } else {
+          // Trading window hasn't started yet today
+          nextTime.setHours(13, 0, 0, 0);
+        }
 
-  async function applyDailyTradingProfits() {
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date();
-
-    const activeDeposits = await sql`
-      SELECT t.id, t.account_id, t.amount_cents, t.created_at
-      FROM transactions t
-      WHERE t.type = 'deposit' AND t.status = 'approved'
-      ORDER BY t.account_id
-    `;
-
-    for (const deposit of activeDeposits) {
-      const alreadyCredited = await sql`
-        SELECT id FROM trading_ledger
-        WHERE deposit_transaction_id = ${deposit.id} AND profit_date = ${today}
-      `;
-
-      if (alreadyCredited.length > 0) continue;
-
-      const depositDate = new Date(deposit.created_at);
-      const depositDay = depositDate.toISOString().split('T')[0];
-
-      if (depositDay === today) {
-        continue;
-      }
-
-      const currentMinutesOfDay = now.getHours() * 60 + now.getMinutes();
-      const activationMinutesOfDay = EARNINGS_ACTIVATION_HOUR * 60 + EARNINGS_ACTIVATION_MINUTE;
-
-      if (currentMinutesOfDay < activationMinutesOfDay) {
-        continue;
-      }
-
-      const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
-      if (dailyProfit <= 0) continue;
-
-      const profitCents = Math.round(dailyProfit * 100);
-      const ledgerId = randomBytes(16).toString('hex');
-
-      try {
-        const ledgerInsert = sql`
-          INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
-          VALUES (${ledgerId}, ${deposit.account_id}, ${deposit.id}, ${profitCents}, ${today}, ${new Date().toISOString()})
-        `;
-
-        const txId = randomBytes(16).toString('hex');
-        const txInsert = sql`
-          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-          VALUES (${txId}, ${deposit.account_id}, 'trading_profit', ${profitCents}, ${`Trading profit from ${today}`}, 'approved', ${new Date().toISOString()})
-        `;
-
-        await Promise.all([ledgerInsert, txInsert]);
-      } catch (error) {
-        console.error(`Failed to credit profit for deposit ${deposit.id}:`, error);
-      }
-    }
-  }
-
-  async function applyWeeklySalaries() {
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const weekNumber = Math.ceil((now.getUTCDate() - now.getUTCDay() + 1) / 7);
-    const paymentWeek = `${year}-W${String(weekNumber).padStart(2, '0')}`;
-
-    const members = await sql`
-      SELECT DISTINCT
-        a.id,
-        a.email,
-        a.name
-      FROM accounts a
-      WHERE a.role = 'member' AND a.status = 'active'
-    `;
-
-    for (const member of members) {
-      const alreadyPaid = await sql`
-        SELECT id FROM weekly_salary_payments
-        WHERE account_id = ${member.id} AND payment_week = ${paymentWeek}
-      `;
-
-      if (alreadyPaid.length > 0) continue;
-
-      const directCount = await getDirectReferralCount(sql, member.id);
-      const teamTotal = await getTeamTotal(sql, member.id);
-      const tier = getTierByProgress(directCount, teamTotal);
-
-      if (tier < 1) continue;
-
-      const tierName = TIER_NAMES[tier];
-      const salaryCents = Math.round(TIER_SALARIES[tier] * 100);
-
-      if (salaryCents <= 0) continue;
-
-      const salaryId = randomBytes(16).toString('hex');
-      const txId = randomBytes(16).toString('hex');
-
-      try {
-        const salaryInsert = sql`
-          INSERT INTO weekly_salary_payments (id, account_id, tier_index, tier_name, salary_cents, payment_week, credited_at, created_at)
-          VALUES (${salaryId}, ${member.id}, ${tier}, ${tierName}, ${salaryCents}, ${paymentWeek}, ${new Date().toISOString()}, ${new Date().toISOString()})
-        `;
-
-        const txInsert = sql`
-          INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-          VALUES (${txId}, ${member.id}, 'tier_salary', ${salaryCents}, ${`Weekly ${tierName} salary for ${paymentWeek}`}, 'approved', ${new Date().toISOString()})
-        `;
-
-        await Promise.all([salaryInsert, txInsert]);
-
-        await recordAudit({}, 'salary.weekly_credited', member.id, {
-          tierIndex: tier,
-          tierName,
-          amountUSD: salaryCents / 100,
-          paymentWeek,
-          directCount,
-          teamTotal,
+        const timeStr = nextTime.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
         });
-      } catch (error) {
-        console.error(`Failed to credit weekly salary for member ${member.id}:`, error);
+        setNextTradingTime(timeStr);
       }
+    }
+
+    checkTradingHours();
+    const interval = setInterval(checkTradingHours, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ✅ ADD: Refresh prime hour balance during prime hour window
+  useEffect(() => {
+    if (isPrimeHourActive && account) {
+      fetchPrimeHourBalance();
+      const interval = setInterval(() => {
+        fetchPrimeHourBalance();
+      }, 60000); // Refresh every minute during prime hour
+      return () => clearInterval(interval);
+    }
+  }, [isPrimeHourActive, account]);
+
+  // ✅ REMOVED: Automatic earnings activation - now manual claim only during 1:00 PM - 1:30 PM EAT trading window
+  // All earnings are claimed manually through the claim button during trading hours
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refCode = params.get('ref') || params.get('referral') || '';
+    if (refCode) {
+      setReferralCode(refCode);
+    }
+  }, []);
+
+  // ✅ ADD: New function to fetch claim eligibility
+  async function fetchCanClaimTrade() {
+    if (!account || totalDeposits === 0) {
+      setCanClaimTrade(false);
+      return;
+    }
+    try {
+      const result = await requestApi('/api/trading/can-claim-today');
+      // ✅ FIX: Backend returns 'canClaimToday', not 'canClaim'
+      setCanClaimTrade(result.canClaimToday || false);
+    } catch (error) {
+      console.error('Failed to fetch claim status:', error);
+      setCanClaimTrade(false);
     }
   }
 
-  function scheduleDailyTradingProfits() {
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    tomorrow.setUTCHours(0, 0, 0, 0);
+  // ✅ ADD: New function to claim daily trade
+  async function claimDailyTrade() {
+    if (!account || totalDeposits === 0 || claimTradeLoading) {
+      setTradeClaimMessage('Cannot claim trade at this time.');
+      return;
+    }
 
-    const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+    setClaimTradeLoading(true);
+    setTradeClaimMessage('');
 
-    setTimeout(() => {
-      applyDailyTradingProfits();
-      setInterval(() => {
-        applyDailyTradingProfits();
-      }, 24 * 60 * 60 * 1000);
-    }, timeUntilMidnight);
+    try {
+      const result = await requestApi('/api/trading/claim-daily-trade', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+
+      setTradeClaimMessage(`✅ ${result.message || 'Trade claimed successfully! Your profit has been added to your balance.'}`);
+      setCanClaimTrade(false);
+
+      // Refresh balance after successful claim
+      await fetchAccountBalance();
+      // ✅ ADD: Refresh claim status to show "Already Claimed Today"
+      await fetchCanClaimTrade();
+      // ✅ ADD: Refresh comprehensive wallet after trade claim
+      await fetchComprehensiveWallet();
+    } catch (error) {
+      setTradeClaimMessage(`⚠️ ${error.message || 'Failed to claim trade. Please try again.'}`);
+      // ✅ FIX: Refresh claim status to get latest eligibility
+      await fetchCanClaimTrade();
+    } finally {
+      setClaimTradeLoading(false);
+    }
   }
 
-  function scheduleWeeklySalaries() {
-    const now = new Date();
-    const daysUntilMonday = (1 - now.getUTCDay() + 7) % 7 || 7;
-    const nextMonday = new Date(now);
-    nextMonday.setUTCDate(nextMonday.getUTCDate() + daysUntilMonday);
-    nextMonday.setUTCHours(0, 0, 0, 0);
-
-    const timeUntilMonday = nextMonday.getTime() - now.getTime();
-
-    setTimeout(() => {
-      applyWeeklySalaries();
-      setInterval(() => {
-        applyWeeklySalaries();
-      }, 7 * 24 * 60 * 60 * 1000);
-    }, timeUntilMonday);
+  // ✅ ADD: Fetch Prime Hour wallet balance
+  async function fetchPrimeHourBalance() {
+    if (!account) {
+      setPrimeHourBalance(0);
+      return;
+    }
+    try {
+      const result = await requestApi('/api/prime-hour/balance');
+      setPrimeHourBalance(result.balance || 0);
+    } catch (error) {
+      console.error('Failed to fetch prime hour balance:', error);
+      setPrimeHourBalance(0);
+    }
   }
 
-  await seedInitialAdmin();
-  scheduleWeeklySalaries();
-  // ✅ DISABLED: Daily trading profits are now claimed MANUALLY only via /api/trading/claim-daily-trade
-  // scheduleDailyTradingProfits();
+  // ✅ ADD: Handle Prime Hour deposits/withdrawals
+  async function submitPrimeHourAction(event, actionType) {
+    event.preventDefault();
+    const value = Number(amount);
 
-  // =========================================================================
-  // PUBLIC ENDPOINTS
-  // =========================================================================
-
-  app.get('/api/health', (_request, response) => response.json({
-    status: 'ok',
-    accountStorage: 'postgresql',
-  }));
-
-  app.get('/api/public-config', (_request, response) => response.json({
-    binanceWalletAddress: process.env.BINANCE_WALLET_ADDRESS?.trim() ?? '',
-  }));
-
-  app.get('/api/public/logo', (_request, response) => {
-    const logoPath = process.env.LOGO_PATH?.trim();
-    if (!logoPath) {
-      return response.status(404).json({ error: 'Logo not configured.' });
+    if (!account) {
+      setPrimeHourMessage('You must be signed in to perform transactions.');
+      return;
     }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      setPrimeHourMessage('Enter an amount greater than $0.');
+      return;
+    }
+
+    // ✅ UPDATED: Prime Hour specific requirements
+    if (actionType === 'deposit') {
+      // Minimum deposit: $50
+      if (value < 50) {
+        setPrimeHourMessage('💰 Prime Hour Deposit Minimum: $50 (You earn a $5 bonus on deposits!)');
+        return;
+      }
+
+      // Check referral qualifications - REFERRER (you) must meet requirements
+      if (!referralStats || !referralStats.directReferrals || referralStats.directReferrals === 0) {
+        setPrimeHourMessage('⚠️ Prime Hour Qualification: You must have at least 1 referral to deposit.');
+        return;
+      }
+
+      // Check if YOU (referrer) have traded for 3+ days
+      if (!referralStats.tradingDays || referralStats.tradingDays < 3) {
+        setPrimeHourMessage('⚠️ To access Prime Hour: You must have traded for at least 3 days on Ascend.');
+        return;
+      }
+    }
+
+    if (actionType === 'withdraw') {
+      // Minimum withdrawal: $50
+      if (value < 50) {
+        setPrimeHourMessage('The minimum Prime Hour withdrawal amount is $50.');
+        return;
+      }
+
+      if (value > primeHourBalance) {
+        setPrimeHourMessage('Insufficient prime hour balance for this withdrawal.');
+        return;
+      }
+
+      if (destination.trim().length < 8) {
+        setPrimeHourMessage('Enter a wallet address with at least 8 characters.');
+        return;
+      }
+    }
+
+    setPrimeHourLoading(true);
     try {
-      const fs = require('fs');
-      const logoBuffer = fs.readFileSync(logoPath);
-      const ext = logoPath.split('.').pop().toLowerCase();
-      const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
-      response.set('Content-Type', mimeTypes[ext] || 'image/png');
-      return response.send(logoBuffer);
-    } catch (error) {
-      return response.status(404).json({ error: 'Logo file not found.' });
-    }
-  });
-
-  app.get('/api/public/download/android-app', (_request, response) => {
-    const apkPath = process.env.APK_PATH?.trim();
-    if (!apkPath) {
-      return response.status(404).json({ error: 'Android app not available for download.' });
-    }
-    try {
-      const fs = require('fs');
-      const apkBuffer = fs.readFileSync(apkPath);
-      response.set({
-        'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="ascend-capital.apk"',
-        'Content-Length': apkBuffer.length,
+      const result = await requestApi('/api/prime-hour/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: actionType === 'withdraw' ? 'withdrawal' : 'deposit',
+          amount: value,
+          reference: actionType === 'withdraw' ? destination.trim() : `Prime-Deposit-${Date.now()}`,
+        }),
       });
-      return response.send(apkBuffer);
+
+      // ✅ Show success with bonus info for deposits
+      const successMsg = actionType === 'deposit'
+        ? `✅ Prime deposit of $${value} successful! +$5 bonus added to your prime hour wallet.`
+        : `✅ Prime withdrawal of $${value} completed successfully!`;
+
+      setPrimeHourMessage(result.message || successMsg);
+      setAmount('');
+      setDestination('');
+
+      // Refresh prime hour balance
+      await fetchPrimeHourBalance();
+
+      // Close modal after 2 seconds
+      setTimeout(() => {
+        setPrimeHourModal(null);
+        setPrimeHourMessage('');
+      }, 2000);
     } catch (error) {
-      return response.status(404).json({ error: 'Android app file not found.' });
+      setPrimeHourMessage(`Error: ${error.message}`);
+    } finally {
+      setPrimeHourLoading(false);
     }
-  });
+  }
 
-  // =========================================================================
-  // AUTHENTICATION ENDPOINTS
-  // =========================================================================
+  useEffect(() => {
+    let cancelled = false;
+    requestApi('/api/public-config')
+      .then(({ binanceWalletAddress: address }) => {
+        if (!cancelled) setBinanceWalletAddress(typeof address === 'string' ? address.trim() : '');
+      })
+      .catch((error) => {
+        if (!cancelled) setWalletAddressError(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setWalletAddressLoading(false);
+      });
 
-  app.post('/api/auth/register', authRateLimit, async (request, response, next) => {
+    requestApi('/api/health')
+      .then(({ accountStorage }) => {
+        if (!cancelled) setStorageMode(accountStorage);
+      })
+      .catch(() => {
+        if (!cancelled) setStorageMode('unknown');
+      });
+
+    requestApi('/api/auth/me')
+      .then(({ account: currentAccount }) => {
+        if (cancelled) return;
+        setAccount(currentAccount);
+        setAccountName(currentAccount?.name ?? '');
+        setAccountEmail(currentAccount?.email ?? '');
+        setAccountPhone(currentAccount?.phone ?? '');
+        if (currentAccount) {
+          fetchAccountBalance();
+          fetchTransactionHistory();
+          fetchWeeklySalary();
+          fetchReferralCode();
+          fetchReferralStats();
+          // ✅ ADD: Fetch claim status on login
+          fetchCanClaimTrade();
+          // ✅ ADD: Fetch prime hour balance on login
+          fetchPrimeHourBalance();
+          // ✅ ADD: Fetch comprehensive wallet on login
+          fetchComprehensiveWallet();
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setAccountError(`Account service is unavailable: ${error.message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setAccountLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function fetchAccountBalance() {
     try {
-      const input = request.body ?? {};
-      const error = validationMessage(input, true);
-      if (error) return response.status(400).json({ error });
+      const result = await requestApi('/api/transactions');
+      setBalance(result.balance || 0);
+      setTotalDeposits(result.balance || 0);
 
-      const email = input.email.trim().toLowerCase();
-      const existing = await sql`SELECT id FROM accounts WHERE email = ${email}`;
-      if (existing.length > 0) return response.status(409).json({ error: 'An account with this email already exists.' });
-
-      // ✅ Check for duplicate phone number
-      const phone = input.phone?.trim() || null;
-      if (phone) {
-        const existingPhone = await sql`SELECT id FROM accounts WHERE phone = ${phone}`;
-        if (existingPhone.length > 0) return response.status(409).json({ error: 'An account with this phone number already exists.' });
+      if (result.lastDepositTime) {
+        setLastDepositTime(result.lastDepositTime);
       }
 
-      const salt = randomBytes(16);
-      const passwordHash = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
-      const id = randomBytes(16).toString('hex');
-      const createdAt = new Date().toISOString();
-
-      await sql`
-        INSERT INTO accounts (id, name, email, password_salt, password_hash, phone, pin, created_at)
-        VALUES (${id}, ${input.name.trim()}, ${email}, ${salt.toString('hex')}, ${passwordHash.toString('hex')}, ${input.phone?.trim() || null}, ${input.pin || null}, ${createdAt})
-      `;
-
-      const referralCode = input.referralCode?.trim().toUpperCase();
-      if (referralCode) {
-        await trackReferralSignup(id, referralCode);
-      }
-
-      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${id}`;
-      await createAccountSession(id, response);
-      return response.status(201).json({ account: accountView(account[0]) });
+      // ✅ UPDATED: Calculate daily income for manual claiming - not tied to automatic activation
+      const depositAmount = result.balance || 0;
+      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+      setDailyIncome(dailyIncomeValue);
     } catch (error) {
-      return next(error);
+      console.error('Failed to fetch balance:', error);
     }
-  });
+  }
 
-  app.post('/api/auth/login', authRateLimit, async (request, response, next) => {
+  async function fetchTransactionHistory() {
     try {
-      const input = request.body ?? {};
-      const error = loginMessage(input);
-      if (error) return response.status(400).json({ error });
-
-      const email = input.email.trim().toLowerCase();
-      const rows = await sql`
-        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
-        FROM accounts WHERE email = ${email}
-      `;
-
-      const row = rows[0];
-      const salt = row ? Buffer.from(row.password_salt, 'hex') : Buffer.alloc(16);
-      const storedHash = row ? Buffer.from(row.password_hash, 'hex') : Buffer.alloc(PASSWORD_BYTES);
-      const candidate = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
-      if (!row || !timingSafeEqual(candidate, storedHash)) {
-        return response.status(401).json({ error: 'Email or password is incorrect.' });
-      }
-
-      if (row.status === 'held') {
-        return response.status(403).json({ error: 'This account is on hold. Please contact support.' });
-      }
-
-      await sql`DELETE FROM sessions WHERE account_id = ${row.id}`;
-      await createAccountSession(row.id, response);
-      return response.json({ account: accountView(row) });
+      const result = await requestApi('/api/transactions');
+      const transactions = (result.transactions || []).map((tx) => ({
+        id: tx.id,
+        type: tx.type === 'deposit' ? 'Deposit' : 'Withdrawal',
+        amount: tx.amount,
+        createdAt: new Date(tx.createdAt).toLocaleTimeString(),
+        status: tx.status,
+      }));
+      setDemoActivity(transactions.slice(0, 5));
     } catch (error) {
-      return next(error);
+      console.error('Failed to fetch transaction history:', error);
     }
-  });
+  }
 
-  app.get('/api/auth/me', async (request, response) => {
-    const account = await getCurrentAccountAsync(request, SESSION_COOKIE);
-    return response.json({ account: account ? accountView(account) : null });
-  });
-
-  app.patch('/api/auth/profile', updateRateLimit, requireAccount, async (request, response) => {
-    const name = request.body?.name;
-    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
-      return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
-    }
-    await sql`UPDATE accounts SET name = ${name.trim()} WHERE id = ${request.account.id}`;
-    const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${request.account.id}`;
-    return response.json({ account: accountView(account[0]) });
-  });
-
-  app.post('/api/auth/password', passwordRateLimit, requireAccount, async (request, response, next) => {
+  async function fetchWeeklySalary() {
+    if (!account) return;
+    setWeeklyLoading(true);
     try {
-      const { currentPassword, newPassword } = request.body ?? {};
-      if (typeof currentPassword !== 'string' || currentPassword.length === 0 || currentPassword.length > 128) {
-        return response.status(400).json({ error: 'Enter your current password.' });
-      }
-      const newError = passwordError(newPassword);
-      if (newError) return response.status(400).json({ error: newError });
-      if (newPassword === currentPassword) {
-        return response.status(400).json({ error: 'New password must be different from the current password.' });
-      }
-
-      const rows = await sql`SELECT password_salt, password_hash FROM accounts WHERE id = ${request.account.id}`;
-      const row = rows[0];
-      const candidate = await scryptAsync(currentPassword, Buffer.from(row.password_salt, 'hex'), PASSWORD_BYTES, PASSWORD_OPTIONS);
-      if (!timingSafeEqual(candidate, Buffer.from(row.password_hash, 'hex'))) {
-        return response.status(401).json({ error: 'Current password is incorrect.' });
-      }
-
-      const hashed = await hashPassword(newPassword);
-      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash}, must_change_password = 0 WHERE id = ${request.account.id}`;
-      await sql`DELETE FROM sessions WHERE account_id = ${request.account.id}`;
-      await recordAudit(request, 'password.change_self', request.account.id, { role: request.account.role });
-      await createAccountSession(request.account.id, response);
-      return response.json({ ok: true });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post('/api/auth/logout', async (request, response, next) => {
-    try {
-      const token = readCookie(request, SESSION_COOKIE);
-      if (token) await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
-      clearSessionCookie(response, secureCookie);
-      return response.status(204).end();
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  // =========================================================================
-  // ADMIN AUTHENTICATION ENDPOINTS
-  // =========================================================================
-
-  app.post('/api/admin/auth/login', authRateLimit, async (request, response, next) => {
-    try {
-      const input = request.body ?? {};
-      const error = loginMessage(input);
-      if (error) return response.status(400).json({ error });
-
-      const email = input.email.trim().toLowerCase();
-      const rows = await sql`
-        SELECT id, name, email, phone, password_salt, password_hash, created_at, role, status, must_change_password
-        FROM accounts WHERE email = ${email} AND role = 'admin'
-      `;
-
-      const row = rows[0];
-      const salt = row ? Buffer.from(row.password_salt, 'hex') : Buffer.alloc(16);
-      const storedHash = row ? Buffer.from(row.password_hash, 'hex') : Buffer.alloc(PASSWORD_BYTES);
-      const candidate = await scryptAsync(input.password, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
-      if (!row || !timingSafeEqual(candidate, storedHash)) {
-        return response.status(401).json({ error: 'Admin credentials are incorrect.' });
-      }
-
-      if (row.status === 'held') {
-        return response.status(403).json({ error: 'This admin account is on hold.' });
-      }
-
-      await sql`DELETE FROM sessions WHERE account_id = ${row.id}`;
-
-      const token = randomBytes(32).toString('base64url');
-      const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
-      await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${row.id}, ${expiresAt})`;
-      setSessionCookie(response, token, secureCookie, ADMIN_SESSION_COOKIE);
-
-      await recordAudit({ ip: request.ip }, 'admin.login', row.id, { email });
-      return response.json({ account: accountView(row) });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.get('/api/admin/auth/me', async (request, response) => {
-    const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
-    return response.json({ account: account ? accountView(account) : null });
-  });
-
-  app.post('/api/admin/auth/logout', async (request, response, next) => {
-    try {
-      const token = readCookie(request, ADMIN_SESSION_COOKIE);
-      if (token) await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
-      clearSessionCookie(response, secureCookie, ADMIN_SESSION_COOKIE);
-      return response.status(204).end();
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post('/api/admin/auth/password', passwordRateLimit, requireAdminSession, async (request, response, next) => {
-    try {
-      const { currentPassword, newPassword } = request.body ?? {};
-      if (typeof currentPassword !== 'string' || currentPassword.length === 0 || currentPassword.length > 128) {
-        return response.status(400).json({ error: 'Enter your current password.' });
-      }
-      const newError = passwordError(newPassword);
-      if (newError) return response.status(400).json({ error: newError });
-      if (newPassword === currentPassword) {
-        return response.status(400).json({ error: 'New password must be different from the current password.' });
-      }
-
-      const rows = await sql`SELECT password_salt, password_hash FROM accounts WHERE id = ${request.account.id}`;
-      const row = rows[0];
-      const candidate = await scryptAsync(currentPassword, Buffer.from(row.password_salt, 'hex'), PASSWORD_BYTES, PASSWORD_OPTIONS);
-      if (!timingSafeEqual(candidate, Buffer.from(row.password_hash, 'hex'))) {
-        return response.status(401).json({ error: 'Current password is incorrect.' });
-      }
-
-      const hashed = await hashPassword(newPassword);
-      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash}, must_change_password = 0 WHERE id = ${request.account.id}`;
-      await sql`DELETE FROM sessions WHERE account_id = ${request.account.id}`;
-      await recordAudit(request, 'password.change_admin', request.account.id, { role: request.account.role });
-      await createAccountSession(request.account.id, response);
-      return response.json({ ok: true });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  // =========================================================================
-  // REFERRAL ENDPOINTS
-  // =========================================================================
-
-  app.get('/api/referrals/code', requireAccount, async (request, response) => {
-    const existing = await sql`SELECT code FROM referral_codes WHERE account_id = ${request.account.id} LIMIT 1`;
-
-    if (existing.length > 0) {
-      return response.json({ code: existing[0].code });
-    }
-
-    const code = generateReferralCode();
-    const id = randomBytes(16).toString('hex');
-    await sql`
-      INSERT INTO referral_codes (id, account_id, code, created_at)
-      VALUES (${id}, ${request.account.id}, ${code}, ${new Date().toISOString()})
-    `;
-
-    return response.status(201).json({ code });
-  });
-
-  app.get('/api/referrals/tier-progression', requireAccount, async (request, response) => {
-    const progression = await getTierProgression(sql, request.account.id);
-    return response.json(progression);
-  });
-
-  app.get('/api/referrals/earned-rewards', requireAccount, async (request, response) => {
-    const rewards = await sql`
-      SELECT tier_index, tier_name, reward_cents, physical_reward,
-        physical_reward_value_cents, direct_referrals_at_award,
-        team_total_at_award, credited_at
-      FROM referral_tier_rewards
-      WHERE referrer_id = ${request.account.id}
-      ORDER BY tier_index ASC
-    `;
-
-    const directCount = await getDirectReferralCount(sql, request.account.id);
-    const teamTotal = await getTeamTotal(sql, request.account.id);
-    const totalRewardsUSD = rewards.reduce((sum, r) => sum + r.reward_cents / 100, 0);
-
-    return response.json({
-      directReferrals: directCount,
-      teamTotal,
-      totalRewardsUSD,
-      rewards: rewards.map(r => ({
-        tierIndex: r.tier_index,
-        tierName: r.tier_name,
-        amountUSD: r.reward_cents / 100,
-        physicalReward: r.physical_reward,
-        directWhen: r.direct_referrals_at_award,
-        teamTotalWhen: r.team_total_at_award,
-        creditedAt: r.credited_at,
-      })),
-    });
-  });
-
-  app.get('/api/referrals/stats', requireAccount, async (request, response) => {
-    try {
-      // ✅ FIX: Count DISTINCT referral_signups, not all transaction rows
-      const directStats = await sql`
-        SELECT COUNT(DISTINCT rs.id) AS direct_count,
-          COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS direct_volume
-        FROM referral_signups rs
-        LEFT JOIN transactions t ON t.account_id = rs.referred_account_id
-        WHERE rs.referrer_id = ${request.account.id}
-      `;
-
-      const commissionStats = await sql`
-        SELECT COUNT(*) AS commission_count,
-          COALESCE(SUM(commission_cents), 0) AS total_commission_cents
-        FROM referral_commissions
-        WHERE referrer_id = ${request.account.id}
-      `;
-
-      const directCount = directStats[0]?.direct_count || 0;
-      const teamTotal = await getTeamTotal(sql, request.account.id);
-      const tier = getTierByProgress(directCount, teamTotal);
-      const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
-      const commissionRate = tier >= 0 ? REFERRAL_COMMISSION_RATES[tier] : 0;
-
-      const referralCode = await sql`SELECT code FROM referral_codes WHERE account_id = ${request.account.id}`;
-
-      return response.json({
-        referralCode: referralCode[0]?.code || null,
-        tier: tierName,
-        commissionRate: commissionRate,
-        directReferrals: directCount,
-        directVolume: (directStats[0]?.direct_volume || 0) / 100,
-        commissionsEarned: commissionStats[0]?.commission_count || 0,
-        totalEarnings: (commissionStats[0]?.total_commission_cents || 0) / 100,
-        teamTotal: teamTotal,
+      const result = await requestApi('/api/referrals/weekly-salary');
+      setWeeklyData({
+        tier: result?.tier || null,
+        weeklySalary: typeof result?.weeklySalary === 'number' ? result.weeklySalary : 0,
+        directCount: typeof result?.directCount === 'number' ? result.directCount : 0,
+        teamTotal: typeof result?.teamTotal === 'number' ? result.teamTotal : 0,
+        totalEarned: typeof result?.totalEarned === 'number' ? result.totalEarned : 0,
+        recentPayments: Array.isArray(result?.recentPayments) ? result.recentPayments : [],
+        message: result?.message || null,
       });
     } catch (error) {
-      console.error('Error in /api/referrals/stats:', error);
-      return response.status(500).json({ error: 'Failed to fetch referral stats.' });
-    }
-  });
-
-  // ✅ NEW: DEBUG ENDPOINT - See raw referral data for troubleshooting
-  app.get('/api/referrals/debug', requireAccount, async (request, response) => {
-    try {
-      const rawSignups = await sql`
-        SELECT rs.id, rs.referrer_id, rs.referred_account_id, a.name, a.email, rs.signed_up_at
-        FROM referral_signups rs
-        JOIN accounts a ON a.id = rs.referred_account_id
-        WHERE rs.referrer_id = ${request.account.id}
-      `;
-
-      const countTest = await sql`
-        SELECT COUNT(*) AS total FROM referral_signups
-        WHERE referrer_id = ${request.account.id}
-      `;
-
-      return response.json({
-        directCount: countTest[0]?.total || 0,
-        referrals: rawSignups,
-      });
-    } catch (error) {
-      console.error('Error in debug endpoint:', error);
-      return response.status(500).json({ error: 'Debug error.' });
-    }
-  });
-
-  app.get('/api/referrals/list', requireAccount, async (request, response) => {
-    const referrals = await sql`
-      SELECT
-        rs.id,
-        a.id AS account_id,
-        a.name,
-        a.email,
-        rs.signed_up_at,
-        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
-      FROM referral_signups rs
-      JOIN accounts a ON a.id = rs.referred_account_id
-      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
-      WHERE rs.referrer_id = ${request.account.id}
-      GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
-      ORDER BY rs.signed_up_at DESC
-      LIMIT 100
-    `;
-
-    return response.json({
-      referrals: referrals.map(r => ({
-        id: r.account_id,
-        name: r.name,
-        email: r.email,
-        signedUpAt: r.signed_up_at,
-        totalDeposits: r.total_deposits_cents / 100,
-      })),
-    });
-  });
-
-  app.get('/api/referrals/weekly-salary', requireAccount, async (request, response) => {
-    const directCount = await getDirectReferralCount(sql, request.account.id);
-    const teamTotal = await getTeamTotal(sql, request.account.id);
-    const tier = getTierByProgress(directCount, teamTotal);
-
-    if (tier < 1) {
-      return response.json({
+      console.error('Failed to fetch weekly salary:', error);
+      setWeeklyData({
         tier: null,
         weeklySalary: 0,
-        message: 'Star 2 tier and above receive weekly salaries.',
-        directCount,
-        teamTotal,
+        directCount: 0,
+        teamTotal: 0,
+        totalEarned: 0,
+        recentPayments: [],
+        message: 'Unable to load salary information.',
       });
+    } finally {
+      setWeeklyLoading(false);
     }
-
-    const tierName = TIER_NAMES[tier];
-    const weeklySalary = TIER_SALARIES[tier];
-
-    const payments = await sql`
-      SELECT id, tier_name, salary_cents, payment_week, credited_at
-      FROM weekly_salary_payments
-      WHERE account_id = ${request.account.id}
-      ORDER BY payment_week DESC
-      LIMIT 12
-    `;
-
-    const totalEarned = payments.reduce((sum, p) => sum + (p.salary_cents / 100), 0);
-
-    return response.json({
-      tier: tierName,
-      weeklySalary,
-      directCount,
-      teamTotal,
-      totalEarned,
-      recentPayments: payments.map(p => ({
-        week: p.payment_week,
-        amount: p.salary_cents / 100,
-        creditedAt: p.credited_at,
-      })),
-    });
-  });
-
-  // ✅ NEW: Manual AutoTrade Endpoints (Claim Daily Trade)
-  // =========================================================================
-
-  app.get('/api/trading/can-claim-today', requireAccount, async (request, response) => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-
-      // Check if user has active deposit
-      const activeDeposits = await sql`
-        SELECT id, amount_cents FROM transactions
-        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
-        LIMIT 1
-      `;
-
-      if (activeDeposits.length === 0) {
-        return response.json({
-          canClaimToday: false,
-          hasActiveDeposit: false,
-          alreadyClaimedToday: false,
-          dailyProfitAmount: 0,
-        });
-      }
-
-      // Check if already claimed today
-      const alreadyClaimed = await sql`
-        SELECT id FROM trading_ledger
-        WHERE account_id = ${request.account.id} AND profit_date = ${today}
-      `;
-
-      const dailyProfit = getDailyProfitForDeposit(activeDeposits[0].amount_cents);
-
-      return response.json({
-        canClaimToday: alreadyClaimed.length === 0,
-        hasActiveDeposit: true,
-        alreadyClaimedToday: alreadyClaimed.length > 0,
-        dailyProfitAmount: dailyProfit,
-      });
-    } catch (error) {
-      console.error('Error in /api/trading/can-claim-today:', error);
-      return response.status(500).json({ error: 'Failed to check claim status.' });
-    }
-  });
-
-  app.post('/api/trading/claim-daily-trade', updateRateLimit, requireAccount, async (request, response, next) => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-
-      // Check if user has active deposit
-      const activeDeposits = await sql`
-        SELECT id, amount_cents FROM transactions
-        WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
-      `;
-
-      if (activeDeposits.length === 0) {
-        return response.status(409).json({ error: 'No active deposits found.' });
-      }
-
-      // Check if already claimed today
-      const alreadyClaimed = await sql`
-        SELECT id FROM trading_ledger
-        WHERE account_id = ${request.account.id} AND profit_date = ${today}
-      `;
-
-      if (alreadyClaimed.length > 0) {
-        return response.status(409).json({ error: 'You have already claimed your trade today.' });
-      }
-
-      // Calculate total daily profit from all active deposits
-      let totalProfitCents = 0;
-      for (const deposit of activeDeposits) {
-        const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
-        if (dailyProfit > 0) {
-          totalProfitCents += Math.round(dailyProfit * 100);
-        }
-      }
-
-      if (totalProfitCents <= 0) {
-        return response.status(409).json({ error: 'No profit available to claim.' });
-      }
-
-      // Create trading ledger entry for the first deposit (or sum if multiple)
-      const ledgerId = randomBytes(16).toString('hex');
-      const txId = randomBytes(16).toString('hex');
-
-      await sql`
-        INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
-        VALUES (${ledgerId}, ${request.account.id}, ${activeDeposits[0].id}, ${totalProfitCents}, ${today}, ${new Date().toISOString()})
-      `;
-
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.account.id}, 'trading_profit', ${totalProfitCents}, ${`Manual daily trade claim from ${today}`}, 'approved', ${new Date().toISOString()})
-      `;
-
-      await recordAudit(request, 'trading.claim_daily_trade', ledgerId, {
-        profitAmount: totalProfitCents / 100,
-        profitDate: today,
-      });
-
-      return response.status(201).json({
-        ok: true,
-        message: `Successfully claimed $${(totalProfitCents / 100).toFixed(2)} in daily trading profit.`,
-        earnedAmount: totalProfitCents / 100,
-        transactionId: txId,
-      });
-    } catch (error) {
-      console.error('Error in /api/trading/claim-daily-trade:', error);
-      return next(error);
-    }
-  });
-
-  // =========================================================================
-  // TRADING ENDPOINTS
-  // =========================================================================
-
-  app.get('/api/trading/history', requireAccount, async (request, response) => {
-    const profits = await sql`
-      SELECT
-        tl.id,
-        tl.profit_cents,
-        tl.profit_date,
-        tl.created_at,
-        t.amount_cents AS deposit_amount,
-        t.created_at AS deposit_date
-      FROM trading_ledger tl
-      JOIN transactions t ON t.id = tl.deposit_transaction_id
-      WHERE tl.account_id = ${request.account.id}
-      ORDER BY tl.profit_date DESC
-      LIMIT 365
-    `;
-
-    const totalProfit = profits.reduce((sum, p) => sum + (p.profit_cents / 100), 0);
-    const totalProfitDays = new Set(profits.map(p => p.profit_date)).size;
-
-    return response.json({
-      totalProfit,
-      totalProfitDays,
-      profits: profits.map(p => ({
-        id: p.id,
-        profitAmount: p.profit_cents / 100,
-        profitDate: p.profit_date,
-        depositAmount: p.deposit_amount / 100,
-        creditedAt: p.created_at,
-      })),
-    });
-  });
-
-  // ✅ ADD: Prime Hour Wallet Endpoints
-  // =========================================================================
-
-  app.get('/api/prime-hour/balance', requireAccount, async (request, response) => {
-    try {
-      const wallet = await sql`
-        SELECT balance_cents FROM prime_hour_wallets
-        WHERE account_id = ${request.account.id}
-      `;
-
-      if (wallet.length === 0) {
-        // Initialize wallet if it doesn't exist
-        const id = randomBytes(16).toString('hex');
-        const now = new Date().toISOString();
-        await sql`
-          INSERT INTO prime_hour_wallets (id, account_id, balance_cents, created_at, updated_at)
-          VALUES (${id}, ${request.account.id}, 0, ${now}, ${now})
-        `;
-        return response.json({ balance: 0 });
-      }
-
-      return response.json({ balance: wallet[0].balance_cents / 100 });
-    } catch (error) {
-      console.error('Error fetching prime hour balance:', error);
-      return response.status(500).json({ error: 'Failed to fetch prime hour balance.' });
-    }
-  });
-
-  app.post('/api/prime-hour/transaction', updateRateLimit, requireAccount, async (request, response, next) => {
-    try {
-      const { type, amount, reference } = request.body ?? {};
-
-      // Validate transaction type
-      if (!['deposit', 'withdrawal'].includes(type)) {
-        return response.status(400).json({ error: 'Transaction type must be deposit or withdrawal.' });
-      }
-
-      // Validate amount
-      const amountCents = parseAmountCents(amount);
-      if (amountCents === null || amountCents < 5000) { // $50 minimum
-        return response.status(400).json({ error: 'Minimum transaction amount is $50.' });
-      }
-
-      // ✅ Check Prime Hour time window (3:45 AM - 4:15 AM EAT/UTC+3)
-      const currentTime = new Date();
-      const hours = currentTime.getHours();
-      const minutes = currentTime.getMinutes();
-      const currentMinutes = hours * 60 + minutes;
-      const primeStart = 3 * 60 + 45;  // 3:45 AM = 225 minutes
-      const primeEnd = 4 * 60 + 15;    // 4:15 AM = 255 minutes
-      const isPrimeHourActive = currentMinutes >= primeStart && currentMinutes < primeEnd;
-
-      if (!isPrimeHourActive) {
-        return response.status(403).json({
-          error: 'Prime Hour is only available from 3:45 AM to 4:15 AM EAT. Check back during this window.'
-        });
-      }
-
-      // Get referral stats for qualification check
-      const directCount = await getDirectReferralCount(sql, request.account.id);
-      const tradingDays = await sql`
-        SELECT COUNT(DISTINCT DATE(profit_date)) AS days
-        FROM trading_ledger
-        WHERE account_id = ${request.account.id}
-      `;
-
-      const tradingDaysCount = tradingDays[0]?.days || 0;
-
-      // ✅ Check if referral has DEPOSITED (not just signed up)
-      const referralDeposits = await sql`
-        SELECT COUNT(DISTINCT rs.referred_account_id) AS count
-        FROM referral_signups rs
-        JOIN transactions t ON t.account_id = rs.referred_account_id
-        WHERE rs.referrer_id = ${request.account.id}
-        AND t.type = 'deposit'
-        AND t.status = 'approved'
-      `;
-
-      const hasReferralWithDeposit = referralDeposits[0]?.count > 0;
-
-      // Prime Hour qualification: 3+ days trading AND 1+ referral who DEPOSITED
-      if (type === 'deposit') {
-        if (tradingDaysCount < 3) {
-          return response.status(403).json({
-            error: 'You must have traded for at least 3 days on Ascend to access Prime Hour.'
-          });
-        }
-
-        if (!hasReferralWithDeposit) {
-          return response.status(403).json({
-            error: 'You must have at least 1 referral who has made a deposit to access Prime Hour deposits.'
-          });
-        }
-      }
-
-      // Get or create wallet
-      let wallet = await sql`
-        SELECT id, balance_cents FROM prime_hour_wallets
-        WHERE account_id = ${request.account.id}
-      `;
-
-      let walletId;
-      if (wallet.length === 0) {
-        walletId = randomBytes(16).toString('hex');
-        const now = new Date().toISOString();
-        await sql`
-          INSERT INTO prime_hour_wallets (id, account_id, balance_cents, created_at, updated_at)
-          VALUES (${walletId}, ${request.account.id}, 0, ${now}, ${now})
-        `;
-        wallet = [{ id: walletId, balance_cents: 0 }];
-      } else {
-        walletId = wallet[0].id;
-      }
-
-      const currentBalance = wallet[0].balance_cents;
-
-      // Handle withdrawal
-      if (type === 'withdrawal') {
-        if (amountCents > currentBalance) {
-          return response.status(409).json({
-            error: 'Insufficient prime hour balance for this withdrawal.'
-          });
-        }
-
-        // Validate wallet address
-        if (!reference || typeof reference !== 'string' || reference.trim().length < 8) {
-          return response.status(400).json({
-            error: 'Enter a valid wallet address (minimum 8 characters).'
-          });
-        }
-      }
-
-      // Process transaction
-      const txId = randomBytes(16).toString('hex');
-      const now = new Date().toISOString();
-
-      let newBalance = currentBalance;
-      if (type === 'deposit') {
-        // Add $5 bonus to deposit
-        newBalance = currentBalance + amountCents + 500; // $5 = 500 cents
-      } else {
-        newBalance = currentBalance - amountCents;
-      }
-
-      // Update wallet balance
-      await sql`
-        UPDATE prime_hour_wallets
-        SET balance_cents = ${newBalance}, updated_at = ${now}
-        WHERE id = ${walletId}
-      `;
-
-      // Record transaction
-      await sql`
-        INSERT INTO prime_hour_transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.account.id}, ${type}, ${amountCents}, ${reference || `Prime Hour ${type}`}, 'approved', ${now})
-      `;
-
-      // Log audit
-      await recordAudit(request, `prime_hour.${type}`, txId, {
-        amount: amountCents / 100,
-        newBalance: newBalance / 100,
-        bonus: type === 'deposit' ? 5 : 0,
-      });
-
-      const message = type === 'deposit'
-        ? `Prime deposit of $${(amountCents / 100).toFixed(2)} successful! +$5 bonus added.`
-        : `Prime withdrawal of $${(amountCents / 100).toFixed(2)} completed.`;
-
-      return response.status(201).json({
-        ok: true,
-        message,
-        transactionId: txId,
-        balance: newBalance / 100,
-      });
-    } catch (error) {
-      console.error('Error in prime hour transaction:', error);
-      return next(error);
-    }
-  });
-
-  // =========================================================================
-  // TRANSACTION ENDPOINTS
-  // =========================================================================
-
-  app.post('/api/transactions', updateRateLimit, requireAccount, async (request, response, next) => {
-    try {
-      if (request.account.role === 'admin') {
-        return response.status(403).json({ error: 'Administrator accounts cannot request transactions.' });
-      }
-      const input = request.body ?? {};
-      if (!TX_TYPES.slice(0, 2).includes(input.type)) {
-        return response.status(400).json({ error: 'Type must be deposit or withdrawal.' });
-      }
-      const amountCents = parseAmountCents(input.amount);
-      if (amountCents === null) {
-        return response.status(400).json({ error: 'Enter a valid amount with at most two decimal places.' });
-      }
-      const reference = cleanText(input.reference, { min: 3, max: 120 });
-      if (reference === null) {
-        return response.status(400).json({
-          error: input.type === 'deposit'
-            ? 'Enter the payment reference or transaction code (3-120 characters).'
-            : 'Enter the withdrawal destination (3-120 characters).',
-        });
-      }
-
-      if (input.type === 'withdrawal') {
-        const available = await approvedBalanceCents(request.account.id) - await pendingWithdrawalsCents(request.account.id);
-        if (amountCents > available) {
-          return response.status(409).json({ error: 'Withdrawal exceeds your available balance.' });
-        }
-      } else {
-        const duplicate = await sql`
-          SELECT id FROM transactions
-          WHERE type = 'deposit' AND reference = ${reference} AND status IN ('pending', 'approved')
-        `;
-        if (duplicate.length > 0) {
-          return response.status(409).json({ error: 'A deposit with this reference was already submitted.' });
-        }
-      }
-
-      const id = randomBytes(16).toString('hex');
-      const now = new Date().toISOString();
-
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${id}, ${request.account.id}, ${input.type}, ${amountCents}, ${reference}, 'pending', ${now})
-      `;
-
-      if (input.type === 'deposit') {
-        await sql`UPDATE accounts SET last_deposit_time = ${now} WHERE id = ${request.account.id}`;
-      }
-
-      const transaction = await getTransaction(id);
-      return response.status(201).json({ transaction: transactionView(transaction) });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  // ✅ FIXED: /api/transactions GET endpoint with corrected balance calculation
-  app.get('/api/transactions', requireAccount, async (request, response) => {
-    const rows = await sql`
-      SELECT t.*, a.name AS account_name, a.email AS account_email
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id
-      WHERE t.account_id = ${request.account.id}
-      ORDER BY t.created_at DESC
-      LIMIT 100
-    `;
-
-    const accountRow = await sql`SELECT last_deposit_time FROM accounts WHERE id = ${request.account.id}`;
-    const lastDepositTime = accountRow[0]?.last_deposit_time || null;
-    const earningsStatus = calculateEarningsStatus(lastDepositTime);
-
-    // ✅ FIX: Get ONLY the original deposits (type='deposit', not earnings)
-    const depositRow = await sql`
-      SELECT COALESCE(SUM(amount_cents), 0) AS total_deposits
-      FROM transactions
-      WHERE account_id = ${request.account.id} AND type = 'deposit' AND status = 'approved'
-    `;
-    const totalDepositsCents = depositRow[0]?.total_deposits || 0;
-    const totalDeposits = totalDepositsCents / 100;
-
-    // ✅ Get the actual approved balance (includes ALL earnings)
-    const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
-
-    // ✅ FIX: Match ORIGINAL DEPOSIT amount to DEPOSIT_PLANS (not total balance)
-    let dailyIncome = 0;
-    if (earningsStatus.earningsActive && lastDepositTime) {
-      // This now correctly matches the original deposit amount, not the total balance
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
-      dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
-    }
-
-    return response.json({
-      // Total wallet balance (deposits + earnings - withdrawals)
-      balance: approvedBalance,
-      
-      // Original deposits only (for "Total deposits" / "Active investments" display)
-      totalDeposits: totalDeposits,
-      
-      // Available to withdraw
-      availableBalance: approvedBalance,
-      
-      // Pending withdrawals
-      pendingWithdrawals: await pendingWithdrawalsCents(request.account.id) / 100,
-      
-      // Transaction list
-      transactions: rows.map((row) => transactionView(row)),
-      
-      // Deposit tracking
-      lastDepositTime,
-      
-      // Earnings activation status
-      earningsActive: earningsStatus.earningsActive,
-      earningsStartTime: earningsStatus.earningsStartTime,
-      
-      // Daily income based on ORIGINAL deposit (now correctly calculated!)
-      dailyIncome,
-    });
-  });
-
-  // ✅ NEW: COMPREHENSIVE WALLET - All earnings aggregated
-  // ✅ NEW: Get all transaction history for member (audit trail)
-  app.get('/api/wallet/transactions', requireAccount, async (request, response) => {
-    try {
-      const transactions = await sql`
-        SELECT id, type, amount_cents, reference, status, created_at
-        FROM transactions
-        WHERE account_id = ${request.account.id} AND status = 'approved'
-        ORDER BY created_at DESC
-        LIMIT 500
-      `;
-
-      const formatted = transactions.map(tx => ({
-        id: tx.id,
-        type: tx.type
-          .replace('_', ' ')
-          .replace(/\b\w/g, l => l.toUpperCase())
-          .replace('Trading Profit', 'Trading Profit')
-          .replace('Tier Reward', 'Tier Reward')
-          .replace('Tier Salary', 'Weekly Salary')
-          .replace('Referral Commission', 'Referral Bonus'),
-        amount: tx.amount_cents / 100,
-        reference: tx.reference,
-        status: tx.status,
-        date: new Date(tx.created_at).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        }),
-      }));
-
-      return response.json({
-        ok: true,
-        transactions: formatted
-      });
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      return response.status(500).json({ error: 'Failed to fetch transactions' });
-    }
-  });
-
-  app.get('/api/wallet/comprehensive', requireAccount, async (request, response) => {
-    try {
-      // Get all transaction-based earnings (deposits, withdrawals, and all earning types)
-      const allTransactions = await sql`
-        SELECT
-          type,
-          COUNT(*) AS count,
-          COALESCE(SUM(amount_cents), 0) AS total_cents
-        FROM transactions
-        WHERE account_id = ${request.account.id} AND status = 'approved'
-        GROUP BY type
-      `;
-
-      // Build transaction breakdown by type - ONLY count known earning types
-      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
-      const txByType = {};
-      let totalDepositsCents = 0;
-      let totalWithdrawalsCents = 0;
-      let totalEarningsCents = 0;
-
-      console.log('🔍 [COMPREHENSIVE WALLET] Account:', request.account.id, '| All Transactions:', JSON.stringify(allTransactions));
-
-      for (const row of allTransactions) {
-        // 🔧 FIX: Parse total_cents as integer (database returns as string)
-        const amountCents = parseInt(row.total_cents, 10) || 0;
-
-        txByType[row.type] = {
-          count: row.count,
-          amount_cents: amountCents,
-          amount: amountCents / 100,
-        };
-
-        if (row.type === 'deposit') {
-          totalDepositsCents += amountCents;
-          console.log(`  ✅ DEPOSIT: +${(amountCents / 100).toFixed(2)} (total: ${(totalDepositsCents / 100).toFixed(2)})`);
-        } else if (row.type === 'withdrawal') {
-          totalWithdrawalsCents += amountCents;
-          console.log(`  ✅ WITHDRAWAL: +${(amountCents / 100).toFixed(2)} (total: ${(totalWithdrawalsCents / 100).toFixed(2)})`);
-        } else if (knownEarningTypes.includes(row.type)) {
-          // ✅ Only count KNOWN earnings: trading_profit, tier_reward, tier_salary, referral_commission
-          totalEarningsCents += amountCents;
-          console.log(`  ✅ KNOWN EARNING (${row.type}): +${(amountCents / 100).toFixed(2)} (total: ${(totalEarningsCents / 100).toFixed(2)})`);
-        } else {
-          console.log(`  ⚠️ UNKNOWN TYPE (${row.type}): SKIPPED ${(amountCents / 100).toFixed(2)}`);
-        }
-        // ⚠️ Ignore unknown transaction types (they're NOT counted as earnings)
-      }
-
-      // Calculate wallet totals
-      const totalDeposits = totalDepositsCents / 100;
-      const totalWithdrawals = totalWithdrawalsCents / 100;
-      const totalEarnings = totalEarningsCents / 100;
-      const totalIncome = totalDeposits + totalEarnings;
-      const walletBalance = totalIncome - totalWithdrawals;
-
-      console.log(`💰 [COMPREHENSIVE WALLET FINAL] Deposits: $${totalDeposits.toFixed(2)} | Earnings: $${totalEarnings.toFixed(2)} | Balance: $${walletBalance.toFixed(2)}`);
-
-      return response.json({
-        // Root-level properties for frontend wallet display
-        balance: walletBalance,           // Total wallet balance (deposits + earnings - withdrawals)
-        totalDeposits: totalDeposits,     // Original deposits (locked)
-        totalEarnings: totalEarnings,     // All earnings combined
-        totalWithdrawals: totalWithdrawals,
-        totalIncome: totalIncome,         // deposits + earnings
-        availableToWithdraw: Math.max(0, walletBalance),
-
-        // Earnings breakdown
-        earnings: {
-          tradingProfit: txByType['trading_profit'] ? { count: txByType['trading_profit'].count, amount: txByType['trading_profit'].amount } : { count: 0, amount: 0 },
-          tierRewards: txByType['tier_reward'] ? { count: txByType['tier_reward'].count, amount: txByType['tier_reward'].amount } : { count: 0, amount: 0 },
-          weeklySalary: txByType['tier_salary'] ? { count: txByType['tier_salary'].count, amount: txByType['tier_salary'].amount } : { count: 0, amount: 0 },
-          referralCommissions: txByType['referral_commission'] ? { count: txByType['referral_commission'].count, amount: txByType['referral_commission'].amount } : { count: 0, amount: 0 },
-          totalEarnings,
-        },
-
-        // Detailed breakdown for admin/reporting
-        breakdown: {
-          'Trading Profit': txByType['trading_profit']?.amount || 0,
-          'Tier Rewards': txByType['tier_reward']?.amount || 0,
-          'Weekly Salary': txByType['tier_salary']?.amount || 0,
-          'Referral Commissions': txByType['referral_commission']?.amount || 0,
-          'Total Earnings': totalEarnings,
-          'Total Deposits': totalDeposits,
-          'Total Withdrawals': totalWithdrawals,
-          'Net Wallet Balance': walletBalance,
-        },
-      });
-    } catch (error) {
-      console.error('Error fetching comprehensive wallet:', error);
-      return response.status(500).json({ error: 'Failed to fetch wallet data.' });
-    }
-  });
-
-  // 🔍 DEBUG: Show ALL transactions (individual records) to check for duplicates or inflation
-  app.get('/api/debug/all-transactions', requireAccount, async (request, response) => {
-    try {
-      // Get ALL individual transactions (not grouped)
-      const allTx = await sql`
-        SELECT
-          id,
-          type,
-          amount_cents,
-          reference,
-          status,
-          created_at
-        FROM transactions
-        WHERE account_id = ${request.account.id}
-        ORDER BY created_at DESC
-        LIMIT 100
-      `;
-
-      // Group by type for summary
-      const summary = {};
-      let totalDepositsCents = 0;
-      let totalWithdrawalsCents = 0;
-      let totalEarningsCents = 0;
-
-      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission'];
-
-      for (const tx of allTx) {
-        // 🔧 FIX: Parse amount_cents as integer (database returns as string)
-        const amountCents = parseInt(tx.amount_cents, 10) || 0;
-
-        if (!summary[tx.type]) {
-          summary[tx.type] = { count: 0, totalCents: 0 };
-        }
-        summary[tx.type].count += 1;
-        summary[tx.type].totalCents += amountCents;
-
-        if (tx.type === 'deposit') {
-          totalDepositsCents += amountCents;
-        } else if (tx.type === 'withdrawal') {
-          totalWithdrawalsCents += amountCents;
-        } else if (knownEarningTypes.includes(tx.type)) {
-          totalEarningsCents += amountCents;
-        }
-      }
-
-      return response.json({
-        accountId: request.account.id,
-        accountName: request.account.name,
-        totalTransactions: allTx.length,
-        summary: Object.keys(summary).reduce((acc, type) => {
-          acc[type] = {
-            count: summary[type].count,
-            amount: (summary[type].totalCents / 100).toFixed(2)
-          };
-          return acc;
-        }, {}),
-        calculation: {
-          totalDeposits: (totalDepositsCents / 100).toFixed(2),
-          totalEarnings: (totalEarningsCents / 100).toFixed(2),
-          totalWithdrawals: (totalWithdrawalsCents / 100).toFixed(2),
-          expectedBalance: ((totalDepositsCents + totalEarningsCents - totalWithdrawalsCents) / 100).toFixed(2)
-        },
-        recentTransactions: allTx.map(tx => ({
-          id: tx.id,
-          type: tx.type,
-          amount: (tx.amount_cents / 100).toFixed(2),
-          reference: tx.reference,
-          date: tx.created_at
-        }))
-      });
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      return response.status(500).json({ error: 'Failed to fetch transactions.' });
-    }
-  });
-
-  // =========================================================================
-  // ADMIN ENDPOINTS
-  // =========================================================================
-
-  const adminLimiter = createRateLimiter({ limit: 60, windowMs: 15 * 60 * 1000 });
-
-  // ✅ NEW: Admin endpoint to check and fix member balance reconciliation
-  // ✅ NEW: Admin endpoint to add deposits for members (automatically updates balance)
-  app.post('/api/admin/deposits/add', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const { accountId, depositAmount, depositDate } = request.body ?? {};
-
-      if (!accountId || !depositAmount) {
-        return response.status(400).json({ error: 'accountId and depositAmount are required.' });
-      }
-
-      const depositNum = parseFloat(depositAmount);
-      if (isNaN(depositNum) || depositNum <= 0) {
-        return response.status(400).json({ error: 'Deposit amount must be a positive number.' });
-      }
-
-      // Verify member exists
-      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
-      if (member.length === 0) {
-        return response.status(404).json({ error: 'Member not found.' });
-      }
-
-      const depositCents = Math.round(depositNum * 100);
-      const txId = randomBytes(16).toString('hex');
-      const now = new Date().toISOString();
-      const refDate = depositDate || new Date().toISOString().split('T')[0];
-
-      // Create deposit transaction (approved immediately)
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'deposit', ${depositCents}, ${`Manual deposit added on ${refDate}`}, 'approved', ${now})
-      `;
-
-      // Get updated balance
-      const newBalance = await approvedBalanceCents(accountId) / 100;
-
-      return response.status(201).json({
-        ok: true,
-        message: `✅ Added $${depositNum.toFixed(2)} deposit for ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
-        transactionId: txId,
-        memberName: member[0].name,
-        depositAmount: depositNum,
-        newBalance,
-      });
-    } catch (error) {
-      console.error('Error adding deposit:', error);
-      return response.status(500).json({ error: `Failed to add deposit: ${error.message}` });
-    }
-  });
-
-  // ✅ NEW: Admin endpoint to deduct/remove trades from members (automatically updates balance)
-  app.post('/api/admin/trading/deduct-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const { accountId, deductAmount, deductDate } = request.body ?? {};
-
-      if (!accountId || !deductAmount) {
-        return response.status(400).json({ error: 'accountId and deductAmount are required.' });
-      }
-
-      const deductNum = parseFloat(deductAmount);
-      if (isNaN(deductNum) || deductNum <= 0) {
-        return response.status(400).json({ error: 'Deduct amount must be a positive number.' });
-      }
-
-      // Verify member exists
-      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
-      if (member.length === 0) {
-        return response.status(404).json({ error: 'Member not found.' });
-      }
-
-      const deductCents = Math.round(deductNum * 100);
-      const txId = randomBytes(16).toString('hex');
-      const now = new Date().toISOString();
-      const refDate = deductDate || new Date().toISOString().split('T')[0];
-
-      // Create deduction as a WITHDRAWAL type (reverses the trade by removing funds)
-      // This way we stay with positive amounts in the database
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'withdrawal', ${deductCents}, ${`Trade reversal on ${refDate}`}, 'approved', ${now})
-      `;
-
-      // Get updated balance
-      const newBalance = await approvedBalanceCents(accountId) / 100;
-
-      return response.status(200).json({
-        ok: true,
-        message: `✅ Deducted $${deductNum.toFixed(2)} trade from ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
-        transactionId: txId,
-        memberName: member[0].name,
-        deductAmount: deductNum,
-        newBalance,
-      });
-    } catch (error) {
-      console.error('Error deducting trade:', error);
-      return response.status(500).json({ error: `Failed to deduct trade: ${error.message}` });
-    }
-  });
-
-  // ✅ NEW: Admin endpoint to add/create trades for members (automatically updates balance)
-  app.post('/api/admin/trading/add-trade', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const { accountId, profitAmount, profitDate } = request.body ?? {};
-
-      if (!accountId || !profitAmount || !profitDate) {
-        return response.status(400).json({ error: 'accountId, profitAmount, and profitDate are required.' });
-      }
-
-      const profitNum = parseFloat(profitAmount);
-      if (isNaN(profitNum) || profitNum <= 0) {
-        return response.status(400).json({ error: 'Profit amount must be a positive number.' });
-      }
-
-      // Verify member exists
-      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
-      if (member.length === 0) {
-        return response.status(404).json({ error: 'Member not found.' });
-      }
-
-      // Check if trade already exists for this date
-      const existing = await sql`
-        SELECT id FROM trading_ledger
-        WHERE account_id = ${accountId} AND profit_date = ${profitDate}
-      `;
-
-      if (existing.length > 0) {
-        return response.status(409).json({ error: 'Trade already exists for this member on this date.' });
-      }
-
-      // Get a deposit to link to (or create entry)
-      const deposits = await sql`
-        SELECT id FROM transactions
-        WHERE account_id = ${accountId} AND type = 'deposit' AND status = 'approved'
-        LIMIT 1
-      `;
-
-      if (deposits.length === 0) {
-        return response.status(409).json({ error: 'Member has no approved deposits. Cannot add trade.' });
-      }
-
-      const profitCents = Math.round(profitNum * 100);
-      const ledgerId = randomBytes(16).toString('hex');
-      const txId = randomBytes(16).toString('hex');
-      const now = new Date().toISOString();
-
-      // Create trading ledger entry
-      await sql`
-        INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
-        VALUES (${ledgerId}, ${accountId}, ${deposits[0].id}, ${profitCents}, ${profitDate}, ${now})
-      `;
-
-      // Create approved transaction (adds directly to balance)
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'approved', ${now})
-      `;
-
-      // Record audit
-      await recordAudit(request, 'admin.trading.add_trade', ledgerId, {
-        accountId,
-        accountName: member[0].name,
-        accountEmail: member[0].email,
-        profitAmount: profitNum,
-        profitDate,
-      });
-
-      // Get updated balance
-      const newBalance = await approvedBalanceCents(accountId) / 100;
-
-      return response.status(201).json({
-        ok: true,
-        message: `✅ Added $${profitNum.toFixed(2)} trade for ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
-        ledgerId,
-        transactionId: txId,
-        memberName: member[0].name,
-        profitAmount: profitNum,
-        newBalance,
-      });
-    } catch (error) {
-      console.error('Error adding trade:', error);
-      return next(error);
-    }
-  });
-
-  app.get('/api/admin/balance-reconciliation', adminLimiter, requireAdminSession, async (request, response) => {
-    try {
-      // Get all members with their transactions
-      const members = await sql`
-        SELECT DISTINCT a.id, a.name, a.email, a.created_at
-        FROM accounts a
-        WHERE a.role = 'member' AND a.status = 'active'
-        ORDER BY a.created_at DESC
-        LIMIT 100
-      `;
-
-      const reconciliationData = [];
-
-      for (const member of members) {
-        // Get current balance using approvedBalanceCents (should include ALL earnings)
-        const currentBalance = await approvedBalanceCents(member.id) / 100;
-
-        // Get all approved transactions breakdown
-        const txBreakdown = await sql`
-          SELECT
-            type,
-            COUNT(*) as count,
-            COALESCE(SUM(amount_cents), 0) as total_cents
-          FROM transactions
-          WHERE account_id = ${member.id} AND status = 'approved'
-          GROUP BY type
-        `;
-
-        const txByType = {};
-        let deposits = 0, withdrawals = 0, earnings = 0;
-
-        for (const tx of txBreakdown) {
-          txByType[tx.type] = {
-            count: tx.count,
-            amount: tx.total_cents / 100,
-          };
-
-          if (tx.type === 'deposit') deposits += tx.total_cents;
-          else if (tx.type === 'withdrawal') withdrawals += tx.total_cents;
-          else earnings += tx.total_cents;
-        }
-
-        const tradingProfit = (txByType['trading_profit']?.amount || 0);
-        const referralCommission = (txByType['referral_commission']?.amount || 0);
-        const tierReward = (txByType['tier_reward']?.amount || 0);
-        const tierSalary = (txByType['tier_salary']?.amount || 0);
-
-        // Check if balance is correct
-        const calculatedBalance = (deposits + earnings - withdrawals) / 100;
-        const isBalanceCorrect = Math.abs(currentBalance - calculatedBalance) < 0.01; // Allow 1 cent variance
-
-        // Add to reconciliation report only if there's trading profit or balance mismatch
-        if (tradingProfit > 0 || !isBalanceCorrect) {
-          reconciliationData.push({
-            memberId: member.id,
-            memberName: member.name,
-            memberEmail: member.email,
-            currentBalance,
-            calculatedBalance,
-            isBalanceCorrect,
-            deposits: deposits / 100,
-            withdrawals: withdrawals / 100,
-            earnings: earnings / 100,
-            breakdown: {
-              tradingProfit,
-              referralCommission,
-              tierReward,
-              tierSalary,
-            },
-            transactionCounts: {
-              deposits: txByType['deposit']?.count || 0,
-              withdrawals: txByType['withdrawal']?.count || 0,
-              tradingProfits: txByType['trading_profit']?.count || 0,
-              referralCommissions: txByType['referral_commission']?.count || 0,
-              tierRewards: txByType['tier_reward']?.count || 0,
-              tierSalaries: txByType['tier_salary']?.count || 0,
-            },
-          });
-        }
-      }
-
-      return response.json({
-        totalMembersChecked: members.length,
-        membersWithIssues: reconciliationData.length,
-        reconciliation: reconciliationData,
-      });
-    } catch (error) {
-      console.error('Error in balance reconciliation:', error);
-      return response.status(500).json({ error: 'Failed to check balance reconciliation.' });
-    }
-  });
-
-  // ✅ NEW: Fix missing recharge bonuses for an account
-  app.post('/api/admin/accounts/:id/fix-missing-bonuses', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const accountId = request.params.id;
-
-      // Get all approved deposits for this account
-      const deposits = await sql`
-        SELECT id, amount_cents, created_at
-        FROM transactions
-        WHERE account_id = ${accountId} AND type = 'deposit' AND status = 'approved'
-        ORDER BY created_at ASC
-      `;
-
-      if (deposits.length === 0) {
-        return response.status(404).json({ error: 'No approved deposits found for this account.' });
-      }
-
-      // Check which deposits already have bonuses
-      const bonusesExist = await sql`
-        SELECT transaction_id FROM referral_commissions
-        WHERE referred_account_id = ${accountId}
-      `;
-
-      const existingBonusesForDeposits = new Set(bonusesExist.map(b => b.transaction_id));
-
-      let addedCount = 0;
-      let totalBonusAdded = 0;
-      const results = [];
-
-      // For each deposit without a bonus, create one
-      for (const deposit of deposits) {
-        if (!existingBonusesForDeposits.has(deposit.id)) {
-          // Calculate 2.5% bonus
-          const bonusCents = Math.round(deposit.amount_cents * 0.025);
-          const bonusId = randomBytes(16).toString('hex');
-          const commissionId = randomBytes(16).toString('hex');
-          const txId = randomBytes(16).toString('hex');
-          const now = new Date().toISOString();
-
-          try {
-            // Create referral commission record
-            await sql`
-              INSERT INTO referral_commissions (id, referrer_id, transaction_id, referred_account_id, commission_cents, commission_rate, created_at)
-              VALUES (${commissionId}, ${accountId}, ${deposit.id}, ${accountId}, ${bonusCents}, 0.025, ${now})
-            `;
-
-            // Create bonus transaction (auto-credited)
-            await sql`
-              INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-              VALUES (${txId}, ${accountId}, 'referral_commission', ${bonusCents}, 'Recharge bonus (2.5%)', 'approved', ${now})
-            `;
-
-            addedCount++;
-            totalBonusAdded += bonusCents;
-            results.push({
-              depositAmount: (deposit.amount_cents / 100).toFixed(2),
-              bonusAdded: (bonusCents / 100).toFixed(2),
-              status: 'Added'
-            });
-          } catch (err) {
-            results.push({
-              depositAmount: (deposit.amount_cents / 100).toFixed(2),
-              status: 'Failed',
-              error: err.message
-            });
-          }
-        } else {
-          results.push({
-            depositAmount: (deposit.amount_cents / 100).toFixed(2),
-            status: 'Already Has Bonus'
-          });
-        }
-      }
-
-      const newBalance = await approvedBalanceCents(accountId) / 100;
-
-      await recordAudit(request, 'admin.fix_missing_bonuses', accountId, {
-        depositCount: deposits.length,
-        bonusesAdded: addedCount,
-        totalBonusAdded: totalBonusAdded / 100,
-      });
-
-      return response.json({
-        ok: true,
-        accountId,
-        message: `Fixed ${addedCount} missing bonuses (+$${(totalBonusAdded / 100).toFixed(2)})`,
-        depositCount: deposits.length,
-        bonusesAdded: addedCount,
-        totalBonusAdded: (totalBonusAdded / 100).toFixed(2),
-        newBalance: newBalance.toFixed(2),
-        details: results,
-      });
-    } catch (error) {
-      console.error('Error fixing missing bonuses:', error);
-      return next(error);
-    }
-  });
-
-  // ✅ NEW: Remove duplicate transactions for an account
-  app.post('/api/admin/accounts/:id/remove-duplicates', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const accountId = request.params.id;
-
-      // Find duplicate transactions (same type, amount, created within 1 minute)
-      const duplicates = await sql`
-        SELECT t1.id, t1.type, t1.amount_cents, t1.created_at,
-               COUNT(*) as duplicate_count
-        FROM transactions t1
-        WHERE t1.account_id = ${accountId}
-        GROUP BY t1.type, t1.amount_cents, DATE_TRUNC('minute', t1.created_at)
-        HAVING COUNT(*) > 1
-      `;
-
-      if (duplicates.length === 0) {
-        return response.json({
-          ok: true,
-          message: 'No duplicate transactions found.',
-          removedCount: 0,
-        });
-      }
-
-      let removedCount = 0;
-
-      // For each group of duplicates, keep the first and remove the rest
-      for (const dup of duplicates) {
-        const duplicateTransactions = await sql`
-          SELECT id, created_at
-          FROM transactions
-          WHERE account_id = ${accountId}
-            AND type = ${dup.type}
-            AND amount_cents = ${dup.amount_cents}
-            AND DATE_TRUNC('minute', created_at) = DATE_TRUNC('minute', ${dup.created_at}::timestamp)
-          ORDER BY created_at ASC
-        `;
-
-        // Keep first, delete the rest
-        for (let i = 1; i < duplicateTransactions.length; i++) {
-          try {
-            await sql`DELETE FROM transactions WHERE id = ${duplicateTransactions[i].id}`;
-            removedCount++;
-          } catch (err) {
-            console.error(`Failed to delete duplicate ${duplicateTransactions[i].id}:`, err);
-          }
-        }
-      }
-
-      const newBalance = await approvedBalanceCents(accountId) / 100;
-
-      await recordAudit(request, 'admin.remove_duplicates', accountId, {
-        duplicateGroupsFound: duplicates.length,
-        transactionsRemoved: removedCount,
-      });
-
-      return response.json({
-        ok: true,
-        accountId,
-        message: `Removed ${removedCount} duplicate transactions`,
-        duplicateGroupsFound: duplicates.length,
-        removedCount,
-        newBalance: newBalance.toFixed(2),
-      });
-    } catch (error) {
-      console.error('Error removing duplicates:', error);
-      return next(error);
-    }
-  });
-
-  // ✅ VERIFICATION ENDPOINT: Check deposit calculations for all members
-  app.get('/api/admin/deposits/verify', adminLimiter, requireAdminSession, async (request, response) => {
-    try {
-      const members = await sql`SELECT id, name, email FROM accounts WHERE role = 'member' ORDER BY created_at DESC`;
-
-      const verification = await Promise.all(members.map(async (member) => {
-        // Get ONLY deposit transactions (type='deposit', status='approved')
-        const depositTxs = await sql`
-          SELECT id, amount_cents, reference, created_at
-          FROM transactions
-          WHERE account_id = ${member.id} AND type = 'deposit' AND status = 'approved'
-          ORDER BY created_at ASC
-        `;
-
-        const totalDepositsCents = depositTxs.reduce((sum, tx) => sum + tx.amount_cents, 0);
-
-        // Get current balance using approvedBalanceCents
-        const currentBalance = await approvedBalanceCents(member.id);
-
-        return {
-          memberId: member.id,
-          memberName: member.name,
-          memberEmail: member.email,
-          depositCount: depositTxs.length,
-          depositTransactions: depositTxs.map(tx => ({
-            id: tx.id,
-            amount: (tx.amount_cents / 100).toFixed(2),
-            reference: tx.reference,
-            date: tx.created_at.split('T')[0],
-          })),
-          totalDeposits: (totalDepositsCents / 100).toFixed(2),
-          currentBalance: (currentBalance / 100).toFixed(2),
-        };
-      }));
-
-      return response.json({
-        ok: true,
-        totalMembers: verification.length,
-        deposits: verification,
-      });
-    } catch (error) {
-      console.error('Error verifying deposits:', error);
-      return response.status(500).json({ error: error.message });
-    }
-  });
-
-  app.get('/api/admin/accounts', adminLimiter, requireAdminSession, async (request, response) => {
-    const accounts = await sql`
-      SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
-        COALESCE((
-          SELECT SUM(amount_cents)
-          FROM transactions t
-          WHERE t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
-        ), 0) AS total_deposits_cents,
-        COALESCE((
-          SELECT SUM(CASE
-            WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
-            WHEN type = 'withdrawal' THEN -amount_cents
-            ELSE 0
-          END)
-          FROM transactions t
-          WHERE t.account_id = a.id AND t.status = 'approved'
-        ), 0) AS balance_cents,
-        (SELECT COUNT(*) FROM transactions t WHERE t.account_id = a.id AND t.status = 'pending') AS pending_count
-      FROM accounts a
-      ORDER BY a.created_at DESC
-      LIMIT 100
-    `;
-
-    return response.json({
-      accounts: accounts.map((row) => ({
-        ...accountView(row),
-        holdReason: row.hold_reason ?? null,
-        heldAt: row.held_at ?? null,
-        totalDeposits: row.total_deposits_cents / 100,
-        balance: row.balance_cents / 100,
-        pendingTransactions: row.pending_count,
-      }))
-    });
-  });
-
-  app.patch('/api/admin/accounts/:id/profile', adminLimiter, requireAdminSession, async (request, response) => {
-    const name = request.body?.name;
-    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
-      return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
-    }
-
-    const target = await sql`SELECT id, role FROM accounts WHERE id = ${request.params.id}`;
-    if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-    if (target[0].role === 'admin') return response.status(403).json({ error: 'Administrator profiles cannot be changed here.' });
-
-    await sql`UPDATE accounts SET name = ${name.trim()} WHERE id = ${target[0].id}`;
-    const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
-    return response.json({ account: accountView(account[0]) });
-  });
-
-  app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await sql`
-      SELECT id, name, email, created_at, role, status, hold_reason, held_at
-      FROM accounts WHERE id = ${request.params.id}
-    `;
-    if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
-
-    const totals = await sql`
-      SELECT
-        COALESCE(SUM(CASE WHEN status = 'approved' AND type = 'deposit' THEN amount_cents END), 0) AS deposited,
-        COALESCE(SUM(CASE WHEN status = 'approved' AND type = 'withdrawal' THEN amount_cents END), 0) AS withdrawn,
-        COALESCE(SUM(CASE WHEN status = 'pending' AND type = 'deposit' THEN amount_cents END), 0) AS pending_deposits,
-        COALESCE(SUM(CASE WHEN status = 'pending' AND type = 'withdrawal' THEN amount_cents END), 0) AS pending_withdrawals,
-        COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 END), 0) AS rejected_count
-      FROM transactions WHERE account_id = ${request.params.id}
-    `;
-
-    const recent = await sql`
-      SELECT t.*, a.name AS account_name, a.email AS account_email
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id
-      WHERE t.account_id = ${request.params.id}
-      ORDER BY t.created_at DESC
-      LIMIT 50
-    `;
-
-    return response.json({
-      account: {
-        ...accountView(account[0]),
-        holdReason: account[0].hold_reason ?? null,
-        heldAt: account[0].held_at ?? null,
-      },
-      summary: {
-        balance: (totals[0].deposited - totals[0].withdrawn) / 100,
-        totalDeposited: totals[0].deposited / 100,
-        totalWithdrawn: totals[0].withdrawn / 100,
-        pendingDeposits: totals[0].pending_deposits / 100,
-        pendingWithdrawals: totals[0].pending_withdrawals / 100,
-        rejectedCount: totals[0].rejected_count,
-      },
-      transactions: recent.map((row) => transactionView(row, { admin: true })),
-    });
-  });
-
-  app.patch('/api/admin/accounts/:id', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const target = await sql`SELECT id, name, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot edit administrator accounts.' });
-
-      const name = request.body?.name;
-      const email = request.body?.email;
-
-      if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
-        return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
-      }
-
-      const cleanEmail = email?.trim().toLowerCase();
-      if (typeof cleanEmail !== 'string' || !EMAIL_PATTERN.test(cleanEmail)) {
-        return response.status(400).json({ error: 'Enter a valid email address.' });
-      }
-
-      if (cleanEmail !== target[0].email) {
-        const existing = await sql`SELECT id FROM accounts WHERE email = ${cleanEmail} AND id != ${target[0].id}`;
-        if (existing.length > 0) return response.status(409).json({ error: 'This email is already in use.' });
-      }
-
-      await sql`UPDATE accounts SET name = ${name.trim()}, email = ${cleanEmail} WHERE id = ${target[0].id}`;
-      await recordAudit(request, 'account.edit', target[0].id, {
-        email: target[0].email,
-        newName: name.trim(),
-        newEmail: cleanEmail,
-      });
-
-      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
-      return response.json({ account: accountView(account[0]) });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.delete('/api/admin/accounts/:id', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const confirm = request.body?.confirm;
-      if (confirm !== 'DELETE') {
-        return response.status(400).json({ error: 'Confirmation required to delete account.' });
-      }
-
-      const target = await sql`SELECT id, email, role FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot delete administrator accounts.' });
-
-      await sql`DELETE FROM accounts WHERE id = ${target[0].id}`;
-      await recordAudit(request, 'account.delete', target[0].id, { email: target[0].email });
-
-      return response.status(204).end();
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post('/api/admin/accounts/:id/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const { action, amountCents, reason } = request.body ?? {};
-
-      if (!['adjust', 'deduct', 'set'].includes(action)) {
-        return response.status(400).json({ error: 'Action must be adjust, deduct, or set.' });
-      }
-
-      if (typeof amountCents !== 'number' || !Number.isFinite(amountCents) || amountCents <= 0) {
-        return response.status(400).json({ error: 'Amount must be a positive number in cents.' });
-      }
-
-      const cleanReason = cleanText(reason, { min: 3, max: 300 });
-      if (cleanReason === null) {
-        return response.status(400).json({ error: 'Reason must be between 3 and 300 characters.' });
-      }
-
-      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot adjust admin account balances.' });
-
-      const currentBalance = await approvedBalanceCents(request.params.id);
-      let txType;
-      let txAmount;
-      let reference;
-
-      if (action === 'adjust') {
-        txType = 'deposit';
-        txAmount = amountCents;
-        reference = `Admin adjustment: +${(amountCents / 100).toFixed(2)} USD`;
-      } else if (action === 'deduct') {
-        txType = 'withdrawal';
-        txAmount = amountCents;
-        reference = `Admin adjustment: -${(amountCents / 100).toFixed(2)} USD`;
-      } else if (action === 'set') {
-        if (amountCents > currentBalance) {
-          txType = 'deposit';
-          txAmount = amountCents - currentBalance;
-          reference = `Admin set balance: ${(amountCents / 100).toFixed(2)} USD`;
-        } else if (amountCents < currentBalance) {
-          txType = 'withdrawal';
-          txAmount = currentBalance - amountCents;
-          reference = `Admin set balance: ${(amountCents / 100).toFixed(2)} USD`;
-        } else {
-          return response.json({ ok: true, message: 'Balance unchanged.' });
-        }
-      }
-
-      const txId = randomBytes(16).toString('hex');
-      await sql`
-        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.params.id}, ${txType}, ${txAmount}, ${reference}, 'approved', ${new Date().toISOString()})
-      `;
-
-      await recordAudit(request, 'balance.adjustment', request.params.id, {
-        action,
-        amountCents,
-        reason: cleanReason,
-        email: target[0].email,
-        previousBalance: currentBalance / 100,
-        newBalance: (action === 'set' ? amountCents : (txType === 'deposit' ? currentBalance + txAmount : currentBalance - txAmount)) / 100,
-      });
-
-      const newBalance = await approvedBalanceCents(request.params.id);
-      return response.json({
-        ok: true,
-        message: `Balance ${action}ed successfully.`,
-        previousBalance: currentBalance / 100,
-        newBalance: newBalance / 100,
-        transactionId: txId,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.get('/api/admin/transactions', adminLimiter, requireAdminSession, async (request, response) => {
-    const { status, type, accountId } = request.query;
-
-    if (status !== undefined && !TX_STATUSES.includes(status)) {
-      return response.status(400).json({ error: 'Invalid status filter.' });
-    }
-    if (type !== undefined && !TX_TYPES.slice(0, 2).includes(type)) {
-      return response.status(400).json({ error: 'Invalid type filter.' });
-    }
-    if (accountId !== undefined && (typeof accountId !== 'string' || accountId.length === 0 || accountId.length > 64)) {
-      return response.status(400).json({ error: 'Invalid account filter.' });
-    }
-
-    let rows;
-
-    if (status && type && accountId) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.status = ${status} AND t.type = ${type} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (status && type) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.status = ${status} AND t.type = ${type}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (status && accountId) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.status = ${status} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (type && accountId) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.type = ${type} AND t.account_id = ${accountId}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (status) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.status = ${status}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (type) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.type = ${type}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else if (accountId) {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        WHERE t.account_id = ${accountId}
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    } else {
-      rows = await sql`
-        SELECT t.*, a.name AS account_name, a.email AS account_email
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        ORDER BY t.created_at DESC
-        LIMIT 200
-      `;
-    }
-
-    return response.json({ transactions: rows.map((row) => transactionView(row, { admin: true })) });
-  });
-
-  function reviewTransaction(decision) {
-    return async (request, response, next) => {
-      try {
-        const note = request.body?.note == null ? '' : cleanText(request.body.note, { min: 0, max: 300 });
-        if (note === null) return response.status(400).json({ error: 'Note must be at most 300 characters.' });
-        if (decision === 'rejected' && note.length < 3) {
-          return response.status(400).json({ error: 'A reason is required to reject a transaction.' });
-        }
-
-        const tx = await getTransaction(request.params.id);
-        if (!tx) return response.status(404).json({ error: 'Transaction not found.' });
-        if (tx.status !== 'pending') {
-          return response.status(409).json({ error: `Transaction is already ${tx.status}.` });
-        }
-        if (decision === 'approved') {
-          if (tx.account_id === request.account.id) {
-            return response.status(403).json({ error: 'You cannot approve your own transaction.' });
-          }
-          const owner = await sql`SELECT status FROM accounts WHERE id = ${tx.account_id}`;
-          if (owner[0].status === 'held') {
-            return response.status(409).json({ error: 'This account is on hold. Release it before approving.' });
-          }
-          if (tx.type === 'withdrawal' && await approvedBalanceCents(tx.account_id) < tx.amount_cents) {
-            return response.status(409).json({ error: 'Insufficient approved balance for this withdrawal.' });
-          }
-        }
-
-        await sql`
-          UPDATE transactions
-          SET status = ${decision}, reviewed_by = ${request.account.id}, reviewed_at = ${new Date().toISOString()}, review_note = ${note}
-          WHERE id = ${tx.id} AND status = 'pending'
-        `;
-
-        await recordAudit(request, `transaction.${decision}`, tx.id, {
-          type: tx.type,
-          amount: tx.amount_cents / 100,
-          accountId: tx.account_id,
-          accountEmail: tx.account_email,
-          note,
-        });
-
-        if (decision === 'approved' && tx.type === 'deposit') {
-          const commission = await applyReferralCommission(tx.id);
-          if (commission) {
-            await recordAudit(request, 'referral.commission_earned', tx.account_id, {
-              amount: commission.amount,
-              commissionId: commission.commissionId,
-              type: commission.bonusType,
-              beneficiary: commission.beneficiaryId === tx.account_id ? 'member_self' : 'referrer',
-            });
-          }
-
-          const referralSignup = await sql`
-            SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${tx.account_id} LIMIT 1
-          `;
-
-          if (referralSignup.length > 0 && referralSignup[0].referrer_id) {
-            const directCount = await getDirectReferralCount(sql, referralSignup[0].referrer_id);
-            const teamTotal = await getTeamTotal(sql, referralSignup[0].referrer_id);
-            const tier = getTierByProgress(directCount, teamTotal);
-
-            if (tier >= 0) {
-              const tierReward = await checkAndCreditTierReward(sql, referralSignup[0].referrer_id);
-              if (tierReward) {
-                await recordAudit(request, 'referral.tier_reward_credited', referralSignup[0].referrer_id, {
-                  tierIndex: tierReward.tierId,
-                  tierName: tierReward.tierName,
-                  amountUSD: tierReward.amountCents / 100,
-                  directCount,
-                  teamTotal,
-                  triggeredBy: tx.account_id,
-                });
-              }
-            }
-
-            const grandParentSignup = await sql`
-              SELECT referrer_id FROM referral_signups WHERE referred_account_id = ${referralSignup[0].referrer_id}
-            `;
-
-            if (grandParentSignup.length > 0 && grandParentSignup[0].referrer_id) {
-              const grandDirect = await getDirectReferralCount(sql, grandParentSignup[0].referrer_id);
-              const grandTeam = await getTeamTotal(sql, grandParentSignup[0].referrer_id);
-              const grandTier = getTierByProgress(grandDirect, grandTeam);
-
-              if (grandTier >= 0) {
-                const grandParentTierReward = await checkAndCreditTierReward(sql, grandParentSignup[0].referrer_id);
-                if (grandParentTierReward) {
-                  await recordAudit(request, 'referral.tier_reward_credited', grandParentSignup[0].referrer_id, {
-                    tierIndex: grandParentTierReward.tierId,
-                    tierName: grandParentTierReward.tierName,
-                    amountUSD: grandParentTierReward.amountCents / 100,
-                    directCount: grandDirect,
-                    teamTotal: grandTeam,
-                    triggeredBy: tx.account_id,
-                  });
-                }
-              }
-            }
-          }
-        }
-
-        const updated = await getTransaction(tx.id);
-        return response.json({ transaction: transactionView(updated, { admin: true }) });
-      } catch (error) {
-        return next(error);
-      }
-    };
   }
 
-  app.post('/api/admin/transactions/:id/approve', adminLimiter, requireAdminSession, reviewTransaction('approved'));
-  app.post('/api/admin/transactions/:id/reject', adminLimiter, requireAdminSession, reviewTransaction('rejected'));
-
-  app.post('/api/admin/accounts/:id/hold', adminLimiter, requireAdminSession, async (request, response, next) => {
+  async function fetchReferralCode() {
+    if (!account) return;
     try {
-      const reason = cleanText(request.body?.reason, { min: 3, max: 300 });
-      if (reason === null) {
-        return response.status(400).json({ error: 'A hold reason of 3-300 characters is required.' });
-      }
-      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].role === 'admin') return response.status(403).json({ error: 'Administrator accounts cannot be put on hold.' });
-      if (target[0].status === 'held') return response.status(409).json({ error: 'Account is already on hold.' });
-
-      await sql`UPDATE accounts SET status = 'held', hold_reason = ${reason}, held_at = ${new Date().toISOString()} WHERE id = ${target[0].id}`;
-      await sql`DELETE FROM sessions WHERE account_id = ${target[0].id}`;
-      await recordAudit(request, 'account.hold', target[0].id, { email: target[0].email, reason });
-
-      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
-      return response.json({ account: accountView(account[0]) });
+      const result = await requestApi('/api/referrals/code');
+      setAccount((prev) => ({...prev, referralCode: result.code}));
     } catch (error) {
-      return next(error);
+      console.error('Failed to fetch referral code:', error);
     }
-  });
+  }
 
-  app.post('/api/admin/accounts/:id/release', adminLimiter, requireAdminSession, async (request, response, next) => {
+  async function fetchReferralStats() {
+    if (!account) return;
+    setReferralStatsLoading(true);
     try {
-      const note = request.body?.note == null ? '' : cleanText(request.body.note, { min: 0, max: 300 });
-      if (note === null) return response.status(400).json({ error: 'Note must be at most 300 characters.' });
+      const result = await requestApi('/api/referrals/stats');
+      setReferralStats(result);
 
-      const target = await sql`SELECT id, email, role, status FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].status !== 'held') return response.status(409).json({ error: 'Account is not on hold.' });
+      let bonusAmount = 0;
 
-      await sql`UPDATE accounts SET status = 'active', hold_reason = NULL, held_at = NULL WHERE id = ${target[0].id}`;
-      await recordAudit(request, 'account.release', target[0].id, { email: target[0].email, note });
-
-      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
-      return response.json({ account: accountView(account[0]) });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post('/api/admin/accounts/:id/password', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      const newError = passwordError(request.body?.newPassword);
-      if (newError) return response.status(400).json({ error: newError });
-
-      const target = await sql`SELECT id, email, role FROM accounts WHERE id = ${request.params.id}`;
-      if (target.length === 0) return response.status(404).json({ error: 'Member account not found.' });
-      if (target[0].role === 'admin') {
-        return response.status(403).json({ error: 'Administrator passwords can only be changed by that administrator.' });
+      if (typeof result.totalEarned === 'number') {
+        bonusAmount = Math.floor(result.totalEarned);
+      } else {
+        const totalReferralDeposits =
+          result.totalReferralDeposits ||
+          result.referralDepositsTotal ||
+          result.totalDepositsFromReferrals ||
+          result.totalDeposits ||
+          0;
+        bonusAmount = Math.floor(totalReferralDeposits * 0.05);
       }
 
-      const hashed = await hashPassword(request.body.newPassword);
-      await sql`UPDATE accounts SET password_salt = ${hashed.salt}, password_hash = ${hashed.hash} WHERE id = ${target[0].id}`;
-      await sql`DELETE FROM sessions WHERE account_id = ${target[0].id}`;
-      await recordAudit(request, 'password.reset_by_admin', target[0].id, { email: target[0].email });
-      return response.json({ ok: true });
+      setReferralEarnings(bonusAmount);
     } catch (error) {
-      return next(error);
+      console.error('Failed to fetch referral stats:', error);
+      setReferralStats(null);
+      setReferralEarnings(0);
+    } finally {
+      setReferralStatsLoading(false);
     }
-  });
+  }
 
-  // ✅ ADMIN REFERRAL ENDPOINTS - Accepts ID or Email
-  app.get('/api/admin/referrals/:identifier', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await findAccountByIdentifier(sql, request.params.identifier);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
-
-    const directStats = await sql`
-      SELECT COUNT(*) AS direct_count
-      FROM referral_signups WHERE referrer_id = ${account.id}
-    `;
-
-    const commissions = await sql`
-      SELECT
-        rc.id,
-        rc.commission_cents,
-        rc.commission_rate,
-        rc.created_at,
-        a.name AS referred_name,
-        a.email AS referred_email,
-        t.amount_cents,
-        t.type
-      FROM referral_commissions rc
-      JOIN accounts a ON a.id = rc.referred_account_id
-      JOIN transactions t ON t.id = rc.transaction_id
-      WHERE rc.referrer_id = ${account.id}
-      ORDER BY rc.created_at DESC
-      LIMIT 100
-    `;
-
-    const directCount = directStats[0].direct_count;
-    const teamTotal = await getTeamTotal(sql, account.id);
-    const tier = getTierByProgress(directCount, teamTotal);
-
-    return response.json({
-      account: { id: account.id, name: account.name, email: account.email },
-      tier: tier >= 0 ? TIER_NAMES[tier] : null,
-      directReferrals: directCount,
-      teamTotal,
-      commissions: commissions.map(c => ({
-        id: c.id,
-        referredName: c.referred_name,
-        referredEmail: c.referred_email,
-        transactionAmount: c.amount_cents / 100,
-        transactionType: c.type,
-        commissionRate: c.commission_rate,
-        commissionEarned: c.commission_cents / 100,
-        earnedAt: c.created_at,
-      })),
-    });
-  });
-
-  // ✅ REFERRED MEMBERS ENDPOINT - Accepts ID or Email
-  app.get('/api/admin/referrals/:identifier/referred-members', adminLimiter, requireAdminSession, async (request, response) => {
-    const account = await findAccountByIdentifier(sql, request.params.identifier);
-    if (!account) return response.status(404).json({ error: 'Account not found.' });
-
-    const referrals = await sql`
-      SELECT
-        rs.id,
-        a.id AS account_id,
-        a.name,
-        a.email,
-        rs.signed_up_at,
-        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
-      FROM referral_signups rs
-      JOIN accounts a ON a.id = rs.referred_account_id
-      LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
-      WHERE rs.referrer_id = ${account.id}
-      GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
-      ORDER BY rs.signed_up_at DESC
-      LIMIT 100
-    `;
-
-    return response.json({
-      referrer: { id: account.id, name: account.name, email: account.email },
-      referrals: referrals.map(r => ({
-        id: r.account_id,
-        name: r.name,
-        email: r.email,
-        signedUpAt: r.signed_up_at,
-        totalDeposits: r.total_deposits_cents / 100,
-      })),
-    });
-  });
-
-  app.get('/api/admin/audit', adminLimiter, requireAdminSession, async (request, response) => {
-    const { action } = request.query;
-    if (action !== undefined && (typeof action !== 'string' || action.length === 0 || action.length > 64)) {
-      return response.status(400).json({ error: 'Invalid action filter.' });
-    }
-    const rows = await (action
-      ? sql`SELECT id, actor_id, actor_email, action, target_id, detail, ip, created_at FROM audit_log WHERE action = ${action} ORDER BY id DESC LIMIT 200`
-      : sql`SELECT id, actor_id, actor_email, action, target_id, detail, ip, created_at FROM audit_log ORDER BY id DESC LIMIT 200`
-    );
-    return response.json({
-      entries: rows.map((row) => ({
-        id: row.id,
-        actorId: row.actor_id,
-        actorEmail: row.actor_email,
-        action: row.action,
-        targetId: row.target_id,
-        detail: row.detail ? JSON.parse(row.detail) : {},
-        ip: row.ip,
-        createdAt: row.created_at,
-      })),
-    });
-  });
-
-  app.get('/api/admin/trading/ledger', adminLimiter, requireAdminSession, async (request, response) => {
-    const { accountId } = request.query;
-    let query = sql`
-      SELECT
-        tl.id,
-        tl.account_id,
-        tl.profit_cents,
-        tl.profit_date,
-        tl.created_at,
-        a.name AS account_name,
-        a.email AS account_email,
-        t.amount_cents AS deposit_amount
-      FROM trading_ledger tl
-      JOIN accounts a ON a.id = tl.account_id
-      JOIN transactions t ON t.id = tl.deposit_transaction_id
-    `;
-
-    if (accountId) {
-      query = sql`${query} WHERE tl.account_id = ${accountId}`;
-    }
-
-    const rows = await sql`${query} ORDER BY tl.profit_date DESC LIMIT 500`;
-    const totalProfit = rows.reduce((sum, r) => sum + (r.profit_cents / 100), 0);
-
-    return response.json({
-      totalProfit,
-      count: rows.length,
-      ledger: rows.map(r => ({
-        id: r.id,
-        accountId: r.account_id,
-        accountName: r.account_name,
-        accountEmail: r.account_email,
-        profitAmount: r.profit_cents / 100,
-        depositAmount: r.deposit_amount / 100,
-        profitDate: r.profit_date,
-        creditedAt: r.created_at,
-      })),
-    });
-  });
-
-  app.post('/api/admin/trading/apply-profits', adminLimiter, requireAdminSession, async (request, response, next) => {
+  // ✅ ADD: Fetch comprehensive wallet (all earnings aggregated)
+  async function fetchComprehensiveWallet() {
+    console.log('🔵 fetchComprehensiveWallet() called!');
+    setComprehensiveWalletLoading(true);
     try {
-      await applyDailyTradingProfits();
-      await recordAudit(request, 'admin.trading_profits_applied', null, {});
-      return response.json({ ok: true, message: 'Daily trading profits applied.' });
+      const result = await requestApi('/api/wallet/comprehensive');
+      console.log('✅ Comprehensive wallet result:', result);
+      setComprehensiveWallet(result);
     } catch (error) {
-      return next(error);
+      console.error('Failed to fetch comprehensive wallet:', error);
+      setComprehensiveWallet(null);
+    } finally {
+      setComprehensiveWalletLoading(false);
     }
-  });
+  }
 
-  app.get('/api/admin/salary/ledger', adminLimiter, requireAdminSession, async (request, response) => {
-    const { accountId, tier } = request.query;
-    let query = sql`
-      SELECT
-        wsp.id,
-        wsp.account_id,
-        wsp.tier_name,
-        wsp.salary_cents,
-        wsp.payment_week,
-        wsp.credited_at,
-        a.name AS account_name,
-        a.email AS account_email
-      FROM weekly_salary_payments wsp
-      JOIN accounts a ON a.id = wsp.account_id
-    `;
-    const filters = [];
 
-    if (accountId) {
-      filters.push(sql`wsp.account_id = ${accountId}`);
+  useEffect(() => {
+    if (account) {
+      fetchWeeklySalary();
+      const timer = setTimeout(() => {
+        fetchReferralStats();
+      }, 300);
+      return () => clearTimeout(timer);
     }
-    if (tier !== undefined) {
-      const tierIndex = TIER_NAMES.indexOf(tier);
-      if (tierIndex >= 0) {
-        filters.push(sql`wsp.tier_index = ${tierIndex}`);
+  }, [account]);
+
+  useEffect(() => {
+    function syncRoute() {
+      setRoute(window.location.pathname);
+      setActiveNav(window.location.pathname === '/referrals' ? 'referrals' : window.location.pathname === '/admin' ? 'admin' : 'overview');
+    }
+    window.addEventListener('popstate', syncRoute);
+    return () => window.removeEventListener('popstate', syncRoute);
+  }, []);
+
+  const currentPage = activeNav === 'admin' ? 'Member admin' : navItems.find((item) => item.id === activeNav)?.label ?? 'Overview';
+
+  function openModal(kind, preset = '') {
+    setAmount(preset);
+    setDestination('');
+    setWalletCopied(false);
+    setNotice('');
+    setModal(kind);
+  }
+
+  async function copyBinanceWalletAddress() {
+    if (walletAddressLoading) {
+      setNotice('The Binance wallet address is still loading. Please try again shortly.');
+      return;
+    }
+    if (walletAddressError) {
+      setNotice(`Could not load the Binance wallet address: ${walletAddressError}`);
+      return;
+    }
+    if (!binanceWalletAddress) {
+      setNotice('Binance wallet address is not configured. Set BINANCE_WALLET_ADDRESS in Render.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(binanceWalletAddress);
+      setWalletCopied(true);
+      setNotice('Binance wallet address copied.');
+    } catch {
+      setNotice('Could not copy the wallet address. Select and copy it manually.');
+    }
+  }
+
+  async function submitShowcaseAction(event) {
+    event.preventDefault();
+    const value = Number(amount);
+
+    if (!account) {
+      setNotice('You must be signed in to perform transactions.');
+      return;
+    }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      setNotice('Enter an amount greater than $0.');
+      return;
+    }
+
+    if (modal === 'withdraw' && value < 40) {
+      setNotice('The minimum withdrawal amount is $40.');
+      return;
+    }
+
+    if (modal === 'withdraw' && value > balance) {
+      setNotice('Insufficient balance for this withdrawal.');
+      return;
+    }
+
+    if (modal === 'withdraw' && destination.trim().length < 8) {
+      setNotice('Enter a wallet address with at least 8 characters.');
+      return;
+    }
+
+    setTransactionLoading(true);
+    try {
+      const result = await requestApi('/api/transactions', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: modal === 'withdraw' ? 'withdrawal' : 'deposit',
+          amount: value,
+          reference: modal === 'withdraw' ? destination.trim() : `Deposit-${Date.now()}`,
+        }),
+      });
+
+      const txData = result.transaction || {};
+      const entry = {
+        id: txData.id || `${Date.now()}-${Math.random()}`,
+        type: modal === 'withdraw' ? 'Withdrawal' : 'Deposit',
+        amount: value,
+        createdAt: new Date().toLocaleTimeString(),
+        status: txData.status || 'pending',
+      };
+
+      setDemoActivity((current) => [entry, ...current].slice(0, 5));
+      const newBalance = balance + (modal === 'withdraw' ? -value : value);
+      setBalance(newBalance);
+
+      if (modal === 'deposit') {
+        setTotalDeposits(value);
+
+        const now = new Date();
+        setLastDepositTime(now.toISOString());
+
+        // ✅ UPDATED: Calculate daily income based on deposit amount for manual claiming during 1:00 PM - 1:30 PM EAT
+        const matchingPlan = plans.find((plan) => plan.deposit === value);
+        const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+        setDailyIncome(dailyIncomeValue);
       }
-    }
 
-    if (filters.length > 0) {
-      query = sql`${query} WHERE ${sql.join(filters, sql` AND `)}`;
-    }
+      setModal(null);
+      setAmount('');
+      setDestination('');
+      setNotice(`${entry.type} of $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} processed successfully.`);
 
-    const rows = await sql`${query} ORDER BY wsp.payment_week DESC LIMIT 500`;
-    const totalPaid = rows.reduce((sum, r) => sum + (r.salary_cents / 100), 0);
-
-    return response.json({
-      totalPaid,
-      count: rows.length,
-      payments: rows.map(r => ({
-        id: r.id,
-        accountId: r.account_id,
-        accountName: r.account_name,
-        accountEmail: r.account_email,
-        tier: r.tier_name,
-        amount: r.salary_cents / 100,
-        week: r.payment_week,
-        creditedAt: r.credited_at,
-      })),
-    });
-  });
-
-  app.post('/api/admin/salary/apply-now', adminLimiter, requireAdminSession, async (request, response, next) => {
-    try {
-      await applyWeeklySalaries();
-      await recordAudit(request, 'admin.weekly_salaries_applied', null, {});
-      return response.json({ ok: true, message: 'Weekly salaries applied immediately.' });
+      if (account) {
+        await fetchAccountBalance();
+        await fetchReferralStats();
+        // ✅ ADD: Refresh claim status after deposit/withdrawal
+        await fetchCanClaimTrade();
+        // ✅ ADD: Refresh comprehensive wallet after transaction
+        await fetchComprehensiveWallet();
+      }
     } catch (error) {
-      return next(error);
+      setNotice(`Transaction failed: ${error.message}`);
+    } finally {
+      setTransactionLoading(false);
     }
-  });
+  }
 
-  // =========================================================================
-  // ERROR HANDLERS - MUST BE LAST
-  // =========================================================================
-
-  app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }));
-
-  app.use((error, _request, response, _next) => {
-    if (error instanceof SyntaxError && 'body' in error) {
-      return response.status(400).json({ error: 'Request body must contain valid JSON.' });
+  function openAccountDialog(mode = null) {
+    if (mode) {
+      setAccountMode(mode);
+    } else {
+      setAccountMode(account ? 'profile' : 'login');
     }
-    console.error('Request failed:', error);
-    return response.status(500).json({ error: 'An unexpected server error occurred.' });
-  });
+    setAccountName(account?.name ?? '');
+    setAccountEmail(account?.email ?? '');
+    setAccountPassword('');
+    setAccountPhone(account?.phone ?? '');
+    setAccountPin('');
+    setAccountError('');
+    setAccountMessage('');
+    setAdminCurrentPassword('');
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
+    setAccountDialog(true);
+  }
 
-  return { app, close: () => sql.end() };
+  function openAdminPasswordDialog() {
+    setAccountMode('admin-password');
+    setAdminCurrentPassword('');
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
+    setAccountError('');
+    setAccountMessage('');
+    setAccountDialog(true);
+  }
+
+  async function submitAccount(event) {
+    event.preventDefault();
+    setAccountError('');
+    setAccountMessage('');
+
+    try {
+      if (accountMode === 'admin-password') {
+        if (!adminCurrentPassword || !adminNewPassword || !adminConfirmPassword) {
+          setAccountError('All password fields are required.');
+          return;
+        }
+        if (adminNewPassword.length < 6 || adminNewPassword.length > 128) {
+          setAccountError('New password must be between 6 and 128 characters.');
+          return;
+        }
+        if (adminNewPassword !== adminConfirmPassword) {
+          setAccountError('New password and confirmation do not match.');
+          return;
+        }
+        if (adminCurrentPassword === adminNewPassword) {
+          setAccountError('New password must be different from the current password.');
+          return;
+        }
+
+        const result = await requestApi('/api/admin/auth/password', {
+          method: 'POST',
+          body: JSON.stringify({
+            currentPassword: adminCurrentPassword,
+            newPassword: adminNewPassword,
+          }),
+        });
+
+        setAdminCurrentPassword('');
+        setAdminNewPassword('');
+        setAdminConfirmPassword('');
+        setAccountMessage('Password changed successfully. You will need to sign in again.');
+
+        setTimeout(() => logout(), 2000);
+        return;
+      }
+
+      if (accountMode === 'profile') {
+        const result = await requestApi('/api/auth/profile', {
+          method: 'PATCH',
+          body: JSON.stringify({ name: accountName }),
+        });
+        setAccount(result.account);
+        setAccountName(result.account.name);
+        setAccountMessage('Profile updated.');
+        return;
+      }
+
+      const register = accountMode === 'register';
+      const result = await requestApi(`/api/auth/${register ? 'register' : 'login'}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(register ? { name: accountName } : {}),
+          email: accountEmail,
+          password: accountPassword,
+          ...(register && accountPhone ? { phone: accountPhone } : {}),
+          ...(register && accountPin ? { pin: accountPin } : {}),
+          ...(register && referralCode ? { referralCode } : {}),
+        }),
+      });
+      const accountWithReferral = {...result.account};
+      setAccount(accountWithReferral);
+      setAccountName(result.account.name);
+      setAccountEmail(result.account.email);
+      setAccountPhone(result.account.phone ?? '');
+      setAccountPassword('');
+      setAccountPin('');
+      setAccountDialog(false);
+
+      if (result.account) {
+        await fetchAccountBalance();
+        await fetchTransactionHistory();
+        await fetchWeeklySalary();
+        await fetchReferralCode();
+        await fetchReferralStats();
+        // ✅ ADD: Fetch claim status after login
+        await fetchCanClaimTrade();
+      }
+
+      if (route === '/login' || route === '/register') navigate(result.account.role === 'admin' ? '/admin' : '/');
+      setNotice(register ? 'Your account has been created.' : 'You are signed in.');
+    } catch (error) {
+      setAccountError(error.message);
+    }
+  }
+
+  async function logout() {
+    try {
+      await requestApi('/api/auth/logout', { method: 'POST', body: '{}' });
+      setAccount(null);
+      setAccountName('');
+      setAccountEmail('');
+      setAccountPhone('');
+      setAccountPassword('');
+      setAccountPin('');
+      setAccountMode('login');
+      setAccountMessage('');
+      setAccountDialog(false);
+      setBalance(0);
+      setTotalDeposits(0);
+      setDailyIncome(0);
+      setReferralEarnings(0);
+      setDemoActivity([]);
+      setWeeklyData(null);
+      setReferralStats(null);
+      setLastDepositTime(null);
+      setEarningsActive(false);
+      setCanClaimTrade(false);
+      setTradeClaimMessage('');
+      setIsTradingHourActive(false);
+      setNextTradingTime('');
+      setPrimeHourBalance(0);
+      setPrimeHourModal(null);
+      setPrimeHourMessage('');
+      setNotice('You are signed out.');
+    } catch (error) {
+      setAccountError(error.message);
+    }
+  }
+
+  function navigate(id) {
+    if (id === '/login' || id === '/register' || id === '/referrals' || id === '/admin' || id === '/') {
+      window.history.pushState({}, '', id);
+      setRoute(id);
+      if (id === '/login' || id === '/register') setAccountMode(id.slice(1));
+      setActiveNav(id === '/referrals' ? 'referrals' : id === '/admin' ? 'admin' : 'overview');
+      setMobileMenu(false);
+      setAccountError('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setActiveNav(id);
+    setMobileMenu(false);
+    if (id === 'referrals') {
+      navigate('/referrals');
+      return;
+    }
+    if (id !== 'overview') {
+      window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  if (!account && !accountLoading) {
+    return <AuthPage
+      mode={accountMode}
+      name={accountName}
+      email={accountEmail}
+      password={accountPassword}
+      phone={accountPhone}
+      pin={accountPin}
+      error={accountError}
+      storageMode={storageMode}
+      referralCode={referralCode}
+      onNameChange={setAccountName}
+      onEmailChange={setAccountEmail}
+      onPasswordChange={setAccountPassword}
+      onPhoneChange={setAccountPhone}
+      onPinChange={setAccountPin}
+      onSubmit={submitAccount}
+      onNavigate={navigate}
+      showPassword={showPassword}
+      onTogglePasswordVisibility={() => setShowPassword(!showPassword)}
+    />;
+  }
+
+  if (route === '/admin' && account) {
+    return <AdminPage account={account} accountLoading={accountLoading} onNavigate={navigate} />;
+  }
+
+  return (
+    <div className="app-shell">
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        :root {
+          --primary-blue: #003366;
+          --dark-blue: #001a33;
+          --light-blue: #005299;
+          --gold: #D4AF37;
+          --light-gold: #E8C547;
+          --dark-gold: #AA8C2C;
+          --text-light: #f5f5f5;
+          --text-dark: #003366;
+          --bg-dark: #0a0a0a;
+          --bg-card: #1a1a1a;
+          --border: #D4AF37;
+        }
+
+        .brand-logo {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+
+        .pending-earnings {
+          font-size: 12px;
+          color: var(--gold);
+          font-weight: 500;
+        }
+
+        .graph-placeholder {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 16px;
+          padding: 60px 20px;
+          text-align: center;
+          color: var(--text-light);
+        }
+
+        .graph-placeholder small {
+          display: block;
+          color: var(--gold);
+          font-size: 12px;
+          margin-top: 8px;
+        }
+
+        .referral-notice {
+          background: rgba(212, 175, 55, 0.1);
+          border: 2px solid var(--gold);
+          border-radius: 8px;
+          padding: 16px;
+          margin: 16px 0;
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          color: var(--gold);
+        }
+
+        .referral-notice > svg {
+          flex-shrink: 0;
+          margin-top: 2px;
+        }
+
+        .referral-notice strong {
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .referral-notice code {
+          background: rgba(0, 0, 0, 0.3);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-family: monospace;
+          font-size: 12px;
+        }
+
+        @media (max-width: 480px) {
+          .referral-notice {
+            flex-direction: column;
+            padding: 12px;
+          }
+        }
+
+        .balance-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 20px;
+          margin: 30px 0;
+        }
+
+        @media (max-width: 768px) {
+          .balance-grid {
+            grid-template-columns: 1fr;
+            gap: 16px;
+            margin: 20px 0;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .balance-grid {
+            gap: 12px;
+            margin: 16px 0;
+          }
+        }
+
+        .plans-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 16px;
+          margin: 30px 0;
+        }
+
+        @media (max-width: 768px) {
+          .plans-grid {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            margin: 20px 0;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .plans-grid {
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin: 16px 0;
+          }
+        }
+
+        .action-buttons {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .action-buttons {
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 16px;
+          }
+
+          .action-buttons .button {
+            width: 100%;
+          }
+
+          .action-buttons a {
+            width: 100% !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .action-buttons {
+            gap: 8px;
+            margin-top: 12px;
+          }
+        }
+
+        .action-buttons a {
+          flex: 1;
+          min-width: 150px;
+        }
+
+        .section-heading {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 30px;
+          gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .section-heading {
+            flex-direction: column;
+            margin-bottom: 20px;
+            gap: 16px;
+          }
+
+          .section-heading > div {
+            width: 100%;
+          }
+
+          .count-tag {
+            align-self: flex-start;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .section-heading {
+            margin-bottom: 16px;
+            gap: 12px;
+          }
+        }
+
+        .graph-stats {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 16px;
+          margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .graph-stats {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .graph-stats {
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 12px;
+          }
+        }
+
+        .rank-table-wrap {
+          overflow-x: auto;
+          border-radius: 8px;
+          border: 2px solid rgba(212, 175, 55, 0.3);
+          margin: 20px 0;
+        }
+
+        .rank-table {
+          width: 100%;
+          font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+          .rank-table-wrap {
+            margin: 16px 0;
+          }
+
+          .rank-table {
+            font-size: 12px;
+          }
+
+          .rank-table th, .rank-table td {
+            padding: 12px 8px;
+          }
+
+          .rank-number {
+            display: none;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .rank-table-wrap {
+            margin: 12px 0;
+            border-radius: 4px;
+          }
+
+          .rank-table {
+            font-size: 10px;
+          }
+
+          .rank-table th, .rank-table td {
+            padding: 6px 3px;
+          }
+
+          .reward-value {
+            display: none;
+          }
+        }
+
+        .sidebar {
+          max-width: 280px;
+        }
+
+        @media (max-width: 768px) {
+          .sidebar {
+            max-width: 100%;
+            width: 100%;
+            height: 100vh;
+          }
+
+          .sidebar.sidebar-open {
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 1000;
+            background: var(--bg-dark);
+          }
+        }
+
+        .main-content {
+          flex: 1;
+        }
+
+        .page-content {
+          padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .page-content {
+            padding: 16px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .page-content {
+            padding: 12px;
+          }
+        }
+
+        .button {
+          padding: 12px 20px;
+          border-radius: 6px;
+          font-size: 14px;
+          transition: all 0.2s ease;
+        }
+
+        @media (max-width: 768px) {
+          .button {
+            padding: 11px 18px;
+            font-size: 13px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .button {
+            padding: 10px 14px;
+            font-size: 12px;
+            border-radius: 4px;
+          }
+        }
+
+        .modal {
+          max-width: 90vw;
+          max-height: 90vh;
+          overflow-y: auto;
+          padding: 0;
+          border-radius: 8px;
+        }
+
+        @media (max-width: 768px) {
+          .modal {
+            max-width: 92vw;
+            max-height: 92vh;
+            border-radius: 8px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .modal {
+            max-width: 96vw;
+            max-height: 96vh;
+            border-radius: 6px;
+          }
+        }
+
+        .modal-icon {
+          margin-bottom: 16px;
+        }
+
+        @media (max-width: 480px) {
+          .modal-icon {
+            margin-bottom: 12px;
+          }
+        }
+
+        h1 {
+          font-size: 28px;
+          margin: 0 0 12px 0;
+        }
+
+        @media (max-width: 768px) {
+          h1 {
+            font-size: 24px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          h1 {
+            font-size: 20px;
+          }
+        }
+
+        h2 {
+          font-size: 24px;
+          margin: 0 0 8px 0;
+        }
+
+        @media (max-width: 768px) {
+          h2 {
+            font-size: 20px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          h2 {
+            font-size: 18px;
+          }
+        }
+
+        h3 {
+          font-size: 18px;
+        }
+
+        @media (max-width: 480px) {
+          h3 {
+            font-size: 16px;
+          }
+        }
+
+        p {
+          font-size: 14px;
+          line-height: 1.6;
+        }
+
+        @media (max-width: 480px) {
+          p {
+            font-size: 13px;
+          }
+        }
+
+        .standalone-shell {
+          min-height: 100vh;
+          padding: 20px;
+        }
+
+        @media (max-width: 480px) {
+          .standalone-shell {
+            padding: 16px;
+          }
+        }
+
+        .standalone-card {
+          max-width: 400px;
+          margin: 40px auto;
+          padding: 30px;
+          background: var(--bg-card);
+          border: 2px solid rgba(212, 175, 55, 0.3);
+          border-radius: 8px;
+        }
+
+        @media (max-width: 768px) {
+          .standalone-card {
+            margin: 30px auto;
+            padding: 24px;
+            border-radius: 8px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .standalone-card {
+            margin: 16px auto;
+            padding: 16px;
+            max-width: 100%;
+            border-radius: 6px;
+          }
+        }
+
+        .section-block {
+          margin: 30px 0;
+          padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+          .section-block {
+            margin: 20px 0;
+            padding: 16px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .section-block {
+            margin: 12px 0;
+            padding: 12px;
+          }
+        }
+
+        /* ✅ ADD: CSS for daily trade claim card */
+        .daily-trade-claim-card {
+          background: rgba(212, 175, 55, 0.08);
+          border: 2px solid rgba(212, 175, 55, 0.3);
+          border-radius: 8px;
+          padding: 24px;
+          margin: 20px 0;
+          text-align: center;
+        }
+
+        .daily-trade-claim-card h3 {
+          color: var(--gold);
+          margin: 0 0 8px 0;
+          font-size: 20px;
+        }
+
+        .daily-trade-claim-card p {
+          color: #aaa;
+          margin: 0 0 16px 0;
+          font-size: 14px;
+        }
+
+        .daily-trade-claim-card button {
+          background: var(--gold);
+          color: #000;
+          border: none;
+          padding: 12px 32px;
+          border-radius: 6px;
+          font-weight: 600;
+          font-size: 14px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .daily-trade-claim-card button:hover:not(:disabled) {
+          background: var(--light-gold);
+          transform: translateY(-2px);
+        }
+
+        .daily-trade-claim-card button:disabled {
+          background: #666;
+          color: #999;
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
+
+        /* ✅ ADD: CSS for daily trade claim message */
+        .daily-trade-claim-message {
+          margin-top: 16px;
+          padding: 12px 16px;
+          background: rgba(212, 175, 55, 0.15);
+          border-left: 3px solid var(--gold);
+          border-radius: 4px;
+          color: var(--gold);
+          font-size: 13px;
+          font-weight: 500;
+        }
+
+        @media (max-width: 480px) {
+          .daily-trade-claim-card {
+            padding: 16px;
+            margin: 16px 0;
+          }
+
+          .daily-trade-claim-card h3 {
+            font-size: 18px;
+          }
+
+          .daily-trade-claim-card button {
+            padding: 10px 24px;
+            font-size: 13px;
+          }
+        }
+      `}</style>
+
+      <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
+        <a className="brand" href="#overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
+          <img src="/ascend-logo.jpg" alt="Ascend Capital" style={{width: '32px', height: '32px', borderRadius: '50%', marginRight: '8px'}} />
+          <span className="brand-name">ascend<span>capital</span></span>
+        </a>
+
+        <div className="workspace-label">WORKSPACE</div>
+        <nav className="main-nav" aria-label="Main navigation">
+          {[...navItems, ...(account?.role === 'admin' ? [{ id: '/admin', label: 'Member admin', icon: 'users' }] : [])].map((item) => (
+            <button className={`nav-item ${activeNav === item.id || (item.id === '/admin' && activeNav === 'admin') ? 'nav-active' : ''}`} key={item.id} onClick={() => navigate(item.id)}>
+              <Icon name={item.icon} />
+              <span>{item.label}</span>
+              {activeNav === item.id && <span className="nav-indicator" />}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-spacer" />
+        <div className="sidebar-card">
+          <div className="sidebar-card-icon"><Icon name="shield" size={17} /></div>
+          <div className="sidebar-card-title">Your account</div>
+          <p>{account ? `Signed in as ${account.email}.` : 'Create an account or sign in to manage your profile.'}</p>
+          <div style={{display: 'flex', gap: '8px', flexDirection: 'column'}}>
+            <button onClick={() => openAccountDialog()}>{account ? 'Manage profile' : 'Sign in or register'} <Icon name="arrow" size={13} /></button>
+            {account && <button onClick={() => logout()} style={{background: 'transparent', color: '#D4AF37', border: '1px solid rgba(212, 175, 55, 0.3)', padding: '10px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', transition: 'all 0.2s ease'}} onMouseEnter={(e) => e.target.style.background = 'rgba(212, 175, 55, 0.1)'} onMouseLeave={(e) => e.target.style.background = 'transparent'}>Sign out <Icon name="arrow" size={13} style={{transform: 'rotate(180deg)', marginLeft: '4px'}} /></button>}
+          </div>
+        </div>
+        <div className="sidebar-footer"><span className="online-dot" /> All systems operational</div>
+      </aside>
+
+      {mobileMenu && <button className="mobile-overlay" aria-label="Close menu" onClick={() => setMobileMenu(false)} />}
+
+      <main className="main-content" id="overview">
+        <header className="topbar">
+          <button className="mobile-menu-button" aria-label="Open navigation" onClick={() => setMobileMenu(!mobileMenu)}><Icon name={mobileMenu ? 'close' : 'menu'} /></button>
+          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>{currentPage}</strong></div>
+          <div className="topbar-right">
+            <span className="secure-label"><Icon name="shield" size={14} /> Secure dashboard</span>
+            <button className="avatar" aria-label={account ? 'Manage account' : 'Sign in'} onClick={() => openAccountDialog()}>{account ? account.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'AC'}</button>
+          </div>
+        </header>
+
+        <div className="page-content">
+          <section className="welcome-row">
+            <div>
+              <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
+              <h1>{account ? `${timeGreeting}, ${account.name.split(/\s+/)[0]}` : `${timeGreeting}`}<span className="title-period">.</span></h1>
+              <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
+              <div className="header-wallet">
+                <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
+                <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
+                <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy prime wallet address">
+                  <Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            <button className="date-chip"><span className="date-dot" /> Member overview</button>
+          </section>
+
+          {/* ✅ PRIME HOUR WALLET - Only visible during prime hour window (3:45 AM - 4:15 AM) */}
+          {isPrimeHourActive && account && (
+            <section style={{ background: 'linear-gradient(135deg, rgba(255, 153, 0, 0.15) 0%, rgba(255, 153, 0, 0.05) 100%)', border: '2px solid rgba(255, 153, 0, 0.5)', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#FF9900', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>⏰ PRIME HOUR ACTIVE</div>
+                  <h2 style={{ margin: '4px 0 0 0', color: '#FF9900', fontSize: '24px' }}>Prime Hour Wallet</h2>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '12px', color: '#FF9900' }}>Window closes in</div>
+                  <div style={{ fontSize: '18px', fontWeight: '700', color: '#FF9900' }}>3:45 - 4:15 AM</div>
+                </div>
+              </div>
+
+              <article style={{ background: 'rgba(255, 153, 0, 0.1)', border: '2px solid rgba(255, 153, 0, 0.3)', borderRadius: '8px', padding: '20px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '12px', color: '#FF9900', fontWeight: '600' }}>PRIME HOUR BALANCE</span>
+                  <span style={{ fontSize: '12px', color: '#FF9900' }}>Exclusive Window</span>
+                </div>
+                <div style={{ fontSize: '32px', fontWeight: '700', color: '#FF9900', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>$</span>{primeHourBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => { setPrimeHourModal('deposit'); setAmount(''); setPrimeHourMessage(''); }}
+                    style={{ flex: 1, padding: '12px 20px', background: '#FF9900', color: '#000', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => e.target.style.background = '#FFB84D'}
+                    onMouseLeave={(e) => e.target.style.background = '#FF9900'}
+                  >
+                    <Icon name="plus" size={16} style={{marginRight: '6px'}} /> Deposit to Prime
+                  </button>
+                  <button
+                    onClick={() => { setPrimeHourModal('withdraw'); setAmount(''); setDestination(''); setPrimeHourMessage(''); }}
+                    style={{ flex: 1, padding: '12px 20px', background: 'rgba(255, 153, 0, 0.2)', color: '#FF9900', border: '2px solid #FF9900', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => { e.target.style.background = 'rgba(255, 153, 0, 0.3)'; }}
+                    onMouseLeave={(e) => { e.target.style.background = 'rgba(255, 153, 0, 0.2)'; }}
+                  >
+                    <Icon name="withdraw" size={16} style={{marginRight: '6px'}} /> Withdraw from Prime
+                  </button>
+                </div>
+              </article>
+
+              <div style={{ background: 'rgba(255, 153, 0, 0.1)', border: '1px solid rgba(255, 153, 0, 0.3)', borderRadius: '6px', padding: '12px', fontSize: '12px', color: '#FF9900' }}>
+                <Icon name="spark" size={14} style={{marginRight: '6px', display: 'inline'}} />
+                <strong>Prime Hour Requirements:</strong>
+                <div style={{ marginTop: '8px', lineHeight: '1.6' }}>
+                  💰 <strong>Min Deposit:</strong> $50 → Earn $5 bonus<br/>
+                  💳 <strong>Min Withdrawal:</strong> $50<br/>
+                  👥 <strong>You must have:</strong> 1+ referral + 3+ days of trading
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section className="balance-grid" aria-label="Wallet balances">
+            <article className="balance-card balance-primary">
+              <div className="card-topline">
+                <span className="balance-label">Ascend wallet</span>
+                <span className="balance-icon"><Icon name="wallet" size={18} /></span>
+              </div>
+              <div className="balance-value"><span className="currency">$</span>{(comprehensiveWallet?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">Available balance</span><span className="balance-pill"><span /> USD</span></div>
+            </article>
+            <article className="balance-card">
+              <div className="card-topline">
+                <span className="balance-label">Total deposits</span>
+                <span className="balance-icon subdued"><Icon name="trending" size={18} /></span>
+              </div>
+              <div className="balance-value"><span className="currency">$</span>{(comprehensiveWallet?.totalDeposits || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="balance-bottom"><span className="balance-caption">Active investments</span><span className="muted-metric">{(comprehensiveWallet?.totalDeposits || 0) === 0 ? 'No activity yet' : 'Locked'}</span></div>
+            </article>
+            <article className="balance-card">
+              <div className="card-topline">
+                <span className="balance-label">Daily trade income</span>
+                <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
+              </div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{totalDeposits > 0 ? dailyIncome : '0'}</div>
+              <div className="balance-bottom">
+                <span className="balance-caption">Claimable during trading hours</span>
+                <span style={{ fontSize: '11px', color: '#D4AF37', fontWeight: '500' }}>1:00 PM - 1:30 PM EAT</span>
+              </div>
+            </article>
+          </section>
+
+          {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
+
+          {account && totalDeposits > 0 && (
+            <div className="daily-trade-claim-card" style={{
+              background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%)',
+              border: '1px solid rgba(76, 175, 80, 0.3)',
+              borderRadius: '8px',
+              padding: '24px',
+              marginTop: '24px',
+              color: '#fff'
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#4CAF50' }}>💰 Claim Your Trade Today</h3>
+              <p style={{ margin: '8px 0', fontSize: '14px', color: '#ccc' }}>Manually claim your daily trading profit from your active deposits</p>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⏰ Trading hours: <strong style={{ color: '#4CAF50' }}>1:00 PM - 1:30 PM EAT</strong>
+              </p>
+              <button
+                onClick={claimDailyTrade}
+                disabled={!canClaimTrade || claimTradeLoading || !isTradingHourActive}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 'not-allowed' : 'pointer',
+                  background: isTradingHourActive && canClaimTrade ? '#4CAF50' : '#666',
+                  color: '#fff',
+                  transition: 'all 0.3s ease',
+                  opacity: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 0.6 : 1,
+                }}
+              >
+                {claimTradeLoading ? '⏳ Processing...' : !isTradingHourActive ? `🕐 Opens at ${nextTradingTime}` : canClaimTrade ? '✅ Claim Daily Trade' : '✔️ Already Claimed Today'}
+              </button>
+              {tradeClaimMessage && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px',
+                  borderRadius: '4px',
+                  background: tradeClaimMessage.includes('✅') ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 152, 0, 0.2)',
+                  color: tradeClaimMessage.includes('✅') ? '#4CAF50' : '#FFB74D',
+                  fontSize: '13px',
+                  border: `1px solid ${tradeClaimMessage.includes('✅') ? '#4CAF50' : '#FFB74D'}`
+                }}>
+                  {tradeClaimMessage}
+                </div>
+              )}
+              {!isTradingHourActive && (
+                <div style={{ marginTop: '12px', fontSize: '12px', color: '#888', textAlign: 'center' }}>
+                  ⏳ Next trading window opens at <strong style={{ color: '#4CAF50' }}>{nextTradingTime}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {totalDeposits > 0 && (
+            <TradingGraph balance={balance} totalDeposits={totalDeposits} />
+          )}
+
+          <section className="action-row" aria-label="Wallet actions">
+            <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
+            <div className="action-buttons">
+              <button className="button button-secondary" onClick={() => openModal('withdraw')} disabled={!account}><Icon name="withdraw" size={16} /> Withdraw</button>
+              <button className="button button-primary" onClick={() => navigate('deposits')} disabled={!account}><Icon name="plus" size={17} /> Make a deposit</button>
+              <a href="/downloads/ascend-capital.apk" download className="button button-primary" style={{textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}><Icon name="plus" size={17} /> Download Android App</a>
+            </div>
+          </section>
+
+          <section className="section-block" id="deposits">
+            <div className="section-heading">
+              <div><div className="eyebrow"><span className="eyebrow-line" /> DEPOSIT PLANS</div><h2>Deposit plans</h2><p className="section-subtitle">Real deposits processed directly to your account balance.</p></div>
+              <span className="count-tag">10 plans <span className="count-dot" /></span>
+            </div>
+            <div className="plans-grid">
+              {plans.map((plan, index) => (
+                <article className={`plan-card ${index === 5 ? 'plan-featured' : ''}`} key={plan.deposit}>
+                  {index === 5 && <span className="popular-tag">POPULAR</span>}
+                  <div className="plan-index">PLAN {String(index + 1).padStart(2, '0')}</div>
+                  <div className="plan-deposit"><span>$</span>{plan.deposit.toLocaleString('en-US')}</div>
+                  <div className="plan-divider" />
+                  <div className="plan-earning-label">Daily trade income</div>
+                  <div className="plan-earning"><span>$</span>{plan.earning}</div>
+                  <div className="daily-earnings-hint">${plan.dailyIncome}/day</div>
+                  <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))} disabled={!account}>{account ? 'Choose plan' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
+                </article>
+              ))}
+            </div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income starts tomorrow at 10:00 AM. Minimum withdrawal is $40.</p></div>
+          </section>
+
+
+          <section className="referral-layout" id="referrals">
+            <div className="section-block rank-section">
+              <div className="section-heading">
+                <div><div className="eyebrow"><span className="eyebrow-line" /> REFERRAL PROGRAM</div><h2>Earn rewards by referring friends</h2><p className="section-subtitle">Invite friends to join and earn commissions on their first deposit plus weekly tier salaries.</p></div>
+              </div>
+              <div className="referral-banner" style={{background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%)', border: '2px solid rgba(212, 175, 55, 0.4)'}}>
+                <div className="referral-banner-content">
+                  <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
+                  <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your link and earn 5% from each friend's first deposit</div>
+                  <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>
+                    {referralEarnings > 0
+                      ? `You've earned $${referralEarnings} from referral bonuses (5% of first deposits)`
+                      : 'Example: Friend deposits $2000 → You earn $100 (5%)'}
+                  </div>
+                  {account?.referralCode ? (
+                    <div style={{background: 'rgba(0, 0, 0, 0.5)', padding: '12px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '14px', fontWeight: '600', color: 'var(--gold)', marginBottom: '12px', wordBreak: 'break-all'}}>
+                      {`${window.location.origin}/?ref=${account.referralCode}`}
+                    </div>
+                  ) : (
+                    <p style={{color: '#aaa', fontSize: '13px', marginBottom: '12px'}}>Generate your referral code to start earning...</p>
+                  )}
+                </div>
+                <button
+                  className="copy-button referral-code-example"
+                  style={{cursor: 'pointer', padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '12px'}}
+                  onClick={async () => {
+                    if (!account?.referralCode) {
+                      try {
+                        const result = await requestApi('/api/referrals/code');
+                        setAccount({...account, referralCode: result.code});
+                        setNotice(`Referral code created: ${result.code}`);
+                      } catch (error) {
+                        setNotice(`Error: ${error.message}`);
+                      }
+                    } else {
+                      const link = `${window.location.origin}/?ref=${account.referralCode}`;
+                      navigator.clipboard.writeText(link).then(() => {
+                        setNotice('Referral link copied to clipboard!');
+                      }).catch(() => {
+                        setNotice('Could not copy link. Select and copy manually.');
+                      });
+                    }
+                  }}
+                >
+                  <Icon name="copy" size={14} style={{marginRight: '6px'}} />{account?.referralCode ? 'Copy link' : 'Generate code'}
+                </button>
+              </div>
+              {!referralStatsLoading && referralStats && (
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '30px'}}>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Your tier</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {referralStats.tier || 'Unranked'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Direct referrals</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.directReferrals === 'number' ? referralStats.directReferrals : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team total (1st-3rd gen)</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.teamTotal === 'number' ? referralStats.teamTotal : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Commission rate</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.commissionRate === 'number' ? `${(referralStats.commissionRate * 100).toFixed(0)}%` : '0%'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      ${typeof referralStats.totalEarnings === 'number' ? referralStats.totalEarnings.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}
+                    </div>
+                  </article>
+                </div>
+              )}
+
+              {/* ✅ SHOW REFERRED MEMBERS LIST */}
+              {account && (
+                <ReferredMembersList />
+              )}
+
+              <div className="rank-table-wrap">
+                <table className="rank-table">
+                  <thead><tr><th>RANK</th><th>DIRECT REFERRALS</th><th>TEAM TOTAL</th><th>REWARD</th><th>WEEKLY SALARY</th></tr></thead>
+                  <tbody>{ranks.map((rank, index) => (
+                    <tr key={rank.name} style={{background: referralStats?.tier === rank.name ? 'rgba(212, 175, 55, 0.1)' : 'transparent'}}>
+                      <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
+                      <td>{rank.direct} <span className="table-muted">direct</span></td>
+                      <td>{rank.team === null || rank.team === 0 ? <span className="table-dash">—</span> : rank.team}</td>
+                      <td className="reward-cell">{rank.reward}{rank.name === 'Star 8' && <span className="reward-value"> · $27,000 value</span>}{rank.name === 'Crown Leader' && <span className="reward-value"> · $46,000 value</span>}{rank.name === 'Star 7' && <span className="reward-value"> · $80,000 house</span>}</td>
+                      <td className="salary-cell" style={{color: 'var(--gold)', fontWeight: '600'}}>{rank.weeklySalary ? rank.weeklySalary : '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <p className="team-note">Your current tier is highlighted above. Qualify for higher tiers by meeting BOTH direct referral AND team total requirements. (Star 1 only requires direct referrals.)</p>
+            </div>
+
+            <aside className={`bonus-card ${!isPrimeHourActive ? 'prime-hour-card inactive' : 'prime-hour-card'}`} id="rewards">
+              <div className="bonus-top"><span className="bonus-icon"><Icon name="clock" size={19} /></span><span className={`prime-hour-status ${isPrimeHourActive ? 'active' : 'inactive'}`}><span className="prime-hour-status-dot" /> {isPrimeHourActive ? 'ACTIVE NOW' : 'INACTIVE'}</span></div>
+              <div className="bonus-eyebrow">TIME-LIMITED WINDOW</div>
+              <h3>Prime hour<span>.</span></h3>
+              <div className="bonus-time">3:45 <span>—</span> 4:15 <small>AM</small></div>
+              <p className="bonus-description">{isPrimeHourActive ? 'Prime hour is currently active. Deposits made now are eligible for this bonus.' : 'Prime hour is only active from 3:45 AM to 4:15 AM. Please return during this window to deposit.'}</p>
+              {isPrimeHourActive && (
+                <>
+                  <div className="bonus-details">
+                    <div><span>Minimum deposit</span><strong>$50</strong></div>
+                    <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
+                    <div><span>Withdrawal minimum</span><strong>$50</strong></div>
+                  </div>
+                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>You should have traded in Ascend for at least 3 days and invite at least 1 person who has invested in Ascend.</span></div>
+                  <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Make a Prime hour deposit' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
+                </>
+              )}
+            </aside>
+          </section>
+
+          {account && (
+            <section className="weekly-salary-section" style={{marginTop: '40px', padding: '20px', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', border: '2px solid rgba(212, 175, 55, 0.2)'}}>
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow"><span className="eyebrow-line" /> TIER BENEFITS</div>
+                  <h2>Weekly tier salary</h2>
+                  <p className="section-subtitle">Automatic weekly salary based on your current tier. Star 2 and above earn weekly.</p>
+                </div>
+              </div>
+
+              {weeklyLoading ? (
+                <p style={{textAlign: 'center', color: 'var(--text-light)'}}>Loading salary information...</p>
+              ) : weeklyData ? (
+                <>
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '20px'}}>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current tier</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {weeklyData.tier ? weeklyData.tier : 'Not qualified'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>
+                        Direct: {typeof weeklyData.directCount === 'number' ? weeklyData.directCount : 0} · Team: {typeof weeklyData.teamTotal === 'number' ? weeklyData.teamTotal : 0}
+                      </span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {typeof weeklyData.weeklySalary === 'number' && weeklyData.weeklySalary > 0
+                          ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}`
+                          : 'None'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        ${typeof weeklyData.totalEarned === 'number'
+                          ? weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                          : '0.00'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>All-time salaries</span>
+                    </article>
+                  </div>
+
+                  {Array.isArray(weeklyData.recentPayments) && weeklyData.recentPayments.length > 0 && (
+                    <div style={{marginTop: '20px'}}>
+                      <h3 style={{fontSize: '16px', marginBottom: '12px', color: 'var(--text-light)'}}>Recent payments</h3>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto'}}>
+                        {weeklyData.recentPayments.map((payment, idx) => (
+                          <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
+                            <span>{String(payment.week || 'Week')}</span>
+                            <span style={{color: 'var(--gold)', fontWeight: '600'}}>
+                              +${typeof payment.amount === 'number'
+                                ? payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                                : '0.00'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!weeklyData.tier && (
+                    <div style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', border: '1px solid rgba(212, 175, 55, 0.3)', marginTop: '20px', color: '#aaa', fontSize: '13px'}}>
+                      {weeklyData.message || 'You need to reach Star 2 tier (7 direct referrals or 13 team members) to earn weekly salary.'}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p style={{textAlign: 'center', color: '#666', padding: '20px'}}>Unable to load salary information.</p>
+              )}
+            </section>
+          )}
+
+          <section className="bottom-notice">
+            <span className="notice-icon"><Icon name="wallet" size={16} /></span>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Earnings start the next day at 10:00 AM.</p></div>
+            <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
+          </section>
+
+          <section className="activity-section" aria-live="polite">
+            <div className="activity-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> TRANSACTION HISTORY</div><h2>Recent activity</h2></div><span className="activity-counter">{demoActivity.length} {demoActivity.length === 1 ? 'transaction' : 'transactions'}</span></div>
+            {demoActivity.length === 0
+              ? <p className="activity-empty">Your deposits and withdrawals will appear here.</p>
+              : <div className="activity-list">{demoActivity.map((entry) => <article className="activity-item" key={entry.id}><span className={`activity-type ${entry.type === 'Deposit' ? 'activity-deposit' : 'activity-withdraw'}`}>{entry.type}</span><strong>${entry.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong><span>{entry.createdAt}</span><span className={`activity-status ${entry.status === 'completed' ? 'status-completed' : 'status-pending'}`}>{entry.status.toUpperCase()}</span></article>)}</div>}
+          </section>
+
+          <footer className="page-footer"><span>© 2026 Ascend Capital</span><span><span className="footer-dot" /> Real transactions · Live account tracking</span></footer>
+        </div>
+      </main>
+
+      {notice && !modal && <div className="toast" role="status">{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}><Icon name="close" size={15} /></button></div>}
+      {modal && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setModal(null)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon"><Icon name={modal === 'withdraw' ? 'withdraw' : 'wallet'} size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" /> REAL TRANSACTION</div>
+            <h2 id="modal-title">{modal === 'withdraw' ? 'Request a withdrawal' : 'Make a deposit'}</h2>
+            <p className="modal-subtitle">This will be processed immediately against your account balance.</p>
+            <form onSubmit={submitShowcaseAction}>
+              <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
+              <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
+              {modal === 'withdraw' ? (
+                <>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => { setDestination(event.target.value); setNotice(''); }} placeholder="Enter wallet address" required disabled={transactionLoading} /></label>
+                  <div className="showcase-fee"><span>Estimated fee (16%)</span><strong>${(Number(amount || 0) * 0.16).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+                </>
+              ) : (
+                <div className="deposit-wallet-card">
+                  <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
+                  <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
+                  {binanceWalletAddress
+                    ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
+                    : <span className="wallet-config-hint">{walletAddressError ? 'Could not load the Render wallet configuration.' : walletAddressLoading ? 'Loading wallet configuration…' : 'Set BINANCE_WALLET_ADDRESS in Render.'}</span>}
+                  <p>Send funds to this address to complete your deposit.</p>
+                </div>
+              )}
+              {notice && <div className="modal-message" role="status">{notice}</div>}
+              <button className="button button-primary modal-submit" type="submit" disabled={transactionLoading}>{transactionLoading ? 'Processing…' : 'Continue'} <Icon name="arrow" size={15} /></button>
+              <p className="modal-footnote"><Icon name="shield" size={13} /> This transaction is real and will affect your account</p>
+            </form>
+          </section>
+        </div>
+      )}
+      {/* ✅ ADD: Prime Hour Modal */}
+      {primeHourModal && isPrimeHourActive && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrimeHourModal(null); }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="prime-hour-modal-title" style={{ borderTop: '3px solid #FF9900' }}>
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setPrimeHourModal(null)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon" style={{ color: '#FF9900' }}><Icon name="clock" size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" style={{background: '#FF9900'}} /> PRIME HOUR TRANSACTION</div>
+            <h2 id="prime-hour-modal-title" style={{ color: '#FF9900' }}>{primeHourModal === 'withdraw' ? 'Withdraw from Prime Hour' : 'Deposit to Prime Hour'}</h2>
+            <p className="modal-subtitle">
+              {primeHourModal === 'withdraw'
+                ? 'Withdraw from your prime hour wallet. Minimum: $50'
+                : 'Deposit to your prime hour wallet. Minimum: $50 • Earn: $5 bonus'}
+            </p>
+            <form onSubmit={(e) => submitPrimeHourAction(e, primeHourModal)}>
+              <label className="amount-label" htmlFor="prime-hour-amount">{primeHourModal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
+              <div className="amount-input-wrap"><span>$</span><input id="prime-hour-amount" type="number" min={primeHourModal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setPrimeHourMessage(''); }} placeholder="0.00" required disabled={primeHourLoading} /></div>
+              {primeHourModal === 'withdraw' ? (
+                <>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => { setDestination(event.target.value); setPrimeHourMessage(''); }} placeholder="Enter wallet address" required disabled={primeHourLoading} /></label>
+                  <div className="showcase-fee"><span>Estimated fee (16%)</span><strong>${(Number(amount || 0) * 0.16).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+                </>
+              ) : (
+                <div className="deposit-wallet-card">
+                  <span className="deposit-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
+                  <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured'}</code>
+                  {binanceWalletAddress
+                    ? <button type="button" className="wallet-copy-button" onClick={copyBinanceWalletAddress}><Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy address'}</button>
+                    : <span className="wallet-config-hint">{walletAddressError ? 'Could not load the wallet address.' : walletAddressLoading ? 'Loading wallet address…' : 'Wallet address not configured.'}</span>}
+                  <p>Send funds to this address during the prime hour window to complete your deposit.</p>
+                </div>
+              )}
+              {primeHourMessage && <div className="modal-message" role={primeHourMessage.includes('Error') ? 'alert' : 'status'} style={{borderLeft: `3px solid ${primeHourMessage.includes('Error') ? '#ff4444' : '#FF9900'}`}}>{primeHourMessage}</div>}
+              <button className="button button-primary modal-submit" type="submit" disabled={primeHourLoading} style={{background: '#FF9900', borderColor: '#FF9900'}}>{primeHourLoading ? 'Processing…' : 'Complete Transaction'} <Icon name="arrow" size={15} /></button>
+              <p className="modal-footnote"><Icon name="spark" size={13} /> Prime Hour exclusive · Limited window (3:45 AM - 4:15 AM)</p>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {accountDialog && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountDialog(false); }}>
+          <section className="modal account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setAccountDialog(false)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon"><Icon name="users" size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" /> MEMBER ACCOUNT</div>
+            <h2 id="account-modal-title">
+              {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Your profile' : accountMode === 'register' ? 'Create your account' : 'Sign in'}
+            </h2>
+            <p className="modal-subtitle">
+              {accountMode === 'admin-password' ? 'Update your administrator account password.' : accountMode === 'profile' ? 'Update the profile name linked to your account.' : 'Create an account to manage your member profile and process transactions.'}
+            </p>
+            <form onSubmit={submitAccount}>
+              {accountMode === 'admin-password' && (
+                <>
+                  <PasswordToggleInput
+                    label="Current Password"
+                    value={adminCurrentPassword}
+                    onChange={setAdminCurrentPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <PasswordToggleInput
+                    label="New Password"
+                    value={adminNewPassword}
+                    onChange={setAdminNewPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <PasswordToggleInput
+                    label="Confirm New Password"
+                    value={adminConfirmPassword}
+                    onChange={setAdminConfirmPassword}
+                    showPassword={showPassword}
+                    onToggle={() => setShowPassword(!showPassword)}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <span className="field-hint">Use at least 6 characters.</span>
+                </>
+              )}
+              {accountMode !== 'login' && accountMode !== 'admin-password' && (
+                <label className="account-field">Full name
+                  <input type="text" autoComplete="name" minLength={2} maxLength={80} value={accountName} onChange={(event) => setAccountName(event.target.value)} required />
+                </label>
+              )}
+              {accountMode === 'register' && (
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px'}}>
+                  <label className="account-field">Phone number
+                    <input type="tel" placeholder="+254 7XX XXX XXX" value={accountPhone} onChange={(event) => setAccountPhone(event.target.value)} />
+                  </label>
+                  <label className="account-field">PIN (6 digits)
+                    <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={accountPin} onChange={(event) => setAccountPin(event.target.value)} />
+                  </label>
+                </div>
+              )}
+              {accountMode !== 'profile' && accountMode !== 'admin-password' && (
+                <label className="account-field">Email address
+                  <input type="email" autoComplete="email" maxLength={254} value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} required />
+                </label>
+              )}
+              {accountMode === 'profile' && (
+                <label className="account-field">Email address
+                  <input type="email" value={accountEmail} readOnly />
+                </label>
+              )}
+              {accountMode !== 'profile' && accountMode !== 'admin-password' && (
+                <>
+                  <PasswordToggleInput
+                    label="Password"
+                    value={accountPassword}
+                    onChange={setAccountPassword}
+                    showPassword={showAccountPassword}
+                    onToggle={() => setShowAccountPassword(!showAccountPassword)}
+                    autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'}
+                    required
+                  />
+                  <span className="field-hint">Use at least 6 characters.</span>
+                </>
+              )}
+              {accountError && <div className="modal-message" role="alert">{accountError}</div>}
+              {accountMessage && <div className="modal-message modal-success" role="status">{accountMessage}</div>}
+              <button className="button button-primary modal-submit" type="submit">
+                {accountMode === 'admin-password' ? 'Change password' : accountMode === 'profile' ? 'Save profile' : accountMode === 'register' ? 'Create account' : 'Sign in'}
+                <Icon name="arrow" size={15} />
+              </button>
+              {accountMode === 'profile' ? (
+                <button className="account-switch logout-button" type="button" onClick={logout}>Sign out</button>
+              ) : accountMode === 'admin-password' ? (
+                <button className="account-switch" type="button" onClick={() => setAccountDialog(false)}>Cancel</button>
+              ) : (
+                <button className="account-switch" type="button" onClick={() => { setAccountMode(accountMode === 'login' ? 'register' : 'login'); setAccountError(''); setAccountMessage(''); }}>{accountMode === 'login' ? 'New here? Create an account' : 'Already registered? Sign in'}</button>
+              )}
+              <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transaction processing</p>
+            </form>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
-export default createApp;
+export default App;

@@ -19,7 +19,8 @@ export default function DepositCard({ deposit, onClaimed = () => {} }) {
       setTradeError(null);
       setTradeSuccess(false);
 
-      const response = await fetch(`/api/trades/${deposit.id}/trigger`, {
+      // Manual trade claiming is done through the trading endpoints
+      const response = await fetch('/api/trading/claim-daily-trade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -32,6 +33,7 @@ export default function DepositCard({ deposit, onClaimed = () => {} }) {
       }
 
       setTradeSuccess(true);
+      onClaimed(data.earnedAmount);
       setTimeout(() => setTradeSuccess(false), 3000);
     } catch (err) {
       setTradeError(err.message);
