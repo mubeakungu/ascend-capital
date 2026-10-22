@@ -2077,8 +2077,8 @@ export async function createApp() {
 
 
       // Build transaction breakdown by type - ONLY count known earning types
-      // ✅ NOTE: 'trading_profit' is NOT included - trading must be manually claimed via /api/trading/claim-daily-trade
-      const knownEarningTypes = ['tier_reward', 'tier_salary', 'referral_commission', 'deposit_bonus', 'admin_adjustment'];
+      // ✅ Include 'trading_profit' - trades added by admin are immediately credited
+      const knownEarningTypes = ['trading_profit', 'tier_reward', 'tier_salary', 'referral_commission', 'deposit_bonus', 'admin_adjustment'];
       const txByType = {};
       let totalDepositsCents = 0;
       let totalWithdrawalsCents = 0;
