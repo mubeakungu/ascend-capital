@@ -1429,7 +1429,12 @@ export async function createApp() {
         WHERE referrer_id = ${request.account.id}
       `;
 
-      const directCount = directStats[0]?.direct_count || 0;
+      // ✅ FIXED: Ensure all numeric values are returned as numbers, not strings
+      const directCount = Number(directStats[0]?.direct_count) || 0;
+      const commissionCount = Number(commissionStats[0]?.commission_count) || 0;
+      const commissionTotal = Number(commissionStats[0]?.total_commission_cents) || 0;
+      const directVolume = Number(directStats[0]?.direct_volume) || 0;
+
       const teamTotal = await getTeamTotal(sql, request.account.id);
       const tier = getTierByProgress(directCount, teamTotal);
       const tierName = tier >= 0 ? TIER_NAMES[tier] : null;
@@ -1442,9 +1447,9 @@ export async function createApp() {
         tier: tierName,
         commissionRate: commissionRate,
         directReferrals: directCount,
-        directVolume: (directStats[0]?.direct_volume || 0) / 100,
-        commissionsEarned: commissionStats[0]?.commission_count || 0,
-        totalEarnings: (commissionStats[0]?.total_commission_cents || 0) / 100,
+        directVolume: directVolume / 100,
+        commissionsEarned: commissionCount,
+        totalEarnings: commissionTotal / 100,
         teamTotal: teamTotal,
       });
     } catch (error) {
