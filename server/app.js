@@ -1603,6 +1603,38 @@ export async function createApp() {
 
   app.post('/api/trading/claim-daily-trade', updateRateLimit, requireAccount, async (request, response, next) => {
     try {
+      // ✅ ADDED: Check if claim is within trading hours (1:00 PM - 1:30 PM EAT)
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+      const currentMinutes = hours * 60 + minutes;
+      const tradingStart = 13 * 60;  // 1:00 PM = 780 minutes
+      const tradingEnd = 13 * 60 + 30;  // 1:30 PM = 810 minutes
+      const isWithinTradingHours = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
+
+      if (!isWithinTradingHours) {
+        const nextTradingTime = new Date(now);
+        if (currentMinutes >= tradingEnd) {
+          // Past today's window, set for tomorrow
+          nextTradingTime.setDate(nextTradingTime.getDate() + 1);
+          nextTradingTime.setHours(13, 0, 0, 0);
+        } else {
+          // Before today's window, set for today
+          nextTradingTime.setHours(13, 0, 0, 0);
+        }
+        const timeStr = nextTradingTime.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'Africa/Nairobi'  // EAT timezone
+        });
+        return response.status(403).json({
+          error: `Trading hours only: 1:00 PM - 1:30 PM EAT. Next window: ${timeStr}`
+        });
+      }
+
       const today = new Date().toISOString().split('T')[0];
 
       // Check if user has active deposit
@@ -1972,10 +2004,11 @@ export async function createApp() {
     // ✅ Get the actual approved balance (includes ALL earnings)
     const approvedBalance = await approvedBalanceCents(request.account.id) / 100;
 
-    // ✅ FIX: Match ORIGINAL DEPOSIT amount to DEPOSIT_PLANS (not total balance)
+    // ✅ FIXED: ALWAYS show daily income based on deposit amount (not dependent on time)
+    // The actual CLAIM is restricted by trading hours (1:00 PM - 1:30 PM EAT) in the claim endpoint
     let dailyIncome = 0;
-    if (earningsStatus.earningsActive && lastDepositTime) {
-      // This now correctly matches the original deposit amount, not the total balance
+    if (lastDepositTime && totalDeposits > 0) {
+      // Always show the daily profit potential based on their deposit amount
       const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
