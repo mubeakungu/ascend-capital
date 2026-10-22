@@ -842,8 +842,11 @@ function App() {
         setLastDepositTime(result.lastDepositTime);
       }
 
-      // ✅ FIXED: Use dailyIncome from API response (backend already calculated it correctly)
-      setDailyIncome(result.dailyIncome || 0);
+      // ✅ UPDATED: Calculate daily income for manual claiming - not tied to automatic activation
+      const depositAmount = result.balance || 0;
+      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+      setDailyIncome(dailyIncomeValue);
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -854,7 +857,7 @@ function App() {
       const result = await requestApi('/api/transactions');
       const transactions = (result.transactions || []).map((tx) => ({
         id: tx.id,
-        type: tx.type === 'deposit' ? 'Deposit' : 'Withdrawal',
+        type: tx.type || 'Unknown',  // ✅ Use backend's mapped type (e.g., 'Trading Profit', 'Deposit', etc.)
         amount: tx.amount,
         createdAt: new Date(tx.createdAt).toLocaleTimeString(),
         status: tx.status,
@@ -2153,7 +2156,7 @@ function App() {
                   <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
                     <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Commission rate</span>
                     <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
-                      {typeof referralStats.referralCommissionRate === 'number' ? `${(referralStats.referralCommissionRate * 100).toFixed(0)}%` : '5%'}
+                      {typeof referralStats.commissionRate === 'number' ? `${(referralStats.commissionRate * 100).toFixed(0)}%` : '0%'}
                     </div>
                   </article>
                   <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
