@@ -2475,6 +2475,53 @@ export async function createApp() {
     }
   });
 
+  // ✅ NEW: Admin endpoint to list member referrals
+  app.get('/api/admin/referrals/:accountId/list', adminLimiter, requireAdminSession, async (request, response) => {
+    try {
+      const { accountId } = request.params;
+
+      // Verify member exists
+      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
+      if (member.length === 0) {
+        return response.status(404).json({ error: 'Member not found.' });
+      }
+
+      // Get all referrals for this member
+      const referrals = await sql`
+        SELECT
+          rs.id,
+          a.id AS account_id,
+          a.name,
+          a.email,
+          rs.signed_up_at,
+          COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents
+        FROM referral_signups rs
+        JOIN accounts a ON a.id = rs.referred_account_id
+        LEFT JOIN transactions t ON t.account_id = a.id AND t.type = 'deposit' AND t.status = 'approved'
+        WHERE rs.referrer_id = ${accountId}
+        GROUP BY rs.id, a.id, a.name, a.email, rs.signed_up_at
+        ORDER BY rs.signed_up_at DESC
+        LIMIT 100
+      `;
+
+      return response.json({
+        memberId: accountId,
+        memberName: member[0].name,
+        totalReferrals: referrals.length,
+        referrals: referrals.map(r => ({
+          id: r.account_id,
+          name: r.name,
+          email: r.email,
+          signedUpAt: r.signed_up_at,
+          totalDeposits: r.total_deposits_cents / 100,
+        })),
+      });
+    } catch (error) {
+      console.error('Error fetching referrals:', error);
+      return response.status(500).json({ error: `Failed to fetch referrals: ${error.message}` });
+    }
+  });
+
   app.get('/api/admin/balance-reconciliation', adminLimiter, requireAdminSession, async (request, response) => {
     try {
       // Get all members with their transactions
