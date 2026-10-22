@@ -172,16 +172,20 @@ function readCookie(request, name) {
 }
 
 function setSessionCookie(response, token, secure, cookieName = SESSION_COOKIE) {
+  // ✅ FIX: Include Domain so cookie works across custom domain and onrender subdomain
+  const cookieDomain = process.env.COOKIE_DOMAIN ? `; Domain=${process.env.COOKIE_DOMAIN}` : '';
   response.append(
     'Set-Cookie',
-    `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DURATION_SECONDS}${secure ? '; Secure' : ''}`,
+    `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DURATION_SECONDS}${cookieDomain}${secure ? '; Secure' : ''}`,
   );
 }
 
 function clearSessionCookie(response, secure, cookieName = SESSION_COOKIE) {
+  // ✅ FIX: Include Domain to clear cookie from the right domain
+  const cookieDomain = process.env.COOKIE_DOMAIN ? `; Domain=${process.env.COOKIE_DOMAIN}` : '';
   response.append(
     'Set-Cookie',
-    `${cookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`,
+    `${cookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${cookieDomain}${secure ? '; Secure' : ''}`,
   );
 }
 
