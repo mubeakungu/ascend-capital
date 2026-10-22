@@ -8,7 +8,7 @@ const when = (iso) => {
   if (!iso) return '—';
   const date = new Date(iso);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  return isMobile
+  return isMobile 
     ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : date.toLocaleString();
 };
@@ -102,398 +102,12 @@ function AskModal({ title, label, type = 'text', multiline, min = 0, confirmText
 }
 
 // ============================================================================
-// MEMBER CONTROL PANEL (UNIFIED ADMIN TOOL)
-// ============================================================================
-
-function MemberControlPanel() {
-  const [searchEmail, setSearchEmail] = useState('');
-  const [selectedMember, setSelectedMember] = useState(null);
-  const [memberData, setMemberData] = useState(null);
-  const [walletData, setWalletData] = useState(null);
-  const [referrals, setReferrals] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState(null);
-
-  // EDIT STATES
-  const [editTrade, setEditTrade] = useState(false);
-  const [tradeAmount, setTradeAmount] = useState('');
-  const [tradeDate, setTradeDate] = useState(new Date().toISOString().split('T')[0]);
-  const [tradeType, setTradeType] = useState('add');
-
-  const [editDeposit, setEditDeposit] = useState(false);
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
-
-  const [editBalance, setEditBalance] = useState(false);
-  const [balanceAction, setBalanceAction] = useState('adjust');
-  const [balanceAmount, setBalanceAmount] = useState('');
-  const [balanceReason, setBalanceReason] = useState('');
-
-  const [busy, setBusy] = useState(false);
-
-  async function searchMember() {
-    if (!searchEmail.trim()) {
-      setNotice({ text: 'Enter email to search', bad: true });
-      return;
-    }
-
-    setLoading(true);
-    setNotice(null);
-    try {
-      const accountsRes = await api('/admin/accounts');
-      const member = accountsRes.accounts.find(
-        a => a.email.toLowerCase() === searchEmail.toLowerCase() ||
-             a.id.toLowerCase() === searchEmail.toLowerCase() ||
-             a.name.toLowerCase().includes(searchEmail.toLowerCase())
-      );
-
-      if (!member) {
-        setNotice({ text: 'Member not found', bad: true });
-        setLoading(false);
-        return;
-      }
-
-      setSelectedMember(member);
-      setMemberData(member);
-
-      try {
-        setWalletData({
-          totalDeposits: member.totalDeposits,
-          balance: member.balance,
-          totalEarnings: member.balance - member.totalDeposits,
-          availableToWithdraw: member.balance,
-        });
-      } catch (err) {
-        console.error('Wallet fetch error:', err);
-      }
-
-      try {
-        const refRes = await api(`/admin/referrals/${member.id}/list`);
-        setReferrals(refRes.referrals || []);
-      } catch (err) {
-        console.error('Referral fetch error:', err);
-        setReferrals([]);
-      }
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function addTrade() {
-    if (!tradeAmount) {
-      setNotice({ text: 'Enter trade amount', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(tradeAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
-
-      if (tradeType === 'add') {
-        await api('/admin/trading/add-trade', {
-          method: 'POST',
-          body: { accountId: selectedMember.id, profitAmount: amount, profitDate: tradeDate },
-        });
-        setNotice({ text: `✅ Added $${amount.toFixed(2)} trade` });
-      } else {
-        await api('/admin/trading/deduct-trade', {
-          method: 'POST',
-          body: { accountId: selectedMember.id, deductAmount: amount, deductDate: tradeDate },
-        });
-        setNotice({ text: `✅ Deducted $${amount.toFixed(2)} trade` });
-      }
-
-      setEditTrade(false);
-      setTradeAmount('');
-      setTradeDate(new Date().toISOString().split('T')[0]);
-      await searchMember();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function addDeposit() {
-    if (!depositAmount) {
-      setNotice({ text: 'Enter deposit amount', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(depositAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
-
-      await api('/admin/deposits/add', {
-        method: 'POST',
-        body: { accountId: selectedMember.id, depositAmount: amount, depositDate },
-      });
-      setNotice({ text: `✅ Added $${amount.toFixed(2)} deposit` });
-
-      setEditDeposit(false);
-      setDepositAmount('');
-      setDepositDate(new Date().toISOString().split('T')[0]);
-      await searchMember();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function adjustBalance() {
-    if (!balanceAmount || !balanceReason) {
-      setNotice({ text: 'Amount and reason required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(balanceAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount');
-
-      await api(`/admin/accounts/${selectedMember.id}/balance`, {
-        method: 'POST',
-        body: { action: balanceAction, amountCents: Math.round(amount * 100), reason: balanceReason },
-      });
-      setNotice({ text: `✅ Balance ${balanceAction}ed by $${amount.toFixed(2)}` });
-
-      setEditBalance(false);
-      setBalanceAmount('');
-      setBalanceReason('');
-      await searchMember();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <h2>👤 Member Control Panel</h2>
-      <p style={{ color: 'var(--muted)', marginBottom: '16px' }}>Search, view, and manage any member's account in one place</p>
-
-      <div className="ad-card" style={{ marginBottom: '20px' }}>
-        <h3>Search Member</h3>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <input
-            type="text"
-            placeholder="Enter email, ID, or name..."
-            value={searchEmail}
-            onChange={(e) => setSearchEmail(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && searchMember()}
-            disabled={loading}
-            style={{ flex: 1 }}
-          />
-          <button onClick={searchMember} disabled={loading} className="ad-btn" style={{ flex: 0 }}>
-            {loading ? 'Searching...' : 'Search'}
-          </button>
-        </div>
-      </div>
-
-      {notice && <Notice notice={notice} />}
-
-      {selectedMember && memberData && walletData && (
-        <>
-          <div className="ad-card">
-            <h3>Member Information</h3>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Name</span>
-              <span className="ad-detail-value">{memberData.name}</span>
-            </div>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Email</span>
-              <span className="ad-detail-value">{memberData.email}</span>
-            </div>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Status</span>
-              <span className="ad-detail-value"><Badge value={memberData.status} /></span>
-            </div>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Member Since</span>
-              <span className="ad-detail-value">{new Date(memberData.createdAt).toLocaleDateString()}</span>
-            </div>
-          </div>
-
-          <div className="ad-grid">
-            <StatCard label="Total Deposits" value={money(walletData.totalDeposits)} />
-            <StatCard label="Earnings" value={money(walletData.totalEarnings)} />
-            <StatCard label="Total Balance" value={money(walletData.balance)} subtext="(deposits + earnings)" />
-          </div>
-
-          <div className="ad-grid">
-            {/* ADD/DEDUCT TRADE */}
-            <div className="ad-card">
-              <h3>Manage Trades</h3>
-              {!editTrade ? (
-                <button onClick={() => setEditTrade(true)} className="ad-btn" style={{ width: '100%' }}>
-                  + Add/Deduct Trade
-                </button>
-              ) : (
-                <form>
-                  <label>Type</label>
-                  <select value={tradeType} onChange={(e) => setTradeType(e.target.value)}>
-                    <option value="add">Add Trade Profit</option>
-                    <option value="deduct">Deduct Trade Loss</option>
-                  </select>
-                  <label>Amount (USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={tradeAmount}
-                    onChange={(e) => setTradeAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
-                  <label>Trade Date</label>
-                  <input
-                    type="date"
-                    value={tradeDate}
-                    onChange={(e) => setTradeDate(e.target.value)}
-                  />
-                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
-                    <button type="button" onClick={() => setEditTrade(false)} className="ad-btn ghost">
-                      Cancel
-                    </button>
-                    <button type="button" onClick={addTrade} disabled={busy} className="ad-btn">
-                      {busy ? 'Processing...' : 'Save Trade'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* ADD DEPOSIT */}
-            <div className="ad-card">
-              <h3>Add Deposit</h3>
-              {!editDeposit ? (
-                <button onClick={() => setEditDeposit(true)} className="ad-btn" style={{ width: '100%' }}>
-                  + Add Deposit
-                </button>
-              ) : (
-                <form>
-                  <label>Amount (USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
-                  <label>Deposit Date</label>
-                  <input
-                    type="date"
-                    value={depositDate}
-                    onChange={(e) => setDepositDate(e.target.value)}
-                  />
-                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
-                    <button type="button" onClick={() => setEditDeposit(false)} className="ad-btn ghost">
-                      Cancel
-                    </button>
-                    <button type="button" onClick={addDeposit} disabled={busy} className="ad-btn">
-                      {busy ? 'Processing...' : 'Add Deposit'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* ADJUST BALANCE */}
-            <div className="ad-card">
-              <h3>Adjust Balance</h3>
-              {!editBalance ? (
-                <button onClick={() => setEditBalance(true)} className="ad-btn" style={{ width: '100%' }}>
-                  ⚙️ Adjust Balance
-                </button>
-              ) : (
-                <form>
-                  <label>Action</label>
-                  <select value={balanceAction} onChange={(e) => setBalanceAction(e.target.value)}>
-                    <option value="adjust">Add</option>
-                    <option value="deduct">Subtract</option>
-                    <option value="set">Set Exact Amount</option>
-                  </select>
-                  <label>Amount (USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={balanceAmount}
-                    onChange={(e) => setBalanceAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
-                  <label>Reason</label>
-                  <textarea
-                    value={balanceReason}
-                    onChange={(e) => setBalanceReason(e.target.value)}
-                    placeholder="Why are you adjusting this balance?"
-                    rows={2}
-                  />
-                  <div className="ad-row end" style={{ marginTop: '12px', gap: '8px' }}>
-                    <button type="button" onClick={() => setEditBalance(false)} className="ad-btn ghost">
-                      Cancel
-                    </button>
-                    <button type="button" onClick={adjustBalance} disabled={busy} className="ad-btn">
-                      {busy ? 'Processing...' : 'Apply'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* REFERRALS */}
-            <div className="ad-card">
-              <h3>Referrals ({referrals?.length || 0})</h3>
-              {referrals && referrals.length > 0 ? (
-                <div className="ad-scroll" style={{ maxHeight: '300px' }}>
-                  <table className="ad-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Deposits</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {referrals.map((ref) => (
-                        <tr key={ref.id}>
-                          <td>{ref.name}</td>
-                          <td className="num" style={{ color: 'var(--gold)' }}>{money(ref.totalDeposits)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="ad-empty">No referred members</p>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-
-      {!selectedMember && !loading && (
-        <div className="ad-card" style={{ textAlign: 'center', padding: '40px' }}>
-          <p style={{ color: 'var(--muted)' }}>👆 Search for a member to manage their account</p>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
 // ACCOUNT MANAGEMENT
 // ============================================================================
 
 function AccountDetailModal({ accountId, onClose, onUpdate }) {
   const [{ data, loading, error }, reload] = useLoad(
     () => api(`/admin/accounts/${accountId}/activity`),
-    [accountId]
-  );
-  const [{ data: walletData }, loadWallet] = useLoad(
-    () => fetch(`/api/wallet/comprehensive`, {
-      credentials: 'same-origin',
-      headers: { 'X-Account-ID': accountId }
-    }).then(r => r.json()).catch(() => ({})),
     [accountId]
   );
   const [editMode, setEditMode] = useState(false);
@@ -538,7 +152,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     <div className="ad-overlay" onClick={onClose}>
       <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={saveChanges}>
         <h3>Account Details</h3>
-
+        
         <div className="ad-detail-row">
           <span className="ad-detail-label">ID</span>
           <span className="ad-detail-value">{account.id}</span>
@@ -557,36 +171,10 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
           <span className="ad-detail-value"><Badge value={account.role} /></span>
         </div>
 
-        {walletData ? (
-          <>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Total Deposits</span>
-              <span className="ad-detail-value" style={{ color: 'var(--gold)' }}>{money(walletData.totalDeposits || 0)}</span>
-            </div>
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Total Earnings</span>
-              <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(walletData.totalEarnings || 0)}</span>
-            </div>
-            {(walletData.earnings?.referralCommissions?.amount > 0 || walletData.earnings?.tradingProfit?.amount > 0) && (
-              <div className="ad-detail-row" style={{ paddingLeft: '20px', fontSize: '12px' }}>
-                <span className="ad-detail-label">Breakdown:</span>
-                <span className="ad-detail-value" style={{ color: 'var(--muted)' }}>
-                  {walletData.earnings?.referralCommissions?.amount > 0 && `Ref: $${walletData.earnings.referralCommissions.amount.toFixed(2)} `}
-                  {walletData.earnings?.tradingProfit?.amount > 0 && `Trade: $${walletData.earnings.tradingProfit.amount.toFixed(2)}`}
-                </span>
-              </div>
-            )}
-            <div className="ad-detail-row">
-              <span className="ad-detail-label">Current Balance</span>
-              <span className="ad-detail-value" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>{money(walletData.balance || 0)}</span>
-            </div>
-          </>
-        ) : (
-          <div className="ad-detail-row">
-            <span className="ad-detail-label">Balance</span>
-            <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
-          </div>
-        )}
+        <div className="ad-detail-row">
+          <span className="ad-detail-label">Balance</span>
+          <span className="ad-detail-value" style={{ color: 'var(--accent)' }}>{money(data?.summary?.balance || 0)}</span>
+        </div>
 
         <div className="ad-detail-row">
           <span className="ad-detail-label">Created</span>
@@ -637,7 +225,7 @@ function AccountsManagement() {
   const [search, setSearch] = useState('');
 
   const allAccounts = data?.accounts || [];
-  const accounts = allAccounts.filter(a =>
+  const accounts = allAccounts.filter(a => 
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.email.toLowerCase().includes(search.toLowerCase()) ||
     a.id.toLowerCase().includes(search.toLowerCase())
@@ -669,9 +257,9 @@ function AccountsManagement() {
       </div>
 
       <div className="ad-row ad-search-row" style={{ marginBottom: '16px' }}>
-        <input
-          placeholder="Search by name, email, or ID"
-          value={search}
+        <input 
+          placeholder="Search by name, email, or ID" 
+          value={search} 
           onChange={(e) => setSearch(e.target.value)}
           style={{ flex: 1 }}
         />
@@ -696,18 +284,8 @@ function AccountsManagement() {
                 <span className="value">{a.email}</span>
               </div>
               <div className="ad-account-card-row">
-                <span className="label">Deposits:</span>
-                <span className="value" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</span>
-              </div>
-              <div className="ad-account-card-row">
-                <span className="label">Earnings:</span>
-                <span className="value" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : '#888' }}>
-                  +${money(Math.max(0, a.balance - a.totalDeposits))}
-                </span>
-              </div>
-              <div className="ad-account-card-row">
-                <span className="label" style={{ fontWeight: 'bold' }}>Total Balance:</span>
-                <span className="value" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>${money(a.balance)}</span>
+                <span className="label">Balance:</span>
+                <span className="value">{money(a.balance)}</span>
               </div>
               <div className="ad-account-card-row">
                 <span className="label">Role:</span>
@@ -737,8 +315,6 @@ function AccountsManagement() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Status</th>
-                <th>Deposits</th>
-                <th>Earnings</th>
                 <th>Balance</th>
                 <th>Role</th>
                 <th>Created</th>
@@ -751,9 +327,7 @@ function AccountsManagement() {
                   <td>{a.name}</td>
                   <td>{a.email}</td>
                   <td><Badge value={a.status} /></td>
-                  <td className="num" style={{ color: 'var(--gold)' }}>${money(a.totalDeposits)}</td>
-                  <td className="num" style={{ color: a.balance > a.totalDeposits ? '#5BEE6A' : '#888' }}>+${money(Math.max(0, a.balance - a.totalDeposits))}</td>
-                  <td className="num" style={{ color: 'var(--accent)', fontWeight: 'bold' }}>${money(a.balance)}</td>
+                  <td className="num">{money(a.balance)}</td>
                   <td><Badge value={a.role} /></td>
                   <td>{new Date(a.createdAt).toLocaleDateString()}</td>
                   <td>
@@ -773,6 +347,7 @@ function AccountsManagement() {
 
       {selectedId && (
         <AccountDetailModal
+          key={selectedId}
           accountId={selectedId}
           onClose={() => setSelectedId(null)}
           onUpdate={reload}
@@ -796,7 +371,7 @@ function AccountsManagement() {
 }
 
 // ============================================================================
-// DASHBOARD / ANALYTICS - ✅ FIXED DATA SYNC
+// DASHBOARD / ANALYTICS
 // ============================================================================
 
 function Dashboard() {
@@ -809,12 +384,6 @@ function Dashboard() {
     return { accounts, queue, ledger };
   }, []);
 
-  // Auto-refresh every 10 seconds to keep data in sync
-  useEffect(() => {
-    const interval = setInterval(() => reload(), 10000);
-    return () => clearInterval(interval);
-  }, [reload]);
-
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
@@ -823,7 +392,7 @@ function Dashboard() {
   const trades = data?.ledger?.ledger || [];
 
   const totalMembers = acc.length;
-  const totalDeposits = acc.reduce((sum, a) => sum + a.totalDeposits, 0);
+  const totalDeposits = acc.reduce((sum, a) => sum + a.balance, 0);
   const pendingDeposits = txns.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
   const pendingWithdrawals = txns.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
   const totalTrades = trades.length;
@@ -834,14 +403,14 @@ function Dashboard() {
     <section>
       <div className="ad-row" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
         <h2>System Overview</h2>
-        <button className="ad-btn ghost" onClick={reload}>Refresh Now</button>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
-
+      
       <div className="ad-grid">
         <StatCard label="Total Members" value={totalMembers} />
         <StatCard label="Active Accounts" value={acc.filter(a => a.status === 'active').length} />
         <StatCard label="Held Accounts" value={acc.filter(a => a.status === 'held').length} />
-        <StatCard label="Total Deposits" value={money(totalDeposits)} subtext="from all members" />
+        <StatCard label="Total Deposits" value={money(totalDeposits)} />
         <StatCard label="Active Deposits" value={money(activeDeposits)} />
         <StatCard label="Pending Deposits" value={money(pendingDeposits)} subtext={`${txns.filter(t => t.type === 'deposit').length} req`} />
         <StatCard label="Pending Withdrawals" value={money(pendingWithdrawals)} subtext={`${txns.filter(t => t.type === 'withdrawal').length} req`} />
@@ -849,60 +418,34 @@ function Dashboard() {
         <StatCard label="Trading Profit" value={money(totalTradeProfit)} />
         <StatCard label="Pending Review" value={txns.length} subtext="txns" />
       </div>
-
-      <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '16px' }}>📊 Data auto-refreshes every 10 seconds</p>
     </section>
   );
 }
 
 // ============================================================================
-// REFERRALS MANAGEMENT - ENHANCED WITH REFERRED MEMBERS NETWORK
+// REFERRALS MANAGEMENT
 // ============================================================================
 
 function ReferralsManagement() {
   const [searchId, setSearchId] = useState('');
   const [notice, setNotice] = useState(null);
-  const [referralsList, setReferralsList] = useState([]);
-  const [referralsLoading, setReferralsLoading] = useState(false);
   const [{ data, error, loading }, reload] = useLoad(
     () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
     [searchId]
   );
 
-  async function loadReferralsList(identifier) {
-    if (!identifier) return;
-    setReferralsLoading(true);
-    try {
-      const result = await api(`/admin/referrals/${identifier}/list`);
-      setReferralsList(result.referrals || []);
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-      setReferralsList([]);
-    } finally {
-      setReferralsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (searchId) {
-      loadReferralsList(searchId);
-    } else {
-      setReferralsList([]);
-    }
-  }, [searchId]);
-
   return (
     <section>
       <h2>Referral Management</h2>
       <div className="ad-row ad-search-row">
-        <input
-          placeholder="Search by member ID or email"
-          value={searchId}
+        <input 
+          placeholder="Search by member ID" 
+          value={searchId} 
           onChange={(e) => setSearchId(e.target.value)}
         />
         <button className="ad-btn ghost" onClick={reload}>Search</button>
       </div>
-
+      
       <Notice notice={notice} />
       {error && <p className="ad-error">{error}</p>}
 
@@ -918,7 +461,7 @@ function ReferralsManagement() {
             <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
           </div>
 
-          <h3>Commission History</h3>
+          <h3>Direct Referrals</h3>
           <div className="ad-scroll">
             <table className="ad-table">
               <thead>
@@ -941,257 +484,28 @@ function ReferralsManagement() {
               </tbody>
             </table>
           </div>
-
-          <h3 style={{ marginTop: '24px' }}>Referred Members Network</h3>
-          {referralsLoading ? (
-            <p className="ad-empty">Loading network…</p>
-          ) : referralsList.length > 0 ? (
-            <div className="ad-scroll">
-              <table className="ad-table">
-                <thead>
-                  <tr>
-                    <th>Member Name</th>
-                    <th>Email</th>
-                    <th>Total Deposits</th>
-                    <th>Joined Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {referralsList.map((member) => (
-                    <tr key={member.id}>
-                      <td><strong>{member.name}</strong></td>
-                      <td>{member.email}</td>
-                      <td className="num" style={{ color: 'var(--accent)' }}>{money(member.totalDeposits)}</td>
-                      <td>{new Date(member.signedUpAt).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="ad-empty">No referred members yet</p>
-          )}
         </div>
       ) : searchId ? (
         <p className="ad-empty">No referral data found</p>
       ) : (
-        <p className="ad-empty">Enter a member ID or email to search</p>
+        <p className="ad-empty">Enter a member ID to search</p>
       )}
     </section>
   );
 }
 
 // ============================================================================
-// DEPOSIT MANAGEMENT - ADD/UPDATE MEMBER DEPOSITS WITH AUTO-SYNC
-// ============================================================================
-
-function DepositManagement() {
-  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
-  const [{ data: auditData }, loadAudit] = useLoad(() => api('/admin/deposits/verify'), []);
-  const [notice, setNotice] = useState(null);
-  const [showAddDeposit, setShowAddDeposit] = useState(false);
-  const [memberId, setMemberId] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
-  const [busy, setBusy] = useState(false);
-
-  // Auto-refresh every 8 seconds to sync with member accounts
-  useEffect(() => {
-    const interval = setInterval(() => reload(), 8000);
-    return () => clearInterval(interval);
-  }, [reload]);
-
-  if (loading && !data) return <p className="ad-empty">Loading…</p>;
-  if (error) return <p className="ad-error">{error}</p>;
-
-  const accountList = data?.accounts || [];
-
-  async function addDeposit(e) {
-    e.preventDefault();
-    if (!memberId || !depositAmount) {
-      setNotice({ text: 'Member and deposit amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(depositAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Deposit must be greater than 0');
-
-      await api(`/admin/deposits/add`, {
-        method: 'POST',
-        body: {
-          accountId: memberId,
-          depositAmount: amount,
-          depositDate: depositDate,
-        },
-      });
-
-      setNotice({ text: `✅ Added $${amount.toFixed(2)} deposit for member ${memberId}` });
-      setMemberId('');
-      setDepositAmount('');
-      setDepositDate(new Date().toISOString().split('T')[0]);
-      setShowAddDeposit(false);
-      reload();
-      loadAudit();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <div style={{ marginBottom: '16px' }}>
-        <h2 style={{ marginBottom: '12px' }}>💰 Deposit Management</h2>
-        <div className="ad-row">
-          <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn" onClick={() => setShowAddDeposit(!showAddDeposit)} style={{ flex: 1 }}>
-            {showAddDeposit ? '✕ Cancel' : '+ Add Deposit'}
-          </button>
-        </div>
-      </div>
-
-      <Notice notice={notice} />
-
-      {showAddDeposit && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(212, 175, 55, 0.05)', border: '1px solid rgba(212, 175, 55, 0.2)' }}>
-          <h3>💸 Add Member Deposit</h3>
-          <form onSubmit={addDeposit}>
-            <label>Member</label>
-            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {accountList.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Total Deposits: ${money(acc.totalDeposits)}
-                </option>
-              ))}
-            </select>
-
-            <label>Deposit Amount (USD)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder="0.00"
-              required
-            />
-
-            <label>Deposit Date</label>
-            <input
-              type="date"
-              value={depositDate}
-              onChange={(e) => setDepositDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowAddDeposit(false)}>Cancel</button>
-              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Adding…' : 'Add Deposit & Update Balance'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div className="ad-grid">
-        <StatCard label="Total Members" value={accountList.length} />
-        <StatCard label="Active Accounts" value={accountList.filter(a => a.status === 'active').length} />
-        <StatCard label="Total Deposits (All)" value={money(accountList.reduce((sum, a) => sum + a.totalDeposits, 0))} />
-      </div>
-
-      <h3>Member Deposits Overview</h3>
-      <div className="ad-scroll">
-        <table className="ad-table">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>Email</th>
-              <th>Total Deposits</th>
-              <th>Current Balance</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accountList.map((acc) => (
-              <tr key={acc.id}>
-                <td>{acc.name}</td>
-                <td className="small">{acc.email}</td>
-                <td className="num" style={{ color: 'var(--gold)' }}>${money(acc.totalDeposits)}</td>
-                <td className="num" style={{ color: acc.balance > acc.totalDeposits ? '#5BEE6A' : 'var(--text-light)' }}>${money(acc.balance)}</td>
-                <td><Badge value={acc.status} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!accountList.length && <p className="ad-empty">No members found</p>}
-      </div>
-
-      <h3 style={{ marginTop: '40px' }}>📋 Deposit Audit Log</h3>
-      <p style={{ color: '#888', fontSize: '12px', marginBottom: '16px' }}>Complete history of all deposits for each member</p>
-      <div className="ad-scroll">
-        {!auditData?.deposits?.length ? (
-          <p className="ad-empty">No deposits yet</p>
-        ) : (
-          <table className="ad-table">
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Email</th>
-                <th>Deposit Count</th>
-                <th>Total Deposits</th>
-                <th>Deposits</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditData.deposits.map((member) => (
-                <tr key={member.memberId}>
-                  <td>{member.memberName}</td>
-                  <td className="small">{member.memberEmail}</td>
-                  <td className="num">{member.depositCount}</td>
-                  <td className="num" style={{ color: 'var(--gold)', fontWeight: 'bold' }}>${money(member.totalDeposits)}</td>
-                  <td style={{ fontSize: '12px', maxWidth: '300px' }}>
-                    {member.depositTransactions.map((dep, i) => (
-                      <div key={i} style={{ color: '#aaa', marginBottom: '4px' }}>
-                        ${dep.amount} on {dep.date}
-                      </div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// ============================================================================
-// TRADING MANAGEMENT - ENHANCED WITH ADD/UPDATE
+// TRADING MANAGEMENT
 // ============================================================================
 
 function TradingManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
-  const [{ data: members }, loadMembers] = useLoad(() => api('/admin/accounts'), []);
   const [notice, setNotice] = useState(null);
-  const [showAddTrade, setShowAddTrade] = useState(false);
-  const [showDeductTrade, setShowDeductTrade] = useState(false);
-  const [memberId, setMemberId] = useState('');
-  const [deductMemberId, setDeductMemberId] = useState('');
-  const [profitAmount, setProfitAmount] = useState('');
-  const [deductAmount, setDeductAmount] = useState('');
-  const [profitDate, setProfitDate] = useState(new Date().toISOString().split('T')[0]);
-  const [deductDate, setDeductDate] = useState(new Date().toISOString().split('T')[0]);
-  const [busy, setBusy] = useState(false);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
   const trades = data?.ledger || [];
-  const accountList = members?.accounts || [];
   const totalProfit = trades.reduce((sum, t) => sum + t.profitAmount, 0);
 
   async function applyProfits() {
@@ -1204,181 +518,21 @@ function TradingManagement() {
     }
   }
 
-  async function addTrade(e) {
-    e.preventDefault();
-    if (!memberId || !profitAmount) {
-      setNotice({ text: 'Member ID and profit amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const profit = parseFloat(profitAmount);
-      if (isNaN(profit) || profit <= 0) throw new Error('Profit must be greater than 0');
-
-      await api(`/admin/trading/add-trade`, {
-        method: 'POST',
-        body: {
-          accountId: memberId,
-          profitAmount: profit,
-          profitDate: profitDate,
-        },
-      });
-
-      setNotice({ text: `✅ Added $${profit.toFixed(2)} trade for member ${memberId}` });
-      setMemberId('');
-      setProfitAmount('');
-      setProfitDate(new Date().toISOString().split('T')[0]);
-      setShowAddTrade(false);
-      reload();
-      loadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  async function deductTrade(e) {
-    e.preventDefault();
-    if (!deductMemberId || !deductAmount) {
-      setNotice({ text: 'Member ID and deduct amount required', bad: true });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const amount = parseFloat(deductAmount);
-      if (isNaN(amount) || amount <= 0) throw new Error('Deduct amount must be greater than 0');
-
-      await api(`/admin/trading/deduct-trade`, {
-        method: 'POST',
-        body: {
-          accountId: deductMemberId,
-          deductAmount: amount,
-          deductDate: deductDate,
-        },
-      });
-
-      setNotice({ text: `✅ Deducted $${amount.toFixed(2)} trade from member ${deductMemberId}` });
-      setDeductMemberId('');
-      setDeductAmount('');
-      setDeductDate(new Date().toISOString().split('T')[0]);
-      setShowDeductTrade(false);
-      reload();
-      loadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
   return (
     <section>
       <div style={{ marginBottom: '16px' }}>
         <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
         <div className="ad-row">
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
-          <button className="ad-btn ghost" onClick={loadMembers} style={{ flex: 1 }}>Sync Members</button>
-          <button className="ad-btn" onClick={() => setShowAddTrade(!showAddTrade)} style={{ flex: 1 }}>
-            {showAddTrade ? '✕ Cancel' : '+ Add Trade'}
-          </button>
-          <button className="ad-btn ghost danger" onClick={() => setShowDeductTrade(!showDeductTrade)} style={{ flex: 1 }}>
-            {showDeductTrade ? '✕ Cancel' : '➖ Deduct Trade'}
-          </button>
           <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
         </div>
       </div>
 
       <Notice notice={notice} />
 
-      {showAddTrade && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(181, 238, 106, 0.05)', border: '1px solid rgba(181, 238, 106, 0.2)' }}>
-          <h3>➕ Add New Trade</h3>
-          <form onSubmit={addTrade}>
-            <label>Member</label>
-            <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {accountList.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
-                </option>
-              ))}
-            </select>
-
-            <label>Profit Amount (USD)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={profitAmount}
-              onChange={(e) => setProfitAmount(e.target.value)}
-              placeholder="0.00"
-              required
-            />
-
-            <label>Trade Date</label>
-            <input
-              type="date"
-              value={profitDate}
-              onChange={(e) => setProfitDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowAddTrade(false)}>Cancel</button>
-              <button className="ad-btn" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Adding…' : 'Add Trade & Update Member'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {showDeductTrade && (
-        <div className="ad-card" style={{ marginBottom: '20px', background: 'rgba(255, 107, 107, 0.05)', border: '1px solid rgba(255, 107, 107, 0.2)' }}>
-          <h3>➖ Deduct Trade</h3>
-          <form onSubmit={deductTrade}>
-            <label>Member</label>
-            <select value={deductMemberId} onChange={(e) => setDeductMemberId(e.target.value)} required>
-              <option value="">Select a member...</option>
-              {(members?.accounts || []).map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.email}) - Balance: ${money(acc.balance)}
-                </option>
-              ))}
-            </select>
-
-            <label>Deduct Amount (USD)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={deductAmount}
-              onChange={(e) => setDeductAmount(e.target.value)}
-              placeholder="0.00"
-              required
-            />
-
-            <label>Deduct Date</label>
-            <input
-              type="date"
-              value={deductDate}
-              onChange={(e) => setDeductDate(e.target.value)}
-              required
-            />
-
-            <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => setShowDeductTrade(false)}>Cancel</button>
-              <button className="ad-btn ghost danger" disabled={busy} style={{ flex: 0 }}>
-                {busy ? 'Deducting…' : 'Deduct & Update Member'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
       <div className="ad-grid">
         <StatCard label="Total Trades" value={trades.length} />
         <StatCard label="Total Profit" value={money(totalProfit)} />
-        <StatCard label="Active Members" value={accountList.length} />
       </div>
 
       <h3>Recent Activity</h3>
@@ -1390,7 +544,6 @@ function TradingManagement() {
               <th>Member</th>
               <th>Deposit</th>
               <th>Profit</th>
-              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -1400,7 +553,6 @@ function TradingManagement() {
                 <td>{t.accountName}</td>
                 <td className="num">{money(t.depositAmount)}</td>
                 <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
-                <td><Badge value="credited" /></td>
               </tr>
             ))}
           </tbody>
@@ -1457,9 +609,9 @@ function BalanceManagement() {
       <h2>Adjust Member Balance</h2>
       <form className="ad-form" onSubmit={submit}>
         <label>Member ID</label>
-        <input
-          type="text"
-          value={memberId}
+        <input 
+          type="text" 
+          value={memberId} 
           onChange={(e) => setMemberId(e.target.value)}
           placeholder="Enter member ID"
           required
@@ -1473,17 +625,17 @@ function BalanceManagement() {
         </select>
 
         <label>Amount (USD)</label>
-        <input
-          type="number"
+        <input 
+          type="number" 
           step="0.01"
-          value={amount}
+          value={amount} 
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
           required
         />
 
         <label>Reason</label>
-        <textarea
+        <textarea 
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -1630,7 +782,7 @@ function TransactionApproval() {
         <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
             <h3>{actionType === 'approve' ? 'Approve Transaction' : 'Reject Transaction'}</h3>
-
+            
             {actionType === 'reject' && (
               <>
                 <label>Reason for rejection</label>
@@ -1658,7 +810,7 @@ function TransactionApproval() {
 }
 
 // ============================================================================
-// SETTINGS / PASSWORD CHANGE
+// SETTINGS / PASSWORD CHANGE - FIXED & MOBILE OPTIMIZED
 // ============================================================================
 
 function SettingsManagement({ account }) {
@@ -1845,10 +997,8 @@ export default function AdminDashboard() {
   const tabs = [
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
-    ['member-control', 'Member Control'],
     ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
-    ['deposits', 'Deposits'],
     ['trading', 'Trading'],
     ['balance', 'Balances'],
     ['settings', 'Settings'],
@@ -1878,9 +1028,9 @@ export default function AdminDashboard() {
           </div>
           <nav className={`ad-nav ${mobileMenuOpen ? 'open' : ''}`}>
             {tabs.map(([key, label]) => (
-              <button
-                key={key}
-                className={tab === key ? 'on' : ''}
+              <button 
+                key={key} 
+                className={tab === key ? 'on' : ''} 
                 onClick={() => { setTab(key); setMobileMenuOpen(false); }}
               >
                 {label}
@@ -1895,10 +1045,8 @@ export default function AdminDashboard() {
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
-          {tab === 'member-control' && <MemberControlPanel />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
-          {tab === 'deposits' && <DepositManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'balance' && <BalanceManagement />}
           {tab === 'settings' && <SettingsManagement account={account} />}
