@@ -2410,6 +2410,71 @@ export async function createApp() {
     }
   });
 
+  // ✅ NEW: Admin endpoint to add/adjust deposits for members
+  app.post('/api/admin/deposits/adjust', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const { accountId, action, amount } = request.body ?? {};
+
+      if (!accountId || !action || !amount) {
+        return response.status(400).json({ error: 'accountId, action, and amount are required.' });
+      }
+
+      if (!['add', 'deduct'].includes(action)) {
+        return response.status(400).json({ error: 'action must be "add" or "deduct".' });
+      }
+
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return response.status(400).json({ error: 'Amount must be a positive number.' });
+      }
+
+      // Verify member exists
+      const member = await sql`SELECT id, name, email FROM accounts WHERE id = ${accountId}`;
+      if (member.length === 0) {
+        return response.status(404).json({ error: 'Member not found.' });
+      }
+
+      const amountCents = Math.round(amountNum * 100);
+      const txId = randomBytes(16).toString('hex');
+      const now = new Date().toISOString();
+      const txType = action === 'add' ? 'deposit' : 'withdrawal';
+      const reference = action === 'add'
+        ? `Admin deposit adjustment: +$${amountNum}`
+        : `Admin deposit deduction: -$${amountNum}`;
+
+      // Create transaction
+      await sql`
+        INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+        VALUES (${txId}, ${accountId}, ${txType}, ${amountCents}, ${reference}, 'approved', ${now})
+      `;
+
+      // Record audit
+      await recordAudit(request, `admin.deposit.${action}`, txId, {
+        accountId,
+        accountName: member[0].name,
+        accountEmail: member[0].email,
+        amount: amountNum,
+        action,
+      });
+
+      // Get updated balance
+      const newBalance = await approvedBalanceCents(accountId) / 100;
+
+      return response.status(201).json({
+        ok: true,
+        message: `✅ ${action === 'add' ? 'Added' : 'Deducted'} $${amountNum.toFixed(2)} ${action === 'add' ? 'to' : 'from'} ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
+        transactionId: txId,
+        memberName: member[0].name,
+        amount: amountNum,
+        action,
+        newBalance,
+      });
+    } catch (error) {
+      console.error('Error adjusting deposit:', error);
+      return next(error);
+    }
+  });
+
   app.get('/api/admin/balance-reconciliation', adminLimiter, requireAdminSession, async (request, response) => {
     try {
       // Get all members with their transactions
