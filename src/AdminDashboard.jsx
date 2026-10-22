@@ -501,6 +501,12 @@ function ReferralsManagement() {
 function TradingManagement() {
   const [{ data, error, loading }, reload] = useLoad(() => api('/admin/trading/ledger'), []);
   const [notice, setNotice] = useState(null);
+  const [showAddTrade, setShowAddTrade] = useState(false);
+  const [tradeMemberId, setTradeMemberId] = useState('');
+  const [tradeDate, setTradeDate] = useState('');
+  const [profitAmount, setProfitAmount] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [tradeBusy, setTradeBusy] = useState(false);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
@@ -518,12 +524,43 @@ function TradingManagement() {
     }
   }
 
+  async function handleAddTrade(e) {
+    e.preventDefault();
+    if (!tradeMemberId || !tradeDate || !profitAmount || !depositAmount) {
+      setNotice({ text: 'All fields required', bad: true });
+      return;
+    }
+    setTradeBusy(true);
+    try {
+      await api('/admin/trading/add-trade', {
+        method: 'POST',
+        body: {
+          accountId: tradeMemberId,
+          profitDate: tradeDate,
+          profitAmount: parseFloat(profitAmount),
+          depositAmount: parseFloat(depositAmount),
+        }
+      });
+      setNotice({ text: 'Trade added successfully' });
+      setShowAddTrade(false);
+      setTradeMemberId('');
+      setTradeDate('');
+      setProfitAmount('');
+      setDepositAmount('');
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setTradeBusy(false);
+  }
+
   return (
     <section>
       <div style={{ marginBottom: '16px' }}>
         <h2 style={{ marginBottom: '12px' }}>Trading & Profit Ledger</h2>
         <div className="ad-row">
           <button className="ad-btn ghost" onClick={reload} style={{ flex: 1 }}>Refresh</button>
+          <button className="ad-btn" onClick={() => setShowAddTrade(true)} style={{ flex: 1 }}>Add Trade</button>
           <button className="ad-btn" onClick={applyProfits} style={{ flex: 1 }}>Apply Profits</button>
         </div>
       </div>
@@ -559,6 +596,52 @@ function TradingManagement() {
         </table>
         {!trades.length && <p className="ad-empty">No trading activity yet</p>}
       </div>
+
+      {showAddTrade && (
+        <div className="ad-overlay" onClick={() => setShowAddTrade(false)}>
+          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleAddTrade}>
+            <h3>Add Trade</h3>
+            <label>Member ID</label>
+            <input
+              type="text"
+              value={tradeMemberId}
+              onChange={(e) => setTradeMemberId(e.target.value)}
+              placeholder="Member account ID"
+              required
+            />
+            <label>Trade Date</label>
+            <input
+              type="date"
+              value={tradeDate}
+              onChange={(e) => setTradeDate(e.target.value)}
+              required
+            />
+            <label>Deposit Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+            <label>Profit Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={profitAmount}
+              onChange={(e) => setProfitAmount(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+            <Notice notice={notice} />
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => setShowAddTrade(false)}>Cancel</button>
+              <button className="ad-btn" disabled={tradeBusy}>{tradeBusy ? 'Adding…' : 'Add Trade'}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
