@@ -616,6 +616,21 @@ function App() {
     }
   }, [isPrimeHourActive, account]);
 
+  // ✅ ADD: Auto-refresh member balance every 30 seconds to show trades added by admin instantly
+  useEffect(() => {
+    if (account) {
+      const interval = setInterval(async () => {
+        try {
+          await fetchAccountBalance();
+          await fetchComprehensiveWallet();
+        } catch (err) {
+          console.error('Auto-refresh balance failed:', err);
+        }
+      }, 30000); // Every 30 seconds
+      return () => clearInterval(interval);
+    }
+  }, [account]);
+
   // ✅ REMOVED: Automatic earnings activation - now manual claim only during 1:00 PM - 1:30 PM EAT trading window
   // All earnings are claimed manually through the claim button during trading hours
 
