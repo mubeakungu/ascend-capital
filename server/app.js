@@ -1538,7 +1538,7 @@ export async function createApp() {
     });
   });
 
-  // ✅ NEW: Manual AutoTrade Endpoints (Claim Daily Trade)
+  // ✅ MANUAL TRADING ENDPOINTS ONLY (No automatic trade creation)
   // =========================================================================
 
   app.get('/api/trading/can-claim-today', requireAccount, async (request, response) => {
@@ -1583,7 +1583,7 @@ export async function createApp() {
 
   app.post('/api/trading/claim-daily-trade', updateRateLimit, requireAccount, async (request, response, next) => {
     try {
-      // ✅ ADDED: Check if claim is within trading hours (1:00 PM - 1:30 PM EAT)
+      // Check if claim is within trading hours (1:00 PM - 1:30 PM EAT)
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
@@ -1650,20 +1650,24 @@ export async function createApp() {
         return response.status(409).json({ error: 'No profit available to claim.' });
       }
 
-      // Create trading ledger entry for the first deposit (or sum if multiple)
+      // Create trading ledger entry
       const ledgerId = randomBytes(16).toString('hex');
       const txId = randomBytes(16).toString('hex');
+      const now_iso = new Date().toISOString();
 
+      // Insert into trading_ledger
       await sql`
         INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
-        VALUES (${ledgerId}, ${request.account.id}, ${activeDeposits[0].id}, ${totalProfitCents}, ${today}, ${new Date().toISOString()})
+        VALUES (${ledgerId}, ${request.account.id}, ${activeDeposits[0].id}, ${totalProfitCents}, ${today}, ${now_iso})
       `;
 
+      // Insert into transactions with APPROVED status immediately
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${request.account.id}, 'trading_profit', ${totalProfitCents}, ${`Manual daily trade claim from ${today}`}, 'approved', ${new Date().toISOString()})
+        VALUES (${txId}, ${request.account.id}, 'trading_profit', ${totalProfitCents}, ${'Manual daily trade claim from ' + today}, 'approved', ${now_iso})
       `;
 
+      // Record audit
       await recordAudit(request, 'trading.claim_daily_trade', ledgerId, {
         profitAmount: totalProfitCents / 100,
         profitDate: today,
@@ -1680,10 +1684,6 @@ export async function createApp() {
       return next(error);
     }
   });
-
-  // =========================================================================
-  // TRADING ENDPOINTS
-  // =========================================================================
 
   app.get('/api/trading/history', requireAccount, async (request, response) => {
     const profits = await sql`
