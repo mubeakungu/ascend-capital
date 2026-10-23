@@ -2417,19 +2417,18 @@ export async function createApp() {
   app.post('/api/admin/accounts/:accountId/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const { accountId } = request.params;
-      const { action, amount } = request.body ?? {};
+      const { action, amountCents, reason } = request.body ?? {};
 
-      if (!action || !amount) {
-        return response.status(400).json({ error: 'action and amount are required.' });
+      if (!action || !amountCents) {
+        return response.status(400).json({ error: 'action and amountCents are required.' });
       }
 
-      if (!['add', 'deduct'].includes(action)) {
-        return response.status(400).json({ error: 'action must be "add" or "deduct".' });
+      if (!['adjust', 'deduct', 'set'].includes(action)) {
+        return response.status(400).json({ error: 'action must be "adjust", "deduct", or "set".' });
       }
 
-      const amountNum = parseFloat(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
-        return response.status(400).json({ error: 'Amount must be a positive number.' });
+      if (!Number.isInteger(amountCents) || amountCents <= 0) {
+        return response.status(400).json({ error: 'amountCents must be a positive integer.' });
       }
 
       // Verify member exists
@@ -2438,13 +2437,33 @@ export async function createApp() {
         return response.status(404).json({ error: 'Member not found.' });
       }
 
-      const amountCents = Math.round(amountNum * 100);
+      // Get current balance before change
+      const previousBalance = await approvedBalanceCents(accountId);
+
       const txId = randomBytes(16).toString('hex');
       const now = new Date().toISOString();
-      const txType = action === 'add' ? 'deposit' : 'withdrawal';
-      const reference = action === 'add'
-        ? `Admin deposit adjustment: +$${amountNum}`
-        : `Admin deposit deduction: -$${amountNum}`;
+
+      let txType = 'deposit';
+      let reference = `Admin adjustment (${action})`;
+      let newBalance = previousBalance;
+
+      if (action === 'adjust') {
+        // Add to balance
+        txType = 'deposit';
+        reference = `Admin adjustment: +$${(amountCents / 100).toFixed(2)}${reason ? ' (' + reason + ')' : ''}`;
+        newBalance = previousBalance + amountCents;
+      } else if (action === 'deduct') {
+        // Subtract from balance
+        txType = 'withdrawal';
+        reference = `Admin deduction: -$${(amountCents / 100).toFixed(2)}${reason ? ' (' + reason + ')' : ''}`;
+        newBalance = previousBalance - amountCents;
+      } else if (action === 'set') {
+        // Set to exact amount
+        const difference = amountCents - previousBalance;
+        txType = difference >= 0 ? 'deposit' : 'withdrawal';
+        reference = `Admin set balance: $${(amountCents / 100).toFixed(2)}${reason ? ' (' + reason + ')' : ''}`;
+        newBalance = amountCents;
+      }
 
       // Create transaction
       await sql`
@@ -2453,30 +2472,31 @@ export async function createApp() {
       `;
 
       // ✅ APPLY REFERRAL COMMISSION: Only for deposits (5% to referrer + 2.5% bonus to depositor)
-      if (action === 'add') {
+      if (action === 'adjust') {
         await applyReferralCommission(txId);
       }
 
       // Record audit
-      await recordAudit(request, `admin.deposit.${action}`, txId, {
+      await recordAudit(request, `admin.balance.${action}`, txId, {
         accountId,
         accountName: member[0].name,
         accountEmail: member[0].email,
-        amount: amountNum,
+        amountCents,
+        previousBalance: previousBalance / 100,
+        newBalance: newBalance / 100,
         action,
+        reason: reason || null,
       });
-
-      // Get updated balance
-      const newBalance = await approvedBalanceCents(accountId) / 100;
 
       return response.status(201).json({
         ok: true,
-        message: `✅ ${action === 'add' ? 'Added' : 'Deducted'} $${amountNum.toFixed(2)} ${action === 'add' ? 'to' : 'from'} ${member[0].name}. New balance: $${newBalance.toFixed(2)}`,
+        message: `✅ Balance ${action === 'adjust' ? 'increased' : action === 'deduct' ? 'decreased' : 'set'} for ${member[0].name}. ${previousBalance / 100 !== newBalance / 100 ? `New balance: $${(newBalance / 100).toFixed(2)}` : 'Balance unchanged'}`,
         transactionId: txId,
         memberName: member[0].name,
-        amount: amountNum,
+        previousBalance: previousBalance / 100,
+        newBalance: newBalance / 100,
         action,
-        newBalance,
+        reason: reason || null,
       });
     } catch (error) {
       console.error('Error adjusting deposit:', error);
