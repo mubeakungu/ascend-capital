@@ -2330,4 +2330,69 @@ function App() {
               <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
               {modal === 'withdraw' ? (
                 <>
-                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} /></label>
+                </>
+              ) : (
+                <input type="hidden" />
+              )}
+              {notice && <div className="modal-message" role="alert">{notice}</div>}
+              <button className="button button-primary modal-submit" type="submit" disabled={transactionLoading}>{transactionLoading ? 'Processing...' : (modal === 'withdraw' ? 'Request withdrawal' : 'Make deposit')} <Icon name="arrow" size={15} /></button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {primeHourModal && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrimeHourModal(null); }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="prime-modal-title">
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setPrimeHourModal(null)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon"><Icon name={primeHourModal === 'withdraw' ? 'withdraw' : 'wallet'} size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" /> PRIME HOUR TRANSACTION</div>
+            <h2 id="prime-modal-title">{primeHourModal === 'withdraw' ? 'Withdraw from Prime' : 'Deposit to Prime'}</h2>
+            <p className="modal-subtitle">Prime Hour Window: 3:45 AM - 4:15 AM EAT</p>
+            <form onSubmit={(event) => submitPrimeHourAction(event, primeHourModal)}>
+              <label className="amount-label" htmlFor="prime-amount">{primeHourModal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
+              <div className="amount-input-wrap"><span>$</span><input id="prime-amount" type="number" min="50" step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setPrimeHourMessage(''); }} placeholder="0.00" required disabled={primeHourLoading} /></div>
+              {primeHourModal === 'withdraw' ? (
+                <>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={primeHourLoading} /></label>
+                </>
+              ) : (
+                <input type="hidden" />
+              )}
+              {primeHourMessage && <div className={`modal-message ${primeHourMessage.includes('✅') ? 'success' : 'error'}`} role="alert">{primeHourMessage}</div>}
+              <button className="button button-primary modal-submit" type="submit" disabled={primeHourLoading}>{primeHourLoading ? 'Processing...' : (primeHourModal === 'withdraw' ? 'Withdraw from Prime' : 'Deposit to Prime')} <Icon name="arrow" size={15} /></button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {accountDialog && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountDialog(false); }}>
+          <AuthPage
+            mode={accountMode}
+            name={accountName}
+            email={accountEmail}
+            password={accountPassword}
+            phone={accountPhone}
+            pin={accountPin}
+            error={accountError}
+            storageMode={storageMode}
+            referralCode={referralCode}
+            onNameChange={setAccountName}
+            onEmailChange={setAccountEmail}
+            onPasswordChange={setAccountPassword}
+            onPhoneChange={setAccountPhone}
+            onPinChange={setAccountPin}
+            onSubmit={submitAccount}
+            onNavigate={(page) => { setAccountDialog(accountMode !== 'profile'); navigate(page); }}
+            showPassword={showAccountPassword}
+            onTogglePasswordVisibility={() => setShowAccountPassword(!showAccountPassword)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
