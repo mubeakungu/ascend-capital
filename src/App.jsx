@@ -2145,6 +2145,66 @@ function App() {
             </section>
           )}
         </div>
+
+        {/* Deposit/Withdraw Modal */}
+        {modal && (
+          <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}} onClick={() => setModal(null)}>
+            <div style={{background: '#1a1a1a', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', border: '1px solid rgba(212, 175, 55, 0.2)'}} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{marginTop: 0, marginBottom: '20px'}}>{modal === 'deposit' ? 'Make a Deposit' : 'Withdraw Funds'}</h2>
+              <form onSubmit={(e) => submitShowcaseAction(e)}>
+                <label className="account-field" style={{marginBottom: '16px'}}>
+                  Amount (USD)
+                  <input type="number" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} style={{padding: '12px', marginTop: '8px', borderRadius: '6px', border: '1px solid rgba(212, 175, 55, 0.2)', background: '#0a0a0a', color: 'var(--text-light)', width: '100%'}} min="0" step="0.01" required />
+                </label>
+                {modal === 'withdraw' && (
+                  <label className="account-field" style={{marginBottom: '16px'}}>
+                    Wallet Address
+                    <input type="text" placeholder="Enter wallet address" value={destination} onChange={(e) => setDestination(e.target.value)} style={{padding: '12px', marginTop: '8px', borderRadius: '6px', border: '1px solid rgba(212, 175, 55, 0.2)', background: '#0a0a0a', color: 'var(--text-light)', width: '100%'}} required />
+                  </label>
+                )}
+                {notice && <div style={{background: 'rgba(255, 107, 107, 0.1)', color: '#ff6b6b', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '12px'}}>{notice}</div>}
+                <div style={{display: 'flex', gap: '12px'}}>
+                  <button type="submit" className="button button-primary" style={{flex: 1, cursor: 'pointer'}} disabled={transactionLoading}>
+                    {transactionLoading ? 'Processing...' : modal === 'deposit' ? 'Confirm Deposit' : 'Confirm Withdrawal'}
+                  </button>
+                  <button type="button" className="button button-secondary" style={{flex: 1, cursor: 'pointer'}} onClick={() => setModal(null)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Prime Hour Modal */}
+        {primeHourModal && (
+          <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}} onClick={() => setPrimeHourModal(null)}>
+            <div style={{background: '#1a1a1a', padding: '30px', borderRadius: '8px', maxWidth: '400px', width: '90%', border: '2px solid #FF9900'}} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{marginTop: 0, marginBottom: '20px', color: '#FF9900'}}>⏰ {primeHourModal === 'deposit' ? 'Prime Hour Deposit' : 'Prime Hour Withdrawal'}</h2>
+              <form onSubmit={(e) => submitPrimeHourAction(e, primeHourModal)}>
+                <label className="account-field" style={{marginBottom: '16px'}}>
+                  Amount (USD)
+                  <input type="number" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} style={{padding: '12px', marginTop: '8px', borderRadius: '6px', border: '1px solid rgba(255, 153, 0, 0.3)', background: '#0a0a0a', color: 'var(--text-light)', width: '100%'}} min="50" step="0.01" required />
+                </label>
+                {primeHourModal === 'withdraw' && (
+                  <label className="account-field" style={{marginBottom: '16px'}}>
+                    Wallet Address
+                    <input type="text" placeholder="Enter wallet address" value={destination} onChange={(e) => setDestination(e.target.value)} style={{padding: '12px', marginTop: '8px', borderRadius: '6px', border: '1px solid rgba(255, 153, 0, 0.3)', background: '#0a0a0a', color: 'var(--text-light)', width: '100%'}} required />
+                  </label>
+                )}
+                {primeHourMessage && (
+                  <div style={{background: primeHourMessage.includes('✅') ? 'rgba(76, 175, 80, 0.1)' : 'rgba(255, 152, 0, 0.1)', color: primeHourMessage.includes('✅') ? '#4CAF50' : '#FFB74D', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '12px', border: `1px solid ${primeHourMessage.includes('✅') ? '#4CAF50' : '#FFB74D'}`}}>
+                    {primeHourMessage}
+                  </div>
+                )}
+                <div style={{display: 'flex', gap: '12px'}}>
+                  <button type="submit" className="button" style={{flex: 1, cursor: 'pointer', background: '#FF9900', color: '#000', fontWeight: '600', border: 'none', padding: '12px', borderRadius: '6px'}} disabled={primeHourLoading}>
+                    {primeHourLoading ? 'Processing...' : primeHourModal === 'deposit' ? 'Confirm Deposit' : 'Confirm Withdrawal'}
+                  </button>
+                  <button type="button" className="button button-secondary" style={{flex: 1, cursor: 'pointer'}} onClick={() => setPrimeHourModal(null)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
