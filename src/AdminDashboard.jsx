@@ -655,7 +655,7 @@ function TradingManagement() {
 }
 
 // ============================================================================
-// BALANCE MANAGEMENT
+// BALANCE MANAGEMENT - ✅ FIXED
 // ============================================================================
 
 function BalanceManagement() {
@@ -680,12 +680,20 @@ function BalanceManagement() {
         throw new Error('Invalid amount');
       }
 
-      await api(`/admin/accounts/${memberId}/balance`, {
+      const response = await api(`/admin/accounts/${memberId}/balance`, {
         method: 'POST',
         body: { action, amountCents: Math.round(amountNum * 100), reason }
       });
 
-      setNotice({ text: `Balance ${action}ed by ${money(amountNum)}` });
+      // ✅ FIXED: Capture response with previousBalance and newBalance
+      const prevBalance = response.previousBalance || 0;
+      const newBalance = response.newBalance || 0;
+      const change = newBalance - prevBalance;
+      const changeSign = change >= 0 ? '+' : '';
+
+      setNotice({ 
+        text: `✓ Balance updated: ${money(prevBalance)} → ${money(newBalance)} (${changeSign}${money(change)})` 
+      });
       setMemberId('');
       setAmount('');
       setReason('');
