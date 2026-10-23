@@ -925,8 +925,26 @@ function App() {
       const result = await requestApi('/api/wallet/comprehensive');
       setComprehensiveWallet(result);
     } catch (error) {
-      console.error('Failed to fetch comprehensive wallet:', error);
-      setComprehensiveWallet(null);
+      console.error('Comprehensive endpoint not available, using fallback:', error);
+      try {
+        const txResult = await requestApi('/api/transactions');
+        const safeBal = Math.max(0, txResult.balance || 0);
+        const safeDeps = Math.max(0, txResult.totalDeposits || 0);
+        setComprehensiveWallet({
+          balance: safeBal,
+          totalDeposits: safeDeps,
+          totalTrading: 0,
+          totalReferral: 0,
+        });
+      } catch (fallbackError) {
+        console.error('Fallback fetch also failed:', fallbackError);
+        setComprehensiveWallet({
+          balance: 0,
+          totalDeposits: 0,
+          totalTrading: 0,
+          totalReferral: 0,
+        });
+      }
     } finally {
       setComprehensiveWalletLoading(false);
     }
