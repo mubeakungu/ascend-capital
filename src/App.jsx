@@ -103,11 +103,17 @@ function Icon({ name, size = 18 }) {
 }
 
 async function requestApi(path, options = {}) {
+  let body = options.body;
+  if (body && typeof body === 'object' && typeof body !== 'string') {
+    body = JSON.stringify(body);
+  }
+
   const response = await fetch(path, {
     ...options,
+    ...(body ? { body } : {}),
     credentials: 'include',
     headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
   });
