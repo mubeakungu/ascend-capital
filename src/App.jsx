@@ -857,8 +857,9 @@ function App() {
         setLastDepositTime(result.lastDepositTime);
       }
 
-      // ✅ UPDATED: Calculate daily income for manual claiming - not tied to automatic activation
-      const depositAmount = result.balance || 0;
+      // ✅ FIXED: Calculate daily income based on ORIGINAL DEPOSIT AMOUNT, not total balance
+      // Balance includes earnings/profits, but daily income should match the deposit plan amount
+      const depositAmount = result.totalDeposits || 0;
       const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
       const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
       setDailyIncome(dailyIncomeValue);
