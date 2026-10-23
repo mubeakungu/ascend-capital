@@ -1019,6 +1019,133 @@ function SettingsManagement({ account }) {
 }
 
 // ============================================================================
+// DEPOSITS MANAGEMENT
+// ============================================================================
+
+function DepositsManagement() {
+  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
+  const [notice, setNotice] = useState(null);
+  const [memberId, setMemberId] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
+  const [busy, setBusy] = useState(false);
+  const members = membersData?.accounts || [];
+
+  async function handleAddDeposit(e) {
+    e.preventDefault();
+    if (!memberId || !depositAmount) {
+      setNotice({ text: 'Member and amount required', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api('/admin/deposits/add', {
+        method: 'POST',
+        body: {
+          accountId: memberId,
+          depositAmount: parseFloat(depositAmount),
+          depositDate,
+        },
+      });
+      setNotice({ text: response.message, bad: false });
+      setMemberId('');
+      setDepositAmount('');
+      setDepositDate(new Date().toISOString().split('T')[0]);
+      reloadMembers();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <h2>Add Member Deposits</h2>
+      <form className="ad-form" onSubmit={handleAddDeposit}>
+        <label>Select Member</label>
+        <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
+          <option value="">-- Choose a member --</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+          ))}
+        </select>
+        <label>Deposit Amount (USD)</label>
+        <input type="number" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0.00" required />
+        <label>Deposit Date</label>
+        <input type="date" value={depositDate} onChange={(e) => setDepositDate(e.target.value)} required />
+        <Notice notice={notice} />
+        <button className="ad-btn" disabled={busy} style={{ width: '100%' }}>{busy ? 'Processing…' : 'Add Deposit'}</button>
+      </form>
+    </section>
+  );
+}
+
+// ============================================================================
+// MEMBER PASSWORD MANAGEMENT
+// ============================================================================
+
+function MemberPasswordManagement() {
+  const [{ data: membersData }] = useLoad(() => api('/admin/accounts'), []);
+  const [notice, setNotice] = useState(null);
+  const [memberId, setMemberId] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const members = membersData?.accounts || [];
+
+  async function handleResetPassword(e) {
+    e.preventDefault();
+    if (!memberId || !newPassword) {
+      setNotice({ text: 'Member and password required', bad: true });
+      return;
+    }
+    if (newPassword.length < 6 || newPassword.length > 128) {
+      setNotice({ text: 'Password must be 6-128 characters', bad: true });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setNotice({ text: 'Passwords do not match', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/admin/accounts/${memberId}/password-reset`, {
+        method: 'POST',
+        body: { newPassword },
+      });
+      setNotice({ text: 'Password reset successfully', bad: false });
+      setMemberId('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <h2>Reset Member Password</h2>
+      <form className="ad-form" onSubmit={handleResetPassword}>
+        <label>Select Member</label>
+        <select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
+          <option value="">-- Choose a member --</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+          ))}
+        </select>
+        <label>New Password</label>
+        <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 6 characters" required />
+        <label>Confirm Password</label>
+        <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm password" required />
+        <Notice notice={notice} />
+        <button className="ad-btn" disabled={busy} style={{ width: '100%' }}>{busy ? 'Resetting…' : 'Reset Password'}</button>
+      </form>
+    </section>
+  );
+}
+
+// ============================================================================
 // MAIN ADMIN DASHBOARD
 // ============================================================================
 
@@ -1088,10 +1215,12 @@ export default function AdminDashboard() {
   const tabs = [
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
+    ['deposits', 'Deposits'],
     ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
     ['balance', 'Balances'],
+    ['passwords', 'Passwords'],
     ['settings', 'Settings'],
   ];
 
@@ -1136,10 +1265,12 @@ export default function AdminDashboard() {
         <main className="ad-main">
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
+          {tab === 'deposits' && <DepositsManagement />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'balance' && <BalanceManagement />}
+          {tab === 'passwords' && <MemberPasswordManagement />}
           {tab === 'settings' && <SettingsManagement account={account} />}
         </main>
       </>
