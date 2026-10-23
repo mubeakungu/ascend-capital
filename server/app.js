@@ -2679,7 +2679,7 @@ export async function createApp() {
         ), 0) AS total_deposits_cents,
         COALESCE((
           SELECT SUM(CASE
-            WHEN type IN ('deposit', 'deposit_bonus', 'tier_reward', 'tier_salary', 'referral_commission', 'admin_adjustment') THEN amount_cents
+            WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
             WHEN type = 'withdrawal' THEN -amount_cents
             ELSE 0
           END)
