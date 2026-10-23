@@ -355,7 +355,7 @@ function ReferredMembersList() {
     <div>
       <div style={{ marginBottom: '12px' }}>
         <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>YOUR NETWORK</span>
-        <h3 style={{ marginTop: '4px', marginBottom: '0' }}>Referred members</h3>
+        <h3 style={{ marginTop: '4px', marginBottom: '0' }}>Referred members (Generation 1)</h3>
       </div>
       {referrals.length === 0 && (
         <div style={{ padding: '20px', textAlign: 'center', color: '#aaa', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', marginBottom: '20px' }}>
@@ -476,6 +476,190 @@ function TradingGraph({ balance, totalDeposits }) {
   );
 }
 
+function ReferralCodeSection({ referralCode, account }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
+
+  const fullReferralLink = referralCode ? `${window.location.origin}?ref=${referralCode}` : '';
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setCopyError('Failed to copy. Please try manually.');
+    }
+  }
+
+  if (!account) return null;
+
+  return (
+    <section style={{ marginTop: '30px', background: 'rgba(212, 175, 55, 0.08)', border: '2px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '8px' }}>
+        <Icon name="link" size={20} />
+        <h2 style={{ margin: 0, color: '#D4AF37' }}>Your Referral Code</h2>
+      </div>
+      <p style={{ color: '#aaa', marginBottom: '16px' }}>Share your unique referral code to invite friends and earn commissions on their deposits.</p>
+
+      {referralCode ? (
+        <>
+          <div style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CODE</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between' }}>
+              <code style={{ fontSize: '20px', fontWeight: '700', color: '#D4AF37', letterSpacing: '2px' }}>{referralCode}</code>
+              <button
+                onClick={() => copyToClipboard(referralCode)}
+                style={{
+                  padding: '8px 16px',
+                  background: '#D4AF37',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#E8C547'}
+                onMouseLeave={(e) => e.target.style.background = '#D4AF37'}
+              >
+                {copied ? '✅ Copied' : 'Copy Code'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px', padding: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>REFERRAL LINK</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between' }}>
+              <code style={{ fontSize: '12px', color: '#aaa', wordBreak: 'break-all', flex: 1 }}>{fullReferralLink}</code>
+              <button
+                onClick={() => copyToClipboard(fullReferralLink)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'rgba(212, 175, 55, 0.2)',
+                  color: '#D4AF37',
+                  border: '1px solid rgba(212, 175, 55, 0.3)',
+                  borderRadius: '4px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => e.target.style.background = 'rgba(212, 175, 55, 0.3)'}
+                onMouseLeave={(e) => e.target.style.background = 'rgba(212, 175, 55, 0.2)'}
+              >
+                {copied ? '✅ Copied' : 'Copy Link'}
+              </button>
+            </div>
+          </div>
+          {copyError && <div style={{ color: '#ff6b6b', fontSize: '12px', marginTop: '12px' }}>⚠️ {copyError}</div>}
+        </>
+      ) : (
+        <div style={{ padding: '16px', background: 'rgba(255, 152, 0, 0.1)', borderRadius: '6px', color: '#FFB74D', fontSize: '14px' }}>
+          💡 Complete your profile to receive your unique referral code
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CommissionBreakdownSection({ referralStats, weeklyData }) {
+  if (!referralStats) return null;
+
+  return (
+    <section style={{ marginTop: '30px' }}>
+      <div style={{ marginBottom: '16px' }}>
+        <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 EARNINGS BREAKDOWN</span>
+        <h3 style={{ marginTop: '8px', marginBottom: '0' }}>Multi-generation commissions</h3>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <article style={{ background: 'rgba(212, 175, 55, 0.08)', border: '1px solid rgba(212, 175, 55, 0.2)', borderRadius: '8px', padding: '16px' }}>
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>Gen 1 (Direct Referrals)</div>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#D4AF37' }}>${(referralStats.gen1Earnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>5% commission × {referralStats.directReferrals || 0} members</div>
+        </article>
+
+        <article style={{ background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.2)', borderRadius: '8px', padding: '16px' }}>
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>Gen 2 (Their Referrals)</div>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#4CAF50' }}>${(referralStats.gen2Earnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>2% commission × {referralStats.gen2Count || 0} members</div>
+        </article>
+
+        <article style={{ background: 'rgba(100, 181, 246, 0.08)', border: '1px solid rgba(100, 181, 246, 0.2)', borderRadius: '8px', padding: '16px' }}>
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>Gen 3+ (Extended Network)</div>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#64B5F6' }}>${(referralStats.gen3Earnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div style={{ fontSize: '11px', color: '#aaa', marginTop: '8px' }}>1% commission × {referralStats.gen3Count || 0} members</div>
+        </article>
+      </div>
+
+      {weeklyData?.weeklySalary > 0 && (
+        <div style={{ background: 'rgba(255, 193, 7, 0.1)', border: '2px solid rgba(255, 193, 7, 0.3)', borderRadius: '8px', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div>
+              <div style={{ fontSize: '12px', color: '#FFC107', fontWeight: '600' }}>WEEKLY SALARY</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: '#FFC107', marginTop: '4px' }}>
+                ${weeklyData.weeklySalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '12px', color: '#aaa' }}>Current Tier</div>
+              <div style={{ fontSize: '20px', fontWeight: '700', color: '#FFC107', marginTop: '4px' }}>{weeklyData.tier || 'Unranked'}</div>
+            </div>
+          </div>
+          <div style={{ fontSize: '12px', color: '#aaa' }}>
+            💡 Earned <strong style={{ color: '#FFC107' }}>${weeklyData.totalEarned?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> total from {weeklyData.directCount} direct referrals
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ActivityLog({ transactions }) {
+  const recentTransactions = transactions ? transactions.slice(0, 8) : [];
+
+  if (!recentTransactions.length) return null;
+
+  return (
+    <section style={{ marginTop: '30px' }}>
+      <div style={{ marginBottom: '16px' }}>
+        <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📊 ACTIVITY</span>
+        <h3 style={{ marginTop: '8px', marginBottom: '0' }}>Recent transactions</h3>
+      </div>
+
+      <div style={{ background: 'rgba(212, 175, 55, 0.05)', border: '1px solid rgba(212, 175, 55, 0.15)', borderRadius: '8px', overflow: 'hidden' }}>
+        {recentTransactions.map((tx, idx) => (
+          <div
+            key={idx}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 16px',
+              borderBottom: idx < recentTransactions.length - 1 ? '1px solid rgba(212, 175, 55, 0.1)' : 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#fff' }}>
+                {tx.type === 'Deposit' ? '📥' : tx.type === 'Withdrawal' ? '📤' : '💱'} {tx.type}
+              </div>
+              <div style={{ fontSize: '11px', color: '#aaa', marginTop: '2px' }}>{tx.createdAt}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '14px', fontWeight: '700', color: tx.type === 'Deposit' ? '#4CAF50' : '#FF6B6B' }}>
+                {tx.type === 'Withdrawal' ? '-' : '+'}${tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: '10px', color: '#888', marginTop: '2px', textTransform: 'capitalize' }}>{tx.status}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [route, setRoute] = useState(() => window.location.pathname);
   const [activeNav, setActiveNav] = useState('overview');
@@ -503,7 +687,6 @@ function App() {
   const [accountMessage, setAccountMessage] = useState('');
   const [referralCode, setReferralCode] = useState('');
   const [referralEarnings, setReferralEarnings] = useState(0);
-  const [referralBonusFromThisDeposit, setReferralBonusFromThisDeposit] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
   const [isPrimeHourActive, setIsPrimeHourActive] = useState(false);
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
@@ -511,14 +694,7 @@ function App() {
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [referralStats, setReferralStats] = useState(null);
   const [referralStatsLoading, setReferralStatsLoading] = useState(false);
-  const [earningsActive, setEarningsActive] = useState(false);
-  const [earningsStartTime, setEarningsStartTime] = useState(null);
-  const [lastDepositTime, setLastDepositTime] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [showAccountPassword, setShowAccountPassword] = useState(false);
-  const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
-  const [adminNewPassword, setAdminNewPassword] = useState('');
-  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
   const [canClaimTrade, setCanClaimTrade] = useState(false);
   const [claimTradeLoading, setClaimTradeLoading] = useState(false);
   const [tradeClaimMessage, setTradeClaimMessage] = useState('');
@@ -531,7 +707,6 @@ function App() {
   const [comprehensiveWallet, setComprehensiveWallet] = useState(null);
   const [comprehensiveWalletLoading, setComprehensiveWalletLoading] = useState(false);
 
-  // Helper to calculate daily income from comprehensiveWallet
   const getDailyIncomeFromWallet = () => {
     if (!comprehensiveWallet?.totalDeposits) return 0;
     const matchingPlan = plans.find((plan) => plan.deposit === comprehensiveWallet.totalDeposits);
@@ -563,7 +738,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check trading hours (1:00 PM - 1:30 PM EAT)
   useEffect(() => {
     function checkTradingHours() {
       const now = new Date();
@@ -602,7 +776,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Refresh prime hour balance during prime hour window
   useEffect(() => {
     if (isPrimeHourActive && account) {
       fetchPrimeHourBalance();
@@ -613,7 +786,6 @@ function App() {
     }
   }, [isPrimeHourActive, account]);
 
-  // Auto-refresh comprehensive wallet every 30 seconds
   useEffect(() => {
     if (account) {
       const interval = setInterval(async () => {
@@ -636,7 +808,6 @@ function App() {
     }
   }, []);
 
-  // Fetch claim eligibility
   async function fetchCanClaimTrade() {
     if (!account || !comprehensiveWallet?.totalDeposits) {
       setCanClaimTrade(false);
@@ -651,7 +822,6 @@ function App() {
     }
   }
 
-  // Claim daily trade
   async function claimDailyTrade() {
     if (!account || !comprehensiveWallet?.totalDeposits || claimTradeLoading) {
       setTradeClaimMessage('Cannot claim trade at this time.');
@@ -680,7 +850,6 @@ function App() {
     }
   }
 
-  // Fetch Prime Hour balance
   async function fetchPrimeHourBalance() {
     if (!account) {
       setPrimeHourBalance(0);
@@ -695,7 +864,6 @@ function App() {
     }
   }
 
-  // Handle Prime Hour transactions
   async function submitPrimeHourAction(event, actionType) {
     event.preventDefault();
     const value = Number(amount);
@@ -874,6 +1042,7 @@ function App() {
     try {
       const result = await requestApi('/api/referrals/code');
       setAccount((prev) => ({...prev, referralCode: result.code}));
+      setReferralCode(result.code);
     } catch (error) {
       console.error('Failed to fetch referral code:', error);
     }
@@ -1044,11 +1213,6 @@ function App() {
 
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
 
-      if (modal === 'deposit') {
-        const now = new Date();
-        setLastDepositTime(now.toISOString());
-      }
-
       setModal(null);
       setAmount('');
       setDestination('');
@@ -1079,19 +1243,6 @@ function App() {
     setAccountPin('');
     setAccountError('');
     setAccountMessage('');
-    setAdminCurrentPassword('');
-    setAdminNewPassword('');
-    setAdminConfirmPassword('');
-    setAccountDialog(true);
-  }
-
-  function openAdminPasswordDialog() {
-    setAccountMode('admin-password');
-    setAdminCurrentPassword('');
-    setAdminNewPassword('');
-    setAdminConfirmPassword('');
-    setAccountError('');
-    setAccountMessage('');
     setAccountDialog(true);
   }
 
@@ -1101,41 +1252,6 @@ function App() {
     setAccountMessage('');
 
     try {
-      if (accountMode === 'admin-password') {
-        if (!adminCurrentPassword || !adminNewPassword || !adminConfirmPassword) {
-          setAccountError('All password fields are required.');
-          return;
-        }
-        if (adminNewPassword.length < 6 || adminNewPassword.length > 128) {
-          setAccountError('New password must be between 6 and 128 characters.');
-          return;
-        }
-        if (adminNewPassword !== adminConfirmPassword) {
-          setAccountError('New password and confirmation do not match.');
-          return;
-        }
-        if (adminCurrentPassword === adminNewPassword) {
-          setAccountError('New password must be different from the current password.');
-          return;
-        }
-
-        const result = await requestApi('/api/admin/auth/password', {
-          method: 'POST',
-          body: JSON.stringify({
-            currentPassword: adminCurrentPassword,
-            newPassword: adminNewPassword,
-          }),
-        });
-
-        setAdminCurrentPassword('');
-        setAdminNewPassword('');
-        setAdminConfirmPassword('');
-        setAccountMessage('Password changed successfully. You will need to sign in again.');
-
-        setTimeout(() => logout(), 2000);
-        return;
-      }
-
       if (accountMode === 'profile') {
         const result = await requestApi('/api/auth/profile', {
           method: 'PATCH',
@@ -1200,8 +1316,6 @@ function App() {
       setDemoActivity([]);
       setWeeklyData(null);
       setReferralStats(null);
-      setLastDepositTime(null);
-      setEarningsActive(false);
       setCanClaimTrade(false);
       setTradeClaimMessage('');
       setIsTradingHourActive(false);
@@ -1746,59 +1860,48 @@ function App() {
         }
 
         .daily-trade-claim-card {
-          background: rgba(212, 175, 55, 0.08);
-          border: 2px solid rgba(212, 175, 55, 0.3);
+          background: rgba(76, 175, 80, 0.08);
+          border: 1px solid rgba(76, 175, 80, 0.3);
           border-radius: 8px;
           padding: 24px;
           margin: 20px 0;
           text-align: center;
+          color: #fff;
         }
 
         .daily-trade-claim-card h3 {
-          color: var(--gold);
-          margin: 0 0 8px 0;
+          margin: 0 0 12px 0;
           font-size: 20px;
+          color: #4CAF50;
         }
 
         .daily-trade-claim-card p {
-          color: #aaa;
-          margin: 0 0 16px 0;
+          margin: 8px 0;
           font-size: 14px;
+          color: #ccc;
         }
 
         .daily-trade-claim-card button {
-          background: var(--gold);
-          color: #000;
+          width: 100%;
+          padding: 12px 20px;
+          font-size: 16px;
+          font-weight: bold;
           border: none;
-          padding: 12px 32px;
           border-radius: 6px;
-          font-weight: 600;
-          font-size: 14px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.3s ease;
+          background: #666;
+          color: #fff;
         }
 
-        .daily-trade-claim-card button:hover:not(:disabled) {
-          background: var(--light-gold);
+        .daily-trade-claim-card button:not(:disabled):hover {
+          background: #4CAF50;
           transform: translateY(-2px);
         }
 
         .daily-trade-claim-card button:disabled {
-          background: #666;
-          color: #999;
-          cursor: not-allowed;
           opacity: 0.6;
-        }
-
-        .daily-trade-claim-message {
-          margin-top: 16px;
-          padding: 12px 16px;
-          background: rgba(212, 175, 55, 0.15);
-          border-left: 3px solid var(--gold);
-          border-radius: 4px;
-          color: var(--gold);
-          font-size: 13px;
-          font-weight: 500;
+          cursor: not-allowed;
         }
 
         @media (max-width: 480px) {
@@ -1971,35 +2074,15 @@ function App() {
               </section>
 
               {account && comprehensiveWallet?.totalDeposits > 0 && (
-                <div className="daily-trade-claim-card" style={{
-                  background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%)',
-                  border: '1px solid rgba(76, 175, 80, 0.3)',
-                  borderRadius: '8px',
-                  padding: '24px',
-                  marginTop: '24px',
-                  color: '#fff'
-                }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '20px', color: '#4CAF50' }}>💰 Claim Your Trade Today</h3>
-                  <p style={{ margin: '8px 0', fontSize: '14px', color: '#ccc' }}>Manually claim your daily trading profit from your active deposits</p>
-                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="daily-trade-claim-card">
+                  <h3>💰 Claim Your Trade Today</h3>
+                  <p>Manually claim your daily trading profit from your active deposits</p>
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
                     ⏰ Trading hours: <strong style={{ color: '#4CAF50' }}>1:00 PM - 1:30 PM EAT</strong>
                   </p>
                   <button
                     onClick={claimDailyTrade}
                     disabled={!canClaimTrade || claimTradeLoading || !isTradingHourActive}
-                    style={{
-                      width: '100%',
-                      padding: '12px 20px',
-                      fontSize: '16px',
-                      fontWeight: 'bold',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 'not-allowed' : 'pointer',
-                      background: isTradingHourActive && canClaimTrade ? '#4CAF50' : '#666',
-                      color: '#fff',
-                      transition: 'all 0.3s ease',
-                      opacity: (!canClaimTrade || claimTradeLoading || !isTradingHourActive) ? 0.6 : 1,
-                    }}
                   >
                     {claimTradeLoading ? '⏳ Processing...' : !isTradingHourActive ? `🕐 Opens at ${nextTradingTime}` : canClaimTrade ? '✅ Claim Daily Trade' : '✔️ Already Claimed Today'}
                   </button>
@@ -2030,6 +2113,10 @@ function App() {
                   totalDeposits={comprehensiveWallet?.totalDeposits || 0}
                 />
               )}
+
+              <ReferralCodeSection referralCode={referralCode} account={account} />
+
+              <ActivityLog transactions={demoActivity} />
 
               <section className="action-row" aria-label="Wallet actions">
                 <div className="action-copy"><div className="action-heading"><span className="action-spark"><Icon name="spark" size={16} /></span>Ready to get started?</div><div className="action-description">Choose a plan to deposit into your account.</div></div>
@@ -2110,7 +2197,11 @@ function App() {
                 </section>
               )}
 
+              <ReferralCodeSection referralCode={referralCode} account={account} />
+
               <ReferredMembersList />
+
+              <CommissionBreakdownSection referralStats={referralStats} weeklyData={weeklyData} />
 
               <section style={{ marginTop: '30px' }}>
                 <div style={{ marginBottom: '12px' }}>
