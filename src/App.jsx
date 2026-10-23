@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+mport React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import DownloadAndroidButton from './components/DownloadAndroidButton';
 
@@ -319,6 +319,7 @@ function AdminPage({ account, accountLoading, onNavigate }) {
   );
 }
 
+// ✅ NEW COMPONENT: Display referred members with their details
 function ReferredMembersList() {
   const [referrals, setReferrals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -502,7 +503,9 @@ function App() {
   const [accountError, setAccountError] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
   const [referralCode, setReferralCode] = useState('');
-  // ✅ REMOVED: Duplicate balance state vars (balance, totalDeposits, dailyIncome) - now consolidated into comprehensiveWallet
+  const [balance, setBalance] = useState(0);
+  const [totalDeposits, setTotalDeposits] = useState(0);
+  const [dailyIncome, setDailyIncome] = useState(0);
   const [referralEarnings, setReferralEarnings] = useState(0);
   const [referralBonusFromThisDeposit, setReferralBonusFromThisDeposit] = useState(0);
   const [transactionLoading, setTransactionLoading] = useState(false);
@@ -520,27 +523,20 @@ function App() {
   const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
-  // Trading claim states
+  // ✅ ADD: New state variables for daily trade claim
   const [canClaimTrade, setCanClaimTrade] = useState(false);
   const [claimTradeLoading, setClaimTradeLoading] = useState(false);
   const [tradeClaimMessage, setTradeClaimMessage] = useState('');
   const [isTradingHourActive, setIsTradingHourActive] = useState(false);
   const [nextTradingTime, setNextTradingTime] = useState('');
-  // Prime Hour Wallet states
+  // ✅ ADD: Prime Hour Wallet states
   const [primeHourBalance, setPrimeHourBalance] = useState(0);
   const [primeHourModal, setPrimeHourModal] = useState(null);
   const [primeHourLoading, setPrimeHourLoading] = useState(false);
   const [primeHourMessage, setPrimeHourMessage] = useState('');
-  // ✅ CONSOLIDATED: Single source of truth for wallet data
+  // ✅ ADD: Comprehensive Wallet states (all earnings aggregated)
   const [comprehensiveWallet, setComprehensiveWallet] = useState(null);
   const [comprehensiveWalletLoading, setComprehensiveWalletLoading] = useState(false);
-
-  // Helper to calculate daily income from comprehensiveWallet
-  const getDailyIncomeFromWallet = () => {
-    if (!comprehensiveWallet?.totalDeposits) return 0;
-    const matchingPlan = plans.find((plan) => plan.deposit === comprehensiveWallet.totalDeposits);
-    return matchingPlan ? matchingPlan.dailyIncome : 0;
-  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -567,7 +563,7 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check trading hours (1:00 PM - 1:30 PM EAT)
+  // ✅ ADD: Check trading hours (1:00 PM - 1:30 PM EAT)
   useEffect(() => {
     function checkTradingHours() {
       const now = new Date();
@@ -575,18 +571,21 @@ function App() {
       const minutes = now.getMinutes();
 
       const currentMinutes = hours * 60 + minutes;
-      const tradingStart = 13 * 60; // 1:00 PM
-      const tradingEnd = 13 * 60 + 30; // 1:30 PM
+      const tradingStart = 13 * 60; // 1:00 PM (13:00 in 24-hour format)
+      const tradingEnd = 13 * 60 + 30; // 1:30 PM (13:30 in 24-hour format)
 
       const isActive = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
       setIsTradingHourActive(isActive);
 
       if (!isActive) {
+        // Calculate next trading time
         let nextTime = new Date(now);
         if (currentMinutes >= tradingEnd) {
+          // Trading window passed for today, set for tomorrow at 1:00 PM
           nextTime.setDate(nextTime.getDate() + 1);
           nextTime.setHours(13, 0, 0, 0);
         } else {
+          // Trading window hasn't started yet today
           nextTime.setHours(13, 0, 0, 0);
         }
 
@@ -606,7 +605,7 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Refresh prime hour balance during prime hour window
+  // ✅ ADD: Refresh prime hour balance during prime hour window
   useEffect(() => {
     if (isPrimeHourActive && account) {
       fetchPrimeHourBalance();
@@ -617,20 +616,23 @@ function App() {
     }
   }, [isPrimeHourActive, account]);
 
-  // ✅ FIXED: Auto-refresh ONLY comprehensive wallet every 30 seconds - single source of truth
+  // ✅ ADD: Auto-refresh member balance every 30 seconds to show trades added by admin instantly
   useEffect(() => {
     if (account) {
       const interval = setInterval(async () => {
         try {
+          await fetchAccountBalance();
           await fetchComprehensiveWallet();
-          await fetchCanClaimTrade();
         } catch (err) {
-          console.error('Auto-refresh failed:', err);
+          console.error('Auto-refresh balance failed:', err);
         }
       }, 30000); // Every 30 seconds
       return () => clearInterval(interval);
     }
   }, [account]);
+
+  // ✅ REMOVED: Automatic earnings activation - now manual claim only during 1:00 PM - 1:30 PM EAT trading window
+  // All earnings are claimed manually through the claim button during trading hours
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -640,14 +642,15 @@ function App() {
     }
   }, []);
 
-  // Fetch claim eligibility
+  // ✅ ADD: New function to fetch claim eligibility
   async function fetchCanClaimTrade() {
-    if (!account || !comprehensiveWallet?.totalDeposits) {
+    if (!account || totalDeposits === 0) {
       setCanClaimTrade(false);
       return;
     }
     try {
       const result = await requestApi('/api/trading/can-claim-today');
+      // ✅ FIX: Backend returns 'canClaimToday', not 'canClaim'
       setCanClaimTrade(result.canClaimToday || false);
     } catch (error) {
       console.error('Failed to fetch claim status:', error);
@@ -655,9 +658,9 @@ function App() {
     }
   }
 
-  // Claim daily trade
+  // ✅ ADD: New function to claim daily trade
   async function claimDailyTrade() {
-    if (!account || !comprehensiveWallet?.totalDeposits || claimTradeLoading) {
+    if (!account || totalDeposits === 0 || claimTradeLoading) {
       setTradeClaimMessage('Cannot claim trade at this time.');
       return;
     }
@@ -674,18 +677,22 @@ function App() {
       setTradeClaimMessage(`✅ ${result.message || 'Trade claimed successfully! Your profit has been added to your balance.'}`);
       setCanClaimTrade(false);
 
-      // Refresh after successful claim
-      await fetchComprehensiveWallet();
+      // Refresh balance after successful claim
+      await fetchAccountBalance();
+      // ✅ ADD: Refresh claim status to show "Already Claimed Today"
       await fetchCanClaimTrade();
+      // ✅ ADD: Refresh comprehensive wallet after trade claim
+      await fetchComprehensiveWallet();
     } catch (error) {
       setTradeClaimMessage(`⚠️ ${error.message || 'Failed to claim trade. Please try again.'}`);
+      // ✅ FIX: Refresh claim status to get latest eligibility
       await fetchCanClaimTrade();
     } finally {
       setClaimTradeLoading(false);
     }
   }
 
-  // Fetch Prime Hour balance
+  // ✅ ADD: Fetch Prime Hour wallet balance
   async function fetchPrimeHourBalance() {
     if (!account) {
       setPrimeHourBalance(0);
@@ -700,7 +707,7 @@ function App() {
     }
   }
 
-  // Handle Prime Hour transactions
+  // ✅ ADD: Handle Prime Hour deposits/withdrawals
   async function submitPrimeHourAction(event, actionType) {
     event.preventDefault();
     const value = Number(amount);
@@ -715,17 +722,21 @@ function App() {
       return;
     }
 
+    // ✅ UPDATED: Prime Hour specific requirements
     if (actionType === 'deposit') {
+      // Minimum deposit: $50
       if (value < 50) {
         setPrimeHourMessage('💰 Prime Hour Deposit Minimum: $50 (You earn a $5 bonus on deposits!)');
         return;
       }
 
+      // Check referral qualifications - REFERRER (you) must meet requirements
       if (!referralStats || !referralStats.directReferrals || referralStats.directReferrals === 0) {
         setPrimeHourMessage('⚠️ Prime Hour Qualification: You must have at least 1 referral to deposit.');
         return;
       }
 
+      // Check if YOU (referrer) have traded for 3+ days
       if (!referralStats.tradingDays || referralStats.tradingDays < 3) {
         setPrimeHourMessage('⚠️ To access Prime Hour: You must have traded for at least 3 days on Ascend.');
         return;
@@ -733,6 +744,7 @@ function App() {
     }
 
     if (actionType === 'withdraw') {
+      // Minimum withdrawal: $50
       if (value < 50) {
         setPrimeHourMessage('The minimum Prime Hour withdrawal amount is $50.');
         return;
@@ -760,6 +772,7 @@ function App() {
         }),
       });
 
+      // ✅ Show success with bonus info for deposits
       const successMsg = actionType === 'deposit'
         ? `✅ Prime deposit of $${value} successful! +$5 bonus added to your prime hour wallet.`
         : `✅ Prime withdrawal of $${value} completed successfully!`;
@@ -768,8 +781,10 @@ function App() {
       setAmount('');
       setDestination('');
 
+      // Refresh prime hour balance
       await fetchPrimeHourBalance();
 
+      // Close modal after 2 seconds
       setTimeout(() => {
         setPrimeHourModal(null);
         setPrimeHourMessage('');
@@ -810,14 +825,17 @@ function App() {
         setAccountEmail(currentAccount?.email ?? '');
         setAccountPhone(currentAccount?.phone ?? '');
         if (currentAccount) {
-          // ✅ SIMPLIFIED: Only fetch comprehensive wallet (single source of truth)
-          fetchComprehensiveWallet();
+          fetchAccountBalance();
           fetchTransactionHistory();
           fetchWeeklySalary();
           fetchReferralCode();
           fetchReferralStats();
+          // ✅ ADD: Fetch claim status on login
           fetchCanClaimTrade();
+          // ✅ ADD: Fetch prime hour balance on login
           fetchPrimeHourBalance();
+          // ✅ ADD: Fetch comprehensive wallet on login
+          fetchComprehensiveWallet();
         }
       })
       .catch((error) => {
@@ -829,14 +847,32 @@ function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // ✅ REMOVED: fetchAccountBalance() - no longer needed, use fetchComprehensiveWallet instead
+  async function fetchAccountBalance() {
+    try {
+      const result = await requestApi('/api/transactions');
+      setBalance(result.balance || 0);
+      setTotalDeposits(result.totalDeposits || 0);
+
+      if (result.lastDepositTime) {
+        setLastDepositTime(result.lastDepositTime);
+      }
+
+      // ✅ UPDATED: Calculate daily income for manual claiming - not tied to automatic activation
+      const depositAmount = result.balance || 0;
+      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+      setDailyIncome(dailyIncomeValue);
+    } catch (error) {
+      console.error('Failed to fetch balance:', error);
+    }
+  }
 
   async function fetchTransactionHistory() {
     try {
       const result = await requestApi('/api/transactions');
       const transactions = (result.transactions || []).map((tx) => ({
         id: tx.id,
-        type: tx.type || 'Unknown',
+        type: tx.type || 'Unknown',  // ✅ Use backend's mapped type (e.g., 'Trading Profit', 'Deposit', etc.)
         amount: tx.amount,
         createdAt: new Date(tx.createdAt).toLocaleTimeString(),
         status: tx.status,
@@ -918,7 +954,7 @@ function App() {
     }
   }
 
-  // ✅ CONSOLIDATED: Fetch comprehensive wallet (all earnings aggregated)
+  // ✅ ADD: Fetch comprehensive wallet (all earnings aggregated)
   async function fetchComprehensiveWallet() {
     setComprehensiveWalletLoading(true);
     try {
@@ -931,6 +967,7 @@ function App() {
       setComprehensiveWalletLoading(false);
     }
   }
+
 
   useEffect(() => {
     if (account) {
@@ -1003,7 +1040,7 @@ function App() {
       return;
     }
 
-    if (modal === 'withdraw' && value > (comprehensiveWallet?.balance || 0)) {
+    if (modal === 'withdraw' && value > balance) {
       setNotice('Insufficient balance for this withdrawal.');
       return;
     }
@@ -1034,10 +1071,19 @@ function App() {
       };
 
       setDemoActivity((current) => [entry, ...current].slice(0, 5));
+      const newBalance = balance + (modal === 'withdraw' ? -value : value);
+      setBalance(newBalance);
 
       if (modal === 'deposit') {
+        setTotalDeposits(value);
+
         const now = new Date();
         setLastDepositTime(now.toISOString());
+
+        // ✅ UPDATED: Calculate daily income based on deposit amount for manual claiming during 1:00 PM - 1:30 PM EAT
+        const matchingPlan = plans.find((plan) => plan.deposit === value);
+        const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
+        setDailyIncome(dailyIncomeValue);
       }
 
       setModal(null);
@@ -1046,10 +1092,12 @@ function App() {
       setNotice(`${entry.type} of $${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} processed successfully.`);
 
       if (account) {
-        // ✅ FIXED: Only refresh comprehensive wallet after transaction
-        await fetchComprehensiveWallet();
+        await fetchAccountBalance();
         await fetchReferralStats();
+        // ✅ ADD: Refresh claim status after deposit/withdrawal
         await fetchCanClaimTrade();
+        // ✅ ADD: Refresh comprehensive wallet after transaction
+        await fetchComprehensiveWallet();
       }
     } catch (error) {
       setNotice(`Transaction failed: ${error.message}`);
@@ -1161,11 +1209,12 @@ function App() {
       setAccountDialog(false);
 
       if (result.account) {
-        await fetchComprehensiveWallet();
+        await fetchAccountBalance();
         await fetchTransactionHistory();
         await fetchWeeklySalary();
         await fetchReferralCode();
         await fetchReferralStats();
+        // ✅ ADD: Fetch claim status after login
         await fetchCanClaimTrade();
       }
 
@@ -1188,7 +1237,10 @@ function App() {
       setAccountMode('login');
       setAccountMessage('');
       setAccountDialog(false);
-      setComprehensiveWallet(null);
+      setBalance(0);
+      setTotalDeposits(0);
+      setDailyIncome(0);
+      setReferralEarnings(0);
       setDemoActivity([]);
       setWeeklyData(null);
       setReferralStats(null);
@@ -1737,6 +1789,7 @@ function App() {
           }
         }
 
+        /* ✅ ADD: CSS for daily trade claim card */
         .daily-trade-claim-card {
           background: rgba(212, 175, 55, 0.08);
           border: 2px solid rgba(212, 175, 55, 0.3);
@@ -1782,6 +1835,7 @@ function App() {
           opacity: 0.6;
         }
 
+        /* ✅ ADD: CSS for daily trade claim message */
         .daily-trade-claim-message {
           margin-top: 16px;
           padding: 12px 16px;
@@ -1869,6 +1923,7 @@ function App() {
             <button className="date-chip"><span className="date-dot" /> Member overview</button>
           </section>
 
+          {/* ✅ PRIME HOUR WALLET - Only visible during prime hour window (3:45 AM - 4:15 AM) */}
           {isPrimeHourActive && account && (
             <section style={{ background: 'linear-gradient(135deg, rgba(255, 153, 0, 0.15) 0%, rgba(255, 153, 0, 0.05) 100%)', border: '2px solid rgba(255, 153, 0, 0.5)', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -1944,7 +1999,7 @@ function App() {
                 <span className="balance-label">Daily trade income</span>
                 <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
               </div>
-              <div className="balance-value gold-accent"><span className="currency">$</span>{comprehensiveWallet?.totalDeposits > 0 ? getDailyIncomeFromWallet() : '0'}</div>
+              <div className="balance-value gold-accent"><span className="currency">$</span>{totalDeposits > 0 ? dailyIncome : '0'}</div>
               <div className="balance-bottom">
                 <span className="balance-caption">Claimable during trading hours</span>
                 <span style={{ fontSize: '11px', color: '#D4AF37', fontWeight: '500' }}>1:00 PM - 1:30 PM EAT</span>
@@ -1952,7 +2007,11 @@ function App() {
             </article>
           </section>
 
-          {account && comprehensiveWallet?.totalDeposits > 0 && (
+
+
+          {/* Daily income card removed - now showing claim button during 1:00 PM - 1:30 PM trading window */}
+
+          {account && totalDeposits > 0 && (
             <div className="daily-trade-claim-card" style={{
               background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%)',
               border: '1px solid rgba(76, 175, 80, 0.3)',
@@ -2006,11 +2065,8 @@ function App() {
             </div>
           )}
 
-          {comprehensiveWallet?.totalDeposits > 0 && (
-            <TradingGraph
-              balance={comprehensiveWallet?.balance || 0}
-              totalDeposits={comprehensiveWallet?.totalDeposits || 0}
-            />
+          {totalDeposits > 0 && (
+            <TradingGraph balance={balance} totalDeposits={totalDeposits} />
           )}
 
           <section className="action-row" aria-label="Wallet actions">
@@ -2022,12 +2078,256 @@ function App() {
             </div>
           </section>
 
-          {/* REST OF THE PAGE CONTINUES WITH SAME CONSOLIDATION PATTERN - DEPOSITS, REFERRALS, ETC SECTIONS */}
-          {/* The remaining code sections follow the same pattern, using comprehensiveWallet throughout */}
+          <section className="section-block" id="deposits">
+            <div className="section-heading">
+              <div><div className="eyebrow"><span className="eyebrow-line" /> DEPOSIT PLANS</div><h2>Deposit plans</h2><p className="section-subtitle">Real deposits processed directly to your account balance.</p></div>
+              <span className="count-tag">10 plans <span className="count-dot" /></span>
+            </div>
+            <div className="plans-grid">
+              {plans.map((plan, index) => (
+                <article className={`plan-card ${index === 5 ? 'plan-featured' : ''}`} key={plan.deposit}>
+                  {index === 5 && <span className="popular-tag">POPULAR</span>}
+                  <div className="plan-index">PLAN {String(index + 1).padStart(2, '0')}</div>
+                  <div className="plan-deposit"><span>$</span>{plan.deposit.toLocaleString('en-US')}</div>
+                  <div className="plan-divider" />
+                  <div className="plan-earning-label">Daily trade income</div>
+                  <div className="plan-earning"><span>$</span>{plan.earning}</div>
+                  <div className="daily-earnings-hint">${plan.dailyIncome}/day</div>
+                  <button className={`plan-button ${index === 5 ? 'plan-button-featured' : ''}`} onClick={() => openModal('deposit', String(plan.deposit))} disabled={!account}>{account ? 'Choose plan' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
+                </article>
+              ))}
+            </div>
+            <div className="notice-bar"><span className="notice-icon"><Icon name="shield" size={16} /></span><p><strong>Real transactions:</strong> All deposits and withdrawals affect your actual account balance. Daily income starts tomorrow at 10:00 AM. Minimum withdrawal is $40.</p></div>
+          </section>
+
+
+          <section className="referral-layout" id="referrals">
+            <div className="section-block rank-section">
+              <div className="section-heading">
+                <div><div className="eyebrow"><span className="eyebrow-line" /> REFERRAL PROGRAM</div><h2>Earn rewards by referring friends</h2><p className="section-subtitle">Invite friends to join and earn commissions on their first deposit plus weekly tier salaries.</p></div>
+              </div>
+              <div className="referral-banner" style={{background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%)', border: '2px solid rgba(212, 175, 55, 0.4)'}}>
+                <div className="referral-banner-content">
+                  <div className="referral-banner-label"><Icon name="users" size={15} /> YOUR REFERRAL LINK</div>
+                  <div className="referral-banner-title" style={{fontSize: '16px', marginBottom: '12px'}}>Share your link and earn 5% from each friend's first deposit</div>
+                  <div style={{fontSize: '13px', color: '#aaa', marginBottom: '12px'}}>
+                    {referralEarnings > 0
+                      ? `You've earned $${referralEarnings} from referral bonuses (5% of first deposits)`
+                      : 'Example: Friend deposits $2000 → You earn $100 (5%)'}
+                  </div>
+                  {account?.referralCode ? (
+                    <div style={{background: 'rgba(0, 0, 0, 0.5)', padding: '12px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '14px', fontWeight: '600', color: 'var(--gold)', marginBottom: '12px', wordBreak: 'break-all'}}>
+                      {`${window.location.origin}/?ref=${account.referralCode}`}
+                    </div>
+                  ) : (
+                    <p style={{color: '#aaa', fontSize: '13px', marginBottom: '12px'}}>Generate your referral code to start earning...</p>
+                  )}
+                </div>
+                <button
+                  className="copy-button referral-code-example"
+                  style={{cursor: 'pointer', padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '12px'}}
+                  onClick={async () => {
+                    if (!account?.referralCode) {
+                      try {
+                        const result = await requestApi('/api/referrals/code');
+                        setAccount({...account, referralCode: result.code});
+                        setNotice(`Referral code created: ${result.code}`);
+                      } catch (error) {
+                        setNotice(`Error: ${error.message}`);
+                      }
+                    } else {
+                      const link = `${window.location.origin}/?ref=${account.referralCode}`;
+                      navigator.clipboard.writeText(link).then(() => {
+                        setNotice('Referral link copied to clipboard!');
+                      }).catch(() => {
+                        setNotice('Could not copy link. Select and copy manually.');
+                      });
+                    }
+                  }}
+                >
+                  <Icon name="copy" size={14} style={{marginRight: '6px'}} />{account?.referralCode ? 'Copy link' : 'Generate code'}
+                </button>
+              </div>
+              {!referralStatsLoading && referralStats && (
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '30px'}}>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Your tier</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {referralStats.tier || 'Unranked'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Direct referrals</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.directReferrals === 'number' ? referralStats.directReferrals : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Team total (1st-3rd gen)</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.teamTotal === 'number' ? referralStats.teamTotal : 0}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Commission rate</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      {typeof referralStats.commissionRate === 'number' ? `${(referralStats.commissionRate * 100).toFixed(0)}%` : '0%'}
+                    </div>
+                  </article>
+                  <article style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                    <span style={{fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                    <div style={{fontSize: '20px', fontWeight: '700', color: 'var(--gold)', marginTop: '6px'}}>
+                      ${typeof referralStats.totalEarnings === 'number' ? referralStats.totalEarnings.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}
+                    </div>
+                  </article>
+                </div>
+              )}
+
+              {/* ✅ SHOW REFERRED MEMBERS LIST */}
+              {account && (
+                <ReferredMembersList />
+              )}
+
+              <div className="rank-table-wrap">
+                <table className="rank-table">
+                  <thead><tr><th>RANK</th><th>DIRECT REFERRALS</th><th>TEAM TOTAL</th><th>REWARD</th><th>WEEKLY SALARY</th></tr></thead>
+                  <tbody>{ranks.map((rank, index) => (
+                    <tr key={rank.name} style={{background: referralStats?.tier === rank.name ? 'rgba(212, 175, 55, 0.1)' : 'transparent'}}>
+                      <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><strong>{rank.name}</strong></td>
+                      <td>{rank.direct} <span className="table-muted">direct</span></td>
+                      <td>{rank.team === null || rank.team === 0 ? <span className="table-dash">—</span> : rank.team}</td>
+                      <td className="reward-cell">{rank.reward}{rank.name === 'Star 8' && <span className="reward-value"> · $27,000 value</span>}{rank.name === 'Crown Leader' && <span className="reward-value"> · $46,000 value</span>}{rank.name === 'Star 7' && <span className="reward-value"> · $80,000 house</span>}</td>
+                      <td className="salary-cell" style={{color: 'var(--gold)', fontWeight: '600'}}>{rank.weeklySalary ? rank.weeklySalary : '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <p className="team-note">Your current tier is highlighted above. Qualify for higher tiers by meeting BOTH direct referral AND team total requirements. (Star 1 only requires direct referrals.)</p>
+            </div>
+
+            <aside className={`bonus-card ${!isPrimeHourActive ? 'prime-hour-card inactive' : 'prime-hour-card'}`} id="rewards">
+              <div className="bonus-top"><span className="bonus-icon"><Icon name="clock" size={19} /></span><span className={`prime-hour-status ${isPrimeHourActive ? 'active' : 'inactive'}`}><span className="prime-hour-status-dot" /> {isPrimeHourActive ? 'ACTIVE NOW' : 'INACTIVE'}</span></div>
+              <div className="bonus-eyebrow">TIME-LIMITED WINDOW</div>
+              <h3>Prime hour<span>.</span></h3>
+              <div className="bonus-time">3:45 <span>—</span> 4:15 <small>AM</small></div>
+              <p className="bonus-description">{isPrimeHourActive ? 'Prime hour is currently active. Deposits made now are eligible for this bonus.' : 'Prime hour is only active from 3:45 AM to 4:15 AM. Please return during this window to deposit.'}</p>
+              {isPrimeHourActive && (
+                <>
+                  <div className="bonus-details">
+                    <div><span>Minimum deposit</span><strong>$50</strong></div>
+                    <div><span>Stated reward</span><strong className="green-text">$5</strong></div>
+                    <div><span>Withdrawal minimum</span><strong>$50</strong></div>
+                  </div>
+                  <div className="bonus-qualification"><span className="qualification-icon"><Icon name="check" size={13} /></span><span>You should have traded in Ascend for at least 3 days and invite at least 1 person who has invested in Ascend.</span></div>
+                  <button className="bonus-button" onClick={() => openModal('deposit', '50')} disabled={!account}>{account ? 'Make a Prime hour deposit' : 'Sign in first'} <Icon name="arrow" size={15} /></button>
+                </>
+              )}
+            </aside>
+          </section>
+
+          {account && (
+            <section className="weekly-salary-section" style={{marginTop: '40px', padding: '20px', background: 'rgba(212, 175, 55, 0.05)', borderRadius: '8px', border: '2px solid rgba(212, 175, 55, 0.2)'}}>
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow"><span className="eyebrow-line" /> TIER BENEFITS</div>
+                  <h2>Weekly tier salary</h2>
+                  <p className="section-subtitle">Automatic weekly salary based on your current tier. Star 2 and above earn weekly.</p>
+                </div>
+              </div>
+
+              {weeklyLoading ? (
+                <p style={{textAlign: 'center', color: 'var(--text-light)'}}>Loading salary information...</p>
+              ) : weeklyData ? (
+                <>
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '20px'}}>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Current tier</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {weeklyData.tier ? weeklyData.tier : 'Not qualified'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>
+                        Direct: {typeof weeklyData.directCount === 'number' ? weeklyData.directCount : 0} · Team: {typeof weeklyData.teamTotal === 'number' ? weeklyData.teamTotal : 0}
+                      </span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Weekly salary</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        {typeof weeklyData.weeklySalary === 'number' && weeklyData.weeklySalary > 0
+                          ? `$${weeklyData.weeklySalary.toLocaleString('en-US')}`
+                          : 'None'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>Paid every Monday</span>
+                    </article>
+                    <article style={{padding: '16px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '6px', borderLeft: '3px solid var(--gold)'}}>
+                      <span style={{fontSize: '12px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Total earned</span>
+                      <div style={{fontSize: '24px', fontWeight: '700', color: 'var(--gold)', marginTop: '4px'}}>
+                        ${typeof weeklyData.totalEarned === 'number'
+                          ? weeklyData.totalEarned.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                          : '0.00'}
+                      </div>
+                      <span style={{fontSize: '12px', color: '#666', marginTop: '8px', display: 'block'}}>All-time salaries</span>
+                    </article>
+                  </div>
+
+                  {Array.isArray(weeklyData.recentPayments) && weeklyData.recentPayments.length > 0 && (
+                    <div style={{marginTop: '20px'}}>
+                      <h3 style={{fontSize: '16px', marginBottom: '12px', color: 'var(--text-light)'}}>Recent payments</h3>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto'}}>
+                        {weeklyData.recentPayments.map((payment, idx) => (
+                          <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', fontSize: '13px'}}>
+                            <span>{String(payment.week || 'Week')}</span>
+                            <span style={{color: 'var(--gold)', fontWeight: '600'}}>
+                              +${typeof payment.amount === 'number'
+                                ? payment.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                                : '0.00'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!weeklyData.tier && (
+                    <div style={{padding: '16px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '6px', border: '1px solid rgba(212, 175, 55, 0.3)', marginTop: '20px', color: '#aaa', fontSize: '13px'}}>
+                      {weeklyData.message || 'You need to reach Star 2 tier (7 direct referrals or 13 team members) to earn weekly salary.'}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p style={{textAlign: 'center', color: '#666', padding: '20px'}}>Unable to load salary information.</p>
+              )}
+            </section>
+          )}
+
+          <section className="bottom-notice">
+            <span className="notice-icon"><Icon name="wallet" size={16} /></span>
+            <div><strong>Live transaction processing</strong><p>All deposits and withdrawals are real and immediately affect your account balance. Withdrawals require minimum $40 and a valid wallet address. Earnings start the next day at 10:00 AM.</p></div>
+            <button onClick={() => openModal('withdraw')} disabled={!account}>{account ? 'Request withdrawal' : 'Sign in first'} <Icon name="arrow" size={14} /></button>
+          </section>
+
+          <section className="activity-section" aria-live="polite">
+            <div className="activity-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> TRANSACTION HISTORY</div><h2>Recent activity</h2></div><span className="activity-counter">{demoActivity.length} {demoActivity.length === 1 ? 'transaction' : 'transactions'}</span></div>
+            {demoActivity.length === 0
+              ? <p className="activity-empty">Your deposits and withdrawals will appear here.</p>
+              : <div className="activity-list">{demoActivity.map((entry) => <article className="activity-item" key={entry.id}><span className={`activity-type ${entry.type === 'Deposit' ? 'activity-deposit' : 'activity-withdraw'}`}>{entry.type}</span><strong>${entry.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong><span>{entry.createdAt}</span><span className={`activity-status ${entry.status === 'completed' ? 'status-completed' : 'status-pending'}`}>{entry.status.toUpperCase()}</span></article>)}</div>}
+          </section>
+
+          <footer className="page-footer"><span>© 2026 Ascend Capital</span><span><span className="footer-dot" /> Real transactions · Live account tracking</span></footer>
         </div>
       </main>
-    </div>
-  );
-}
 
-export default App;
+      {notice && !modal && <div className="toast" role="status">{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}><Icon name="close" size={15} /></button></div>}
+      {modal && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <button className="modal-close" aria-label="Close dialog" onClick={() => setModal(null)}><Icon name="close" size={18} /></button>
+            <div className="modal-icon"><Icon name={modal === 'withdraw' ? 'withdraw' : 'wallet'} size={20} /></div>
+            <div className="eyebrow"><span className="eyebrow-line" /> REAL TRANSACTION</div>
+            <h2 id="modal-title">{modal === 'withdraw' ? 'Request a withdrawal' : 'Make a deposit'}</h2>
+            <p className="modal-subtitle">This will be processed immediately against your account balance.</p>
+            <form onSubmit={submitShowcaseAction}>
+              <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
+              <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
+              {modal === 'withdraw' ? (
+                <>
+                  <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={
