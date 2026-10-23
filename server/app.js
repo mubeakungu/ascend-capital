@@ -2259,6 +2259,9 @@ export async function createApp() {
         VALUES (${txId}, ${accountId}, 'deposit', ${depositCents}, ${`Manual deposit added on ${refDate}`}, 'approved', ${now})
       `;
 
+      // ✅ APPLY REFERRAL COMMISSION: 5% to referrer + 2.5% bonus to depositor
+      await applyReferralCommission(txId);
+
       // Get updated balance
       const newBalance = await approvedBalanceCents(accountId) / 100;
 
@@ -2448,6 +2451,11 @@ export async function createApp() {
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
         VALUES (${txId}, ${accountId}, ${txType}, ${amountCents}, ${reference}, 'approved', ${now})
       `;
+
+      // ✅ APPLY REFERRAL COMMISSION: Only for deposits (5% to referrer + 2.5% bonus to depositor)
+      if (action === 'add') {
+        await applyReferralCommission(txId);
+      }
 
       // Record audit
       await recordAudit(request, `admin.deposit.${action}`, txId, {
