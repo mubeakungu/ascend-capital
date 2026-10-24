@@ -142,7 +142,8 @@ function transactionView(row, { admin = false } = {}) {
     id: row.id,
     type: typeMap[row.type] || row.type,
     amount: row.amount_cents / 100,
-    reference: row.reference,
+    // ✅ FIX: For deposits show 'reference', for withdrawals show 'destination'
+    reference: row.type === 'withdrawal' ? null : row.reference,
     destination: row.type === 'withdrawal' ? row.reference : null,
     status: row.status,
     createdAt: row.created_at,
@@ -1586,10 +1587,17 @@ export async function createApp() {
     try {
       // Check if claim is within trading hours (1:00 PM - 1:30 PM EAT)
       const now = new Date();
-     const timeInEAT = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit', hour12: false });
-     const [hourStr, minuteStr] = timeInEAT.split(':');
-     const hours = parseInt(hourStr, 10);
-     const minutes = parseInt(minuteStr, 10);
+      const timeInEAT = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit', hour12: false });
+      const [hourStr, minuteStr] = timeInEAT.split(':');
+      const hours = parseInt(hourStr, 10);
+      const minutes = parseInt(minuteStr, 10);
+      const currentMinutes = hours * 60 + minutes;
+      const tradingStart = 13 * 60;  // 1:00 PM = 780 minutes
+      const tradingEnd = 13 * 60 + 30;  // 1:30 PM = 810 minutes
+      const isWithinTradingHours = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
+
+      if (!isWithinTradingHours) {
+        const nextTradingTime = new Date(now);
         if (currentMinutes >= tradingEnd) {
           // Past today's window, set for tomorrow
           nextTradingTime.setDate(nextTradingTime.getDate() + 1);
