@@ -827,7 +827,7 @@ function TransactionApproval() {
                   <tr key={t.id}>
                     <td>{t.accountName}</td>
                     <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.reference?.slice(0, 8) || '—'}</code></td>
+                    <td><code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.reference || '—'}</code></td>
                     <td>
                       <div className="ad-actions-compact">
                         <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
@@ -860,7 +860,7 @@ function TransactionApproval() {
                   <tr key={t.id}>
                     <td>{t.accountName}</td>
                     <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.destination?.slice(0, 8) || '—'}</code></td>
+                    <td><code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.destination || '—'}</code></td>
                     <td>
                       <div className="ad-actions-compact">
                         <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
