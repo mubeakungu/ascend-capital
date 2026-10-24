@@ -1586,15 +1586,10 @@ export async function createApp() {
     try {
       // Check if claim is within trading hours (1:00 PM - 1:30 PM EAT)
       const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const currentMinutes = hours * 60 + minutes;
-      const tradingStart = 13 * 60;  // 1:00 PM = 780 minutes
-      const tradingEnd = 13 * 60 + 30;  // 1:30 PM = 810 minutes
-      const isWithinTradingHours = currentMinutes >= tradingStart && currentMinutes < tradingEnd;
-
-      if (!isWithinTradingHours) {
-        const nextTradingTime = new Date(now);
+     const timeInEAT = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit', hour12: false });
+     const [hourStr, minuteStr] = timeInEAT.split(':');
+     const hours = parseInt(hourStr, 10);
+     const minutes = parseInt(minuteStr, 10);
         if (currentMinutes >= tradingEnd) {
           // Past today's window, set for tomorrow
           nextTradingTime.setDate(nextTradingTime.getDate() + 1);
@@ -1616,7 +1611,7 @@ export async function createApp() {
         });
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleString('en-CA', { timeZone: 'Africa/Nairobi' }).split(' ')[0];
 
       // Check if user has active deposit
       const activeDeposits = await sql`
