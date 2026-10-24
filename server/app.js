@@ -1544,7 +1544,7 @@ export async function createApp() {
 
   app.get('/api/trading/can-claim-today', requireAccount, async (request, response) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+     const today = new Date().toLocaleString('en-CA', { timeZone: 'Africa/Nairobi' }).split(' ')[0];
 
       // Check if user has active deposit
       const activeDeposits = await sql`
