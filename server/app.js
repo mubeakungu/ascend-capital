@@ -143,6 +143,7 @@ function transactionView(row, { admin = false } = {}) {
     type: typeMap[row.type] || row.type,
     amount: row.amount_cents / 100,
     reference: row.reference,
+    destination: row.type === 'withdrawal' ? row.reference : null,
     status: row.status,
     createdAt: row.created_at,
     reviewedAt: row.reviewed_at ?? null,
