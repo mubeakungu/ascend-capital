@@ -3269,6 +3269,68 @@ export async function createApp() {
     });
   });
 
+  // ✅ ADD THIS ENDPOINT TO YOUR app.js
+// Place in ADMIN ENDPOINTS section, after line 3270 (after the /api/admin/referrals/:identifier/referred-members endpoint)
+
+// ✅ NEW: Get all referral relationships overview with tier info (ONE call, no rate limiting!)
+app.get('/api/admin/referrals-overview', adminLimiter, requireAdminSession, async (request, response) => {
+  try {
+    const referrals = await sql`
+      SELECT
+        rs.id,
+        rs.referrer_id,
+        a_referrer.name AS referrer_name,
+        a_referrer.email AS referrer_email,
+        rs.referred_account_id,
+        a_referred.name AS referred_name,
+        a_referred.email AS referred_email,
+        rs.signed_up_at,
+        COALESCE(SUM(CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.amount_cents ELSE 0 END), 0) AS total_deposits_cents,
+        COUNT(DISTINCT CASE WHEN t.type = 'deposit' AND t.status = 'approved' THEN t.id END) AS deposit_count
+      FROM referral_signups rs
+      JOIN accounts a_referrer ON a_referrer.id = rs.referrer_id
+      JOIN accounts a_referred ON a_referred.id = rs.referred_account_id
+      LEFT JOIN transactions t ON t.account_id = rs.referred_account_id AND t.type = 'deposit' AND t.status = 'approved'
+      GROUP BY rs.id, rs.referrer_id, a_referrer.name, a_referrer.email, rs.referred_account_id, a_referred.name, a_referred.email, rs.signed_up_at
+      ORDER BY rs.signed_up_at DESC
+      LIMIT 500
+    `;
+
+    // Enrich with tier info for each referrer
+    const enrichedReferrals = await Promise.all(referrals.map(async (r) => {
+      const directCount = await getDirectReferralCount(sql, r.referrer_id);
+      const teamTotal = await getTeamTotal(sql, r.referrer_id);
+      const tier = getTierByProgress(directCount, teamTotal);
+      const tierName = tier >= 0 ? TIER_NAMES[tier] : 'Unranked';
+
+      return {
+        id: r.id,
+        referrerId: r.referrer_id,
+        referrerName: r.referrer_name,
+        referrerEmail: r.referrer_email,
+        referrerTier: tierName,
+        referrerDirectRefs: directCount,
+        referrerTeamTotal: teamTotal,
+        referredId: r.referred_account_id,
+        referredName: r.referred_name,
+        referredEmail: r.referred_email,
+        signedUpAt: r.signed_up_at,
+        totalDeposits: r.total_deposits_cents / 100,
+        depositCount: r.deposit_count,
+      };
+    }));
+
+    return response.json({
+      ok: true,
+      referrals: enrichedReferrals,
+      total: enrichedReferrals.length,
+    });
+  } catch (error) {
+    console.error('Error fetching referrals overview:', error);
+    return response.status(500).json({ error: 'Failed to fetch referrals overview.' });
+  }
+});
+
 
   // ✅ ADD THIS ENDPOINT TO YOUR app.js
 // Place in ADMIN ENDPOINTS section, after line 3270 (after the /api/admin/referrals/:identifier/referred-members endpoint)
