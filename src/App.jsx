@@ -866,7 +866,7 @@ function App() {
       // ✅ FIXED: Calculate daily income based on ORIGINAL DEPOSIT AMOUNT, not total balance
       // Balance includes earnings/profits, but daily income should match the deposit plan amount
       const depositAmount = result.totalDeposits || 0;
-      const matchingPlan = plans.find((plan) => plan.deposit === depositAmount);
+      const matchingPlan = [...plans].reverse().find((plan) => plan.deposit <= depositAmount);
       const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
       setDailyIncome(dailyIncomeValue);
     } catch (error) {
@@ -1088,7 +1088,7 @@ function App() {
         setLastDepositTime(now.toISOString());
 
         // ✅ UPDATED: Calculate daily income based on deposit amount for manual claiming during 1:00 PM - 1:30 PM EAT
-        const matchingPlan = plans.find((plan) => plan.deposit === value);
+        const matchingPlan = [...plans].reverse().find((plan) => plan.deposit <= value);
         const dailyIncomeValue = matchingPlan ? matchingPlan.dailyIncome : 0;
         setDailyIncome(dailyIncomeValue);
       }
