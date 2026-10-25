@@ -427,69 +427,92 @@ function Dashboard() {
 // ============================================================================
 
 function ReferralsManagement() {
-  const [searchId, setSearchId] = useState('');
-  const [notice, setNotice] = useState(null);
-  const [{ data, error, loading }, reload] = useLoad(
-    () => searchId ? api(`/admin/referrals/${searchId}`) : Promise.resolve(null),
-    [searchId]
-  );
+  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
+  const [referralDetails, setReferralDetails] = useState({});
+  const [loadingDetails, setLoadingDetails] = useState(false);
+
+  const accounts = data?.accounts || [];
+
+  useEffect(() => {
+    if (accounts.length > 0 && Object.keys(referralDetails).length === 0) {
+      loadAllReferralDetails();
+    }
+  }, [accounts]);
+
+  async function loadAllReferralDetails() {
+    setLoadingDetails(true);
+    const details = {};
+    for (const account of accounts) {
+      try {
+        const response = await api(`/admin/referrals/${account.id}`);
+        details[account.id] = response;
+      } catch (err) {
+        details[account.id] = { directReferrals: 0, teamTotal: 0, tier: null, commissions: [] };
+      }
+    }
+    setReferralDetails(details);
+    setLoadingDetails(false);
+  }
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const totalDirectReferrals = accounts.reduce((sum, a) => sum + (referralDetails[a.id]?.directReferrals || 0), 0);
+  const totalTeamMembers = accounts.reduce((sum, a) => sum + (referralDetails[a.id]?.teamTotal || 0), 0);
+  const totalCommissionsEarned = accounts.reduce((sum, a) => {
+    const comms = referralDetails[a.id]?.commissions || [];
+    return sum + comms.reduce((s, c) => s + c.commissionEarned, 0);
+  }, 0);
 
   return (
     <section>
-      <h2>Referral Management</h2>
-      <div className="ad-row ad-search-row">
-        <input
-          placeholder="Search by member ID"
-          value={searchId}
-          onChange={(e) => setSearchId(e.target.value)}
-        />
-        <button className="ad-btn ghost" onClick={reload}>Search</button>
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
+        <h2>Referral Management</h2>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
       </div>
 
-      <Notice notice={notice} />
-      {error && <p className="ad-error">{error}</p>}
+      <div className="ad-grid">
+        <StatCard label="Total Direct Referrals" value={totalDirectReferrals} />
+        <StatCard label="Total Team Members" value={totalTeamMembers} />
+        <StatCard label="Total Commissions Earned" value={money(totalCommissionsEarned)} />
+        <StatCard label="Active Members" value={accounts.length} />
+      </div>
 
-      {searchId && loading ? (
-        <p className="ad-empty">Loading…</p>
-      ) : data ? (
-        <div>
-          <div className="ad-grid">
-            <StatCard label="Direct Referrals" value={data.directReferrals} />
-            <StatCard label="Team Total" value={data.teamTotal} />
-            <StatCard label="Current Tier" value={data.tier || 'None'} />
-            <StatCard label="Commissions" value={data.commissions.length} />
-            <StatCard label="Total Earnings" value={money(data.commissions.reduce((sum, c) => sum + c.commissionEarned, 0))} />
-          </div>
-
-          <h3>Direct Referrals</h3>
-          <div className="ad-scroll">
-            <table className="ad-table">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Email</th>
-                  <th>Rate</th>
-                  <th>Earned</th>
+      <h3>Member Referral Overview</h3>
+      {loadingDetails && <p className="ad-empty">Loading referral details…</p>}
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Direct Refs</th>
+              <th>Team Total</th>
+              <th>Tier</th>
+              <th>Commissions</th>
+              <th>Total Earned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((account) => {
+              const detail = referralDetails[account.id] || {};
+              const totalEarned = (detail.commissions || []).reduce((sum, c) => sum + c.commissionEarned, 0);
+              return (
+                <tr key={account.id}>
+                  <td>{account.name}</td>
+                  <td>{account.email}</td>
+                  <td className="num">{detail.directReferrals || 0}</td>
+                  <td className="num">{detail.teamTotal || 0}</td>
+                  <td><Badge value={detail.tier || 'None'} /></td>
+                  <td className="num">{(detail.commissions || []).length}</td>
+                  <td className="num" style={{ color: 'var(--accent)' }}>{money(totalEarned)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {data.commissions.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.referredName}</td>
-                    <td>{c.referredEmail}</td>
-                    <td>{(c.commissionRate * 100).toFixed(0)}%</td>
-                    <td className="num">{money(c.commissionEarned)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : searchId ? (
-        <p className="ad-empty">No referral data found</p>
-      ) : (
-        <p className="ad-empty">Enter a member ID to search</p>
-      )}
+              );
+            })}
+          </tbody>
+        </table>
+        {accounts.length === 0 && <p className="ad-empty">No members yet</p>}
+      </div>
     </section>
   );
 }
