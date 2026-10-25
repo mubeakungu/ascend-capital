@@ -1205,6 +1205,91 @@ function DepositsManagement() {
 }
 
 // ============================================================================
+// WITHDRAWAL HISTORY
+// ============================================================================
+
+function WithdrawalHistory() {
+  const [{ data, error, loading }, reload] = useLoad(
+    () => api('/admin/transactions?status=approved&type=withdrawal'),
+    []
+  );
+  const [copiedId, setCopiedId] = useState(null);
+
+  async function copyToClipboard(text, txId) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(txId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+  }
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const withdrawals = data?.transactions || [];
+  const totalWithdrawn = withdrawals.reduce((sum, t) => sum + t.amount, 0);
+
+  return (
+    <section>
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
+        <h2>Withdrawal History</h2>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+      </div>
+
+      <div className="ad-grid">
+        <StatCard label="Total Withdrawals" value={withdrawals.length} />
+        <StatCard label="Total Withdrawn" value={money(totalWithdrawn)} />
+      </div>
+
+      <h3>All Approved Withdrawals</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Amount</th>
+              <th>Destination</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {withdrawals.map((t) => (
+              <tr key={t.id}>
+                <td>{t.accountName}</td>
+                <td>{t.accountEmail}</td>
+                <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all', flex: 1 }}>
+                      {t.destination || '—'}
+                    </code>
+                    {t.destination && (
+                      <button
+                        className="ad-btn ghost xs"
+                        onClick={() => copyToClipboard(t.destination, t.id)}
+                        style={{ flex: 0, whiteSpace: 'nowrap' }}
+                        title="Copy address"
+                      >
+                        {copiedId === t.id ? '✓' : '📋'}
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td>{when(t.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {withdrawals.length === 0 && <p className="ad-empty">No withdrawals yet</p>}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================================
 // MEMBER PASSWORD MANAGEMENT
 // ============================================================================
 
@@ -1341,6 +1426,7 @@ export default function AdminDashboard() {
     ['accounts', 'Accounts'],
     ['deposits', 'Deposits'],
     ['transactions', 'Approvals'],
+    ['withdrawals', 'Withdrawals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
     ['prime-hour', 'Prime Hour'],
@@ -1392,6 +1478,7 @@ export default function AdminDashboard() {
           {tab === 'accounts' && <AccountsManagement />}
           {tab === 'deposits' && <DepositsManagement />}
           {tab === 'transactions' && <TransactionApproval />}
+          {tab === 'withdrawals' && <WithdrawalHistory />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
           {tab === 'prime-hour' && <PrimeHourManagement />}
