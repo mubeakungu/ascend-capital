@@ -758,6 +758,17 @@ function TransactionApproval() {
   const [actionType, setActionType] = useState(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  async function copyToClipboard(text, txId) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(txId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+  }
 
   const transactions = data?.transactions || [];
 
@@ -851,7 +862,21 @@ function TransactionApproval() {
                   <tr key={t.id}>
                     <td>{t.accountName}</td>
                     <td className="num" style={{ color: 'var(--bad)' }}>−{money(t.amount)}</td>
-                    <td><code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.destination || '—'}</code></td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all', flex: 1 }}>{t.destination || '—'}</code>
+                        {t.destination && (
+                          <button
+                            className="ad-btn ghost xs"
+                            onClick={() => copyToClipboard(t.destination, t.id)}
+                            style={{ flex: 0, whiteSpace: 'nowrap' }}
+                            title="Copy address"
+                          >
+                            {copiedId === t.id ? '✓' : '📋'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <div className="ad-actions-compact">
                         <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
