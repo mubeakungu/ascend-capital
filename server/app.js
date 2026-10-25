@@ -1990,13 +1990,13 @@ export async function createApp() {
 
     // ✅ FIXED: ALWAYS show daily income based on deposit amount (not dependent on time)
     // The actual CLAIM is restricted by trading hours (1:00 PM - 1:30 PM EAT) in the claim endpoint
-    let dailyIncome = 0;
+       let dailyIncome = 0;
     if (lastDepositTime && totalDeposits > 0) {
-      // Always show the daily profit potential based on their deposit amount
+      // Find the highest plan that deposits qualify for
       const matchingPlan = [...DEPOSIT_PLANS].reverse().find((plan) => plan.deposit <= totalDeposits);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
-
+    
     return response.json({
       // Total wallet balance (deposits + earnings - withdrawals)
       balance: approvedBalance,
