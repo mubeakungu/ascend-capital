@@ -427,42 +427,13 @@ function Dashboard() {
 // ============================================================================
 
 function ReferralsManagement() {
-  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/accounts'), []);
-  const [referralDetails, setReferralDetails] = useState({});
-  const [loadingDetails, setLoadingDetails] = useState(false);
-
-  const accounts = data?.accounts || [];
-
-  useEffect(() => {
-    if (accounts.length > 0 && Object.keys(referralDetails).length === 0) {
-      loadAllReferralDetails();
-    }
-  }, [accounts]);
-
-  async function loadAllReferralDetails() {
-    setLoadingDetails(true);
-    const details = {};
-    for (const account of accounts) {
-      try {
-        const response = await api(`/admin/referrals/${account.id}`);
-        details[account.id] = response;
-      } catch (err) {
-        details[account.id] = { directReferrals: 0, teamTotal: 0, tier: null, commissions: [] };
-      }
-    }
-    setReferralDetails(details);
-    setLoadingDetails(false);
-  }
+  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/referrals-overview'), []);
 
   if (loading && !data) return <p className="ad-empty">Loading…</p>;
   if (error) return <p className="ad-error">{error}</p>;
 
-  const totalDirectReferrals = accounts.reduce((sum, a) => sum + (referralDetails[a.id]?.directReferrals || 0), 0);
-  const totalTeamMembers = accounts.reduce((sum, a) => sum + (referralDetails[a.id]?.teamTotal || 0), 0);
-  const totalCommissionsEarned = accounts.reduce((sum, a) => {
-    const comms = referralDetails[a.id]?.commissions || [];
-    return sum + comms.reduce((s, c) => s + c.commissionEarned, 0);
-  }, 0);
+  const referrals = data?.referrals || [];
+  const totalDeposits = referrals.reduce((sum, r) => sum + (r.totalDeposits || 0), 0);
 
   return (
     <section>
@@ -472,46 +443,37 @@ function ReferralsManagement() {
       </div>
 
       <div className="ad-grid">
-        <StatCard label="Total Direct Referrals" value={totalDirectReferrals} />
-        <StatCard label="Total Team Members" value={totalTeamMembers} />
-        <StatCard label="Total Commissions Earned" value={money(totalCommissionsEarned)} />
-        <StatCard label="Active Members" value={accounts.length} />
+        <StatCard label="Total Referral Relationships" value={referrals.length} />
+        <StatCard label="Total Deposits from Referrals" value={money(totalDeposits)} />
       </div>
 
-      <h3>Member Referral Overview</h3>
-      {loadingDetails && <p className="ad-empty">Loading referral details…</p>}
+      <h3>Referral Relationships</h3>
       <div className="ad-scroll">
         <table className="ad-table">
           <thead>
             <tr>
-              <th>Member</th>
-              <th>Email</th>
-              <th>Direct Refs</th>
-              <th>Team Total</th>
-              <th>Tier</th>
-              <th>Commissions</th>
-              <th>Total Earned</th>
+              <th>Referrer</th>
+              <th>Referrer Email</th>
+              <th>Referred Member</th>
+              <th>Referred Email</th>
+              <th>Deposits</th>
+              <th>Signup Date</th>
             </tr>
           </thead>
           <tbody>
-            {accounts.map((account) => {
-              const detail = referralDetails[account.id] || {};
-              const totalEarned = (detail.commissions || []).reduce((sum, c) => sum + c.commissionEarned, 0);
-              return (
-                <tr key={account.id}>
-                  <td>{account.name}</td>
-                  <td>{account.email}</td>
-                  <td className="num">{detail.directReferrals || 0}</td>
-                  <td className="num">{detail.teamTotal || 0}</td>
-                  <td><Badge value={detail.tier || 'None'} /></td>
-                  <td className="num">{(detail.commissions || []).length}</td>
-                  <td className="num" style={{ color: 'var(--accent)' }}>{money(totalEarned)}</td>
-                </tr>
-              );
-            })}
+            {referrals.map((r) => (
+              <tr key={r.id}>
+                <td>{r.referrerName}</td>
+                <td>{r.referrerEmail}</td>
+                <td>{r.referredName}</td>
+                <td>{r.referredEmail}</td>
+                <td className="num" style={{ color: 'var(--accent)' }}>{money(r.totalDeposits)}</td>
+                <td>{new Date(r.signedUpAt).toLocaleDateString()}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
-        {accounts.length === 0 && <p className="ad-empty">No members yet</p>}
+        {referrals.length === 0 && <p className="ad-empty">No referral relationships yet</p>}
       </div>
     </section>
   );
