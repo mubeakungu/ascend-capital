@@ -1993,7 +1993,7 @@ export async function createApp() {
     let dailyIncome = 0;
     if (lastDepositTime && totalDeposits > 0) {
       // Always show the daily profit potential based on their deposit amount
-      const matchingPlan = DEPOSIT_PLANS.find((plan) => plan.deposit === totalDeposits);
+      const matchingPlan = [...DEPOSIT_PLANS].reverse().find((plan) => plan.deposit <= totalDeposits);
       dailyIncome = matchingPlan ? matchingPlan.dailyProfit : 0;
     }
 
