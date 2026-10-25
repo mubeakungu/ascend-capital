@@ -1029,6 +1029,104 @@ function SettingsManagement({ account }) {
 }
 
 // ============================================================================
+// PRIME HOUR MANAGEMENT
+// ============================================================================
+
+function PrimeHourManagement() {
+  const [{ data, error, loading }, reload] = useLoad(() => api('/admin/prime-hour'), []);
+  const [notice, setNotice] = useState(null);
+
+  if (loading && !data) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const wallets = data?.wallets || [];
+  const transactions = data?.transactions || [];
+  const summary = data?.summary || {};
+
+  return (
+    <section>
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
+        <h2>Prime Hour Management</h2>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+      </div>
+
+      <Notice notice={notice} />
+
+      <div className="ad-grid">
+        <StatCard label="Total Wallets" value={summary.totalWallets || 0} />
+        <StatCard label="Active Wallets" value={summary.totalWalletsActive || 0} />
+        <StatCard label="Total Balance" value={money(summary.totalPrimeBalance || 0)} />
+        <StatCard label="Total Deposits" value={money(summary.totalPrimeDeposits || 0)} />
+        <StatCard label="Total Withdrawals" value={money(summary.totalPrimeWithdrawals || 0)} />
+        <StatCard label="Total Transactions" value={summary.totalTransactions || 0} />
+      </div>
+
+      <h3>Prime Hour Wallets</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Email</th>
+              <th>Balance</th>
+              <th>Deposits</th>
+              <th>Withdrawals</th>
+              <th>Transactions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {wallets.map((w) => (
+              <tr key={w.id}>
+                <td>{w.accountName}</td>
+                <td>{w.accountEmail}</td>
+                <td className="num" style={{ color: 'var(--accent)' }}>{money(w.balance)}</td>
+                <td className="num">{money(w.totalDeposits)}</td>
+                <td className="num">{money(w.totalWithdrawals)}</td>
+                <td className="num">{w.transactionCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {wallets.length === 0 && <p className="ad-empty">No wallets yet</p>}
+      </div>
+
+      <h3>Recent Transactions</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Email</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Reference</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.map((t) => (
+              <tr key={t.id}>
+                <td>{t.accountName}</td>
+                <td>{t.accountEmail}</td>
+                <td><Badge value={t.type} /></td>
+                <td className="num" style={{ color: t.type === 'deposit' ? 'var(--accent)' : 'var(--bad)' }}>
+                  {t.type === 'deposit' ? '+' : '−'}{money(t.amount)}
+                </td>
+                <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.reference || '—'}</code></td>
+                <td><Badge value={t.status} /></td>
+                <td>{when(t.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {transactions.length === 0 && <p className="ad-empty">No transactions yet</p>}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================================
 // DEPOSITS MANAGEMENT
 // ============================================================================
 
@@ -1229,6 +1327,7 @@ export default function AdminDashboard() {
     ['transactions', 'Approvals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
+    ['prime-hour', 'Prime Hour'],
     ['balance', 'Balances'],
     ['passwords', 'Passwords'],
     ['settings', 'Settings'],
@@ -1279,6 +1378,7 @@ export default function AdminDashboard() {
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
+          {tab === 'prime-hour' && <PrimeHourManagement />}
           {tab === 'balance' && <BalanceManagement />}
           {tab === 'passwords' && <MemberPasswordManagement />}
           {tab === 'settings' && <SettingsManagement account={account} />}
