@@ -453,7 +453,10 @@ function ReferralsManagement() {
           <thead>
             <tr>
               <th>Referrer</th>
-              <th>Referrer Email</th>
+              <th>Email</th>
+              <th>Tier</th>
+              <th>Direct</th>
+              <th>Team</th>
               <th>Referred Member</th>
               <th>Referred Email</th>
               <th>Deposits</th>
@@ -465,6 +468,9 @@ function ReferralsManagement() {
               <tr key={r.id}>
                 <td>{r.referrerName}</td>
                 <td>{r.referrerEmail}</td>
+                <td><Badge value={r.referrerTier} /></td>
+                <td className="num">{r.referrerDirectRefs}</td>
+                <td className="num">{r.referrerTeamTotal}</td>
                 <td>{r.referredName}</td>
                 <td>{r.referredEmail}</td>
                 <td className="num" style={{ color: 'var(--accent)' }}>{money(r.totalDeposits)}</td>
