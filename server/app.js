@@ -2387,7 +2387,7 @@ export async function createApp() {
       // Create approved transaction (adds directly to balance)
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'approved', ${now})
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'pending', ${now})
       `;
 
       // Record audit
