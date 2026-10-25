@@ -3403,6 +3403,97 @@ export async function createApp() {
   });
 
   // =========================================================================
+  // PRIME HOUR ADMIN MANAGEMENT ENDPOINT
+  // =========================================================================
+
+  // ✅ NEW: Get Prime Hour wallet data for all users
+  app.get('/api/admin/prime-hour', adminLimiter, requireAdminSession, async (request, response) => {
+    try {
+      // Get all prime hour wallets with balance and activity
+      const wallets = await sql`
+        SELECT
+          phw.id,
+          phw.account_id,
+          a.name AS account_name,
+          a.email AS account_email,
+          phw.balance_cents,
+          phw.created_at,
+          phw.updated_at,
+          COUNT(DISTINCT pht.id) AS transaction_count,
+          COALESCE(SUM(CASE WHEN pht.type = 'deposit' THEN pht.amount_cents ELSE 0 END), 0) AS total_deposits_cents,
+          COALESCE(SUM(CASE WHEN pht.type = 'withdrawal' THEN pht.amount_cents ELSE 0 END), 0) AS total_withdrawals_cents
+        FROM prime_hour_wallets phw
+        JOIN accounts a ON a.id = phw.account_id
+        LEFT JOIN prime_hour_transactions pht ON pht.account_id = phw.account_id
+        GROUP BY phw.id, phw.account_id, a.name, a.email, phw.balance_cents, phw.created_at, phw.updated_at
+        ORDER BY phw.balance_cents DESC
+      `;
+
+      // Get all prime hour transactions
+      const transactions = await sql`
+        SELECT
+          pht.id,
+          pht.account_id,
+          a.name AS account_name,
+          a.email AS account_email,
+          pht.type,
+          pht.amount_cents,
+          pht.reference,
+          pht.status,
+          pht.created_at
+        FROM prime_hour_transactions pht
+        JOIN accounts a ON a.id = pht.account_id
+        ORDER BY pht.created_at DESC
+        LIMIT 500
+      `;
+
+      // Calculate summary stats
+      const totalWalletsActive = wallets.filter(w => w.balance_cents > 0).length;
+      const totalPrimeBalance = wallets.reduce((sum, w) => sum + w.balance_cents, 0);
+      const totalPrimeDeposits = wallets.reduce((sum, w) => sum + w.total_deposits_cents, 0);
+      const totalPrimeWithdrawals = wallets.reduce((sum, w) => sum + w.total_withdrawals_cents, 0);
+
+      return response.json({
+        ok: true,
+        wallets: wallets.map(w => ({
+          id: w.id,
+          accountId: w.account_id,
+          accountName: w.account_name,
+          accountEmail: w.account_email,
+          balance: w.balance_cents / 100,
+          transactionCount: w.transaction_count,
+          totalDeposits: w.total_deposits_cents / 100,
+          totalWithdrawals: w.total_withdrawals_cents / 100,
+          createdAt: w.created_at,
+          updatedAt: w.updated_at,
+        })),
+        transactions: transactions.map(t => ({
+          id: t.id,
+          accountId: t.account_id,
+          accountName: t.account_name,
+          accountEmail: t.account_email,
+          type: t.type,
+          amount: t.amount_cents / 100,
+          reference: t.reference,
+          status: t.status,
+          createdAt: t.created_at,
+        })),
+        summary: {
+          totalWallets: wallets.length,
+          totalWalletsActive: totalWalletsActive,
+          totalPrimeBalance: totalPrimeBalance / 100,
+          totalPrimeDeposits: totalPrimeDeposits / 100,
+          totalPrimeWithdrawals: totalPrimeWithdrawals / 100,
+          totalTransactions: transactions.length,
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching prime hour data:', error);
+      return response.status(500).json({ error: 'Failed to fetch prime hour data.' });
+    }
+  });
+
+  // =========================================================================
   // ERROR HANDLERS - MUST BE LAST
   // =========================================================================
 
