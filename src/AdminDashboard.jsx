@@ -646,147 +646,6 @@ function TradingManagement() {
 }
 
 // ============================================================================
-// REVERSE TRADES MANAGEMENT
-// ============================================================================
-
-function ReverseTradesManagement() {
-  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
-  const [selectedMemberId, setSelectedMemberId] = useState('');
-  const [{ data: tradesData, loading: loadingTrades }, reloadTrades] = useLoad(
-    () => selectedMemberId ? api(`/admin/trading/member/${selectedMemberId}`) : Promise.resolve({ trades: [] }),
-    [selectedMemberId]
-  );
-  const [notice, setNotice] = useState(null);
-  const [reverseId, setReverseId] = useState(null);
-  const [reverseReason, setReverseReason] = useState('');
-  const [busy, setBusy] = useState(false);
-  const members = membersData?.accounts || [];
-  const trades = tradesData?.trades || [];
-
-  async function handleReverseTrade() {
-    if (!reverseId || !reverseReason.trim()) {
-      setNotice({ text: 'Reason required', bad: true });
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await api(`/admin/trading/${reverseId}/reverse`, {
-        method: 'POST',
-        body: { reason: reverseReason },
-      });
-      setNotice({ text: `✓ Trade reversed: ${money(response.profitAmount)} profit deducted from balance` });
-      setReverseId(null);
-      setReverseReason('');
-      reloadTrades();
-      reloadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <h2>Reverse Trades</h2>
-
-      <div className="ad-row" style={{ marginBottom: '16px' }}>
-        <div style={{ flex: 1 }}>
-          <label>Select Member</label>
-          <select
-            value={selectedMemberId}
-            onChange={(e) => {
-              setSelectedMemberId(e.target.value);
-              setNotice(null);
-            }}
-          >
-            <option value="">-- Choose a member --</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-            ))}
-          </select>
-        </div>
-        {selectedMemberId && (
-          <button className="ad-btn ghost" onClick={reloadTrades} style={{ alignSelf: 'flex-end', marginBottom: '0' }}>
-            Refresh
-          </button>
-        )}
-      </div>
-
-      <Notice notice={notice} />
-
-      {selectedMemberId && (
-        <>
-          {loadingTrades ? (
-            <p className="ad-empty">Loading trades…</p>
-          ) : trades.length === 0 ? (
-            <p className="ad-empty">No trades for this member</p>
-          ) : (
-            <>
-              <h3>Member Trades</h3>
-              <div className="ad-scroll">
-                <table className="ad-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Deposit</th>
-                      <th>Profit</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trades.map((t) => (
-                      <tr key={t.id}>
-                        <td>{new Date(t.profitDate).toLocaleString()}</td>
-                        <td className="num">{money(t.depositAmount)}</td>
-                        <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
-                        <td><Badge value={t.status || 'active'} /></td>
-                        <td>
-                          <button
-                            className="ad-btn ghost sm danger"
-                            onClick={() => setReverseId(t.id)}
-                          >
-                            Reverse
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {reverseId && (
-        <div className="ad-overlay" onClick={() => { setReverseId(null); setReverseReason(''); }}>
-          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleReverseTrade(); }}>
-            <h3>Reverse Trade</h3>
-            <p style={{ color: 'var(--muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              This will deduct the profit amount from the member's balance.
-            </p>
-            <label>Reason for Reversal</label>
-            <textarea
-              rows={3}
-              value={reverseReason}
-              onChange={(e) => setReverseReason(e.target.value)}
-              placeholder="e.g., Incorrect profit, Member dispute, Manual correction, etc."
-              required
-              autoFocus
-            />
-            <div className="ad-row end" style={{ marginTop: '16px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => { setReverseId(null); setReverseReason(''); }}>Cancel</button>
-              <button className="ad-btn danger" disabled={busy}>{busy ? 'Reversing…' : 'Confirm Reversal'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
 // BALANCE MANAGEMENT - ✅ FIXED - CAPTURES SERVER RESPONSE
 // ============================================================================
 
@@ -900,6 +759,8 @@ function TransactionApproval() {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [editAmount, setEditAmount] = useState('');
 
   async function copyToClipboard(text, txId) {
     try {
@@ -925,6 +786,28 @@ function TransactionApproval() {
       setActionId(null);
       setActionType(null);
       setReason('');
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  async function handleAdjustDeposit() {
+    if (!editId || !editAmount) return;
+    setBusy(true);
+    try {
+      const amountNum = parseFloat(editAmount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error('Invalid amount');
+      }
+      await api(`/admin/deposits/${editId}/adjust`, {
+        method: 'POST',
+        body: { newAmountCents: Math.round(amountNum * 100) }
+      });
+      setNotice({ text: `Deposit adjusted to $${amountNum.toFixed(2)}` });
+      setEditId(null);
+      setEditAmount('');
       reload();
     } catch (err) {
       setNotice({ text: err.message, bad: true });
@@ -973,6 +856,7 @@ function TransactionApproval() {
                     <td><code style={{ fontSize: '10px', color: 'var(--muted)', wordBreak: 'break-all' }}>{t.reference || '—'}</code></td>
                     <td>
                       <div className="ad-actions-compact">
+                        <button className="ad-btn ghost xs" onClick={() => { setEditId(t.id); setEditAmount(String(t.amount)); }} title="Adjust amount">✎</button>
                         <button className="ad-btn ghost xs" onClick={() => { setActionId(t.id); setActionType('approve'); }}>✓</button>
                         <button className="ad-btn ghost xs danger" onClick={() => { setActionId(t.id); setActionType('reject'); }}>✕</button>
                       </div>
@@ -1036,6 +920,30 @@ function TransactionApproval() {
         <p className="ad-empty">No pending transactions</p>
       )}
 
+      {editId && (
+        <div className="ad-overlay" onClick={() => { setEditId(null); setEditAmount(''); }}>
+          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAdjustDeposit(); }}>
+            <h3>Adjust Deposit Amount</h3>
+            <label>New Amount (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editAmount}
+              onChange={(e) => setEditAmount(e.target.value)}
+              placeholder="0.00"
+              required
+              autoFocus
+            />
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => { setEditId(null); setEditAmount(''); }}>Cancel</button>
+              <button className="ad-btn" disabled={busy}>
+                {busy ? 'Saving…' : 'Update Amount'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {actionId && (
         <div className="ad-overlay" onClick={() => { setActionId(null); setActionType(null); setReason(''); }}>
           <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleAction(); }}>
@@ -1070,6 +978,135 @@ function TransactionApproval() {
 // ============================================================================
 // SETTINGS / PASSWORD CHANGE
 // ============================================================================
+
+function AdminWallet({ account }) {
+  const [{ data: walletData, error, loading }, reload] = useLoad(
+    () => api(`/admin/accounts/${account.id}/activity`),
+    [account.id]
+  );
+  const [action, setAction] = useState('add');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [notice, setNotice] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  if (loading && !walletData) return <p className="ad-empty">Loading…</p>;
+  if (error) return <p className="ad-error">{error}</p>;
+
+  const adminBalance = walletData?.summary?.balance || 0;
+  const deposits = walletData?.transactions?.filter(t => t.type === 'deposit' && t.status === 'approved') || [];
+  const withdrawals = walletData?.transactions?.filter(t => t.type === 'withdrawal' && t.status === 'approved') || [];
+
+  async function handleAdjust(e) {
+    e.preventDefault();
+    if (!amount || !reason) {
+      setNotice({ text: 'Amount and reason required', bad: true });
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+    try {
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error('Invalid amount');
+      }
+
+      const response = await api('/admin/wallet/adjust', {
+        method: 'POST',
+        body: { action, amountCents: Math.round(amountNum * 100), reason }
+      });
+
+      setNotice({ text: response.message });
+      setAmount('');
+      setReason('');
+      reload();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <div className="ad-row" style={{ justifyContent: 'space-between' }}>
+        <h2>Admin Wallet</h2>
+        <button className="ad-btn ghost" onClick={reload}>Refresh</button>
+      </div>
+
+      <div className="ad-grid">
+        <StatCard label="Admin Balance" value={money(adminBalance)} />
+        <StatCard label="Total Credits" value={money(deposits.reduce((sum, t) => sum + t.amount, 0))} />
+        <StatCard label="Total Debits" value={money(withdrawals.reduce((sum, t) => sum + t.amount, 0))} />
+      </div>
+
+      <h3>Adjust Balance</h3>
+      <form className="ad-form" onSubmit={handleAdjust} style={{ maxWidth: '500px' }}>
+        <label>Action</label>
+        <select value={action} onChange={(e) => setAction(e.target.value)}>
+          <option value="add">Add to balance</option>
+          <option value="deduct">Deduct from balance</option>
+          <option value="set">Set balance to</option>
+        </select>
+
+        <label>Amount (USD)</label>
+        <input
+          type="number"
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          required
+          disabled={busy}
+        />
+
+        <label>Reason / Note</label>
+        <textarea
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why are you adjusting this?"
+          required
+          disabled={busy}
+        />
+
+        <Notice notice={notice} />
+        <button className="ad-btn" disabled={busy} style={{ width: '100%' }}>
+          {busy ? 'Processing…' : `${action.charAt(0).toUpperCase() + action.slice(1)} Balance`}
+        </button>
+      </form>
+
+      <h3>Recent Transactions</h3>
+      <div className="ad-scroll">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Reference</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(walletData?.transactions || []).map((t) => (
+              <tr key={t.id}>
+                <td><Badge value={t.type} /></td>
+                <td className="num" style={{ color: t.type === 'deposit' ? 'var(--accent)' : 'var(--bad)' }}>
+                  {t.type === 'deposit' ? '+' : '−'}{money(t.amount)}
+                </td>
+                <td><code style={{ fontSize: '10px', color: 'var(--muted)' }}>{t.reference || '—'}</code></td>
+                <td><Badge value={t.status} /></td>
+                <td>{when(t.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!walletData?.transactions?.length && <p className="ad-empty">No transactions</p>}
+      </div>
+    </section>
+  );
+}
 
 function SettingsManagement({ account }) {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -1346,145 +1383,6 @@ function DepositsManagement() {
 }
 
 // ============================================================================
-// REVERSE DEPOSITS MANAGEMENT
-// ============================================================================
-
-function ReverseDepositsManagement() {
-  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
-  const [selectedMemberId, setSelectedMemberId] = useState('');
-  const [{ data: depositsData, loading: loadingDeposits }, reloadDeposits] = useLoad(
-    () => selectedMemberId ? api(`/admin/deposits/member/${selectedMemberId}`) : Promise.resolve({ deposits: [] }),
-    [selectedMemberId]
-  );
-  const [notice, setNotice] = useState(null);
-  const [reverseId, setReverseId] = useState(null);
-  const [reverseReason, setReverseReason] = useState('');
-  const [busy, setBusy] = useState(false);
-  const members = membersData?.accounts || [];
-  const deposits = depositsData?.deposits || [];
-
-  async function handleReverseDeposit() {
-    if (!reverseId || !reverseReason.trim()) {
-      setNotice({ text: 'Reason required', bad: true });
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await api(`/admin/deposits/${reverseId}/reverse`, {
-        method: 'POST',
-        body: { reason: reverseReason },
-      });
-      setNotice({ text: `✓ Deposit reversed: ${money(response.amount)} deducted from balance` });
-      setReverseId(null);
-      setReverseReason('');
-      reloadDeposits();
-      reloadMembers();
-    } catch (err) {
-      setNotice({ text: err.message, bad: true });
-    }
-    setBusy(false);
-  }
-
-  return (
-    <section>
-      <h2>Reverse Deposits</h2>
-
-      <div className="ad-row" style={{ marginBottom: '16px' }}>
-        <div style={{ flex: 1 }}>
-          <label>Select Member</label>
-          <select
-            value={selectedMemberId}
-            onChange={(e) => {
-              setSelectedMemberId(e.target.value);
-              setNotice(null);
-            }}
-          >
-            <option value="">-- Choose a member --</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-            ))}
-          </select>
-        </div>
-        {selectedMemberId && (
-          <button className="ad-btn ghost" onClick={reloadDeposits} style={{ alignSelf: 'flex-end', marginBottom: '0' }}>
-            Refresh
-          </button>
-        )}
-      </div>
-
-      <Notice notice={notice} />
-
-      {selectedMemberId && (
-        <>
-          {loadingDeposits ? (
-            <p className="ad-empty">Loading deposits…</p>
-          ) : deposits.length === 0 ? (
-            <p className="ad-empty">No deposits for this member</p>
-          ) : (
-            <>
-              <h3>Recent Deposits</h3>
-              <div className="ad-scroll">
-                <table className="ad-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deposits.map((d) => (
-                      <tr key={d.id}>
-                        <td>{new Date(d.createdAt).toLocaleString()}</td>
-                        <td className="num" style={{ color: 'var(--accent)' }}>+{money(d.amount)}</td>
-                        <td><Badge value={d.status} /></td>
-                        <td>
-                          <button
-                            className="ad-btn ghost sm danger"
-                            onClick={() => setReverseId(d.id)}
-                          >
-                            Reverse
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {reverseId && (
-        <div className="ad-overlay" onClick={() => { setReverseId(null); setReverseReason(''); }}>
-          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleReverseDeposit(); }}>
-            <h3>Reverse Deposit</h3>
-            <p style={{ color: 'var(--muted)', fontSize: '13px', margin: '0 0 12px' }}>
-              This will deduct the deposit amount from the member's balance.
-            </p>
-            <label>Reason for Reversal</label>
-            <textarea
-              rows={3}
-              value={reverseReason}
-              onChange={(e) => setReverseReason(e.target.value)}
-              placeholder="e.g., Duplicate deposit, Member request, etc."
-              required
-              autoFocus
-            />
-            <div className="ad-row end" style={{ marginTop: '16px' }}>
-              <button type="button" className="ad-btn ghost" onClick={() => { setReverseId(null); setReverseReason(''); }}>Cancel</button>
-              <button className="ad-btn danger" disabled={busy}>{busy ? 'Reversing…' : 'Confirm Reversal'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ============================================================================
 // WITHDRAWAL HISTORY
 // ============================================================================
 
@@ -1705,14 +1603,13 @@ export default function AdminDashboard() {
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
     ['deposits', 'Deposits'],
-    ['reverse-deposits', 'Reverse Deposits'],
     ['transactions', 'Approvals'],
     ['withdrawals', 'Withdrawals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
-    ['reverse-trades', 'Reverse Trades'],
     ['prime-hour', 'Prime Hour'],
     ['balance', 'Balances'],
+    ['wallet', 'Admin Wallet'],
     ['passwords', 'Passwords'],
     ['settings', 'Settings'],
   ];
@@ -1759,14 +1656,13 @@ export default function AdminDashboard() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
           {tab === 'deposits' && <DepositsManagement />}
-          {tab === 'reverse-deposits' && <ReverseDepositsManagement />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'withdrawals' && <WithdrawalHistory />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
-          {tab === 'reverse-trades' && <ReverseTradesManagement />}
           {tab === 'prime-hour' && <PrimeHourManagement />}
           {tab === 'balance' && <BalanceManagement />}
+          {tab === 'wallet' && <AdminWallet account={account} />}
           {tab === 'passwords' && <MemberPasswordManagement />}
           {tab === 'settings' && <SettingsManagement account={account} />}
         </main>
