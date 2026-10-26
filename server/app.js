@@ -2439,7 +2439,7 @@ export async function createApp({ databasePath } = {}) {
       // Create approved transaction (adds directly to balance)
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'pending', ${now})
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'approved', ${now})
       `;
 
       // Record audit
@@ -3565,9 +3565,17 @@ app.post('/api/admin/deposits/add', adminLimiter, requireAdminSession, async (re
       depositDate,
     });
 
+    // Calculate daily trading profit from nearest deposit plan
+    const dailyProfit = getDailyProfitForDeposit(amountCents);
+
     return response.status(201).json({
       message: `Added deposit of $${depositAmount} to member account`,
       transactionId: id,
+      tradingProfitInfo: {
+        dailyProfitAmount: dailyProfit,
+        claimingMethod: 'Manual - member must claim daily via /api/trading/claim-daily-trade during 1:00-1:30 PM EAT',
+        depositTierMatched: dailyProfit > 0 ? `$${dailyProfit}/day` : 'No matching tier',
+      },
     });
   } catch (error) {
     return next(error);
