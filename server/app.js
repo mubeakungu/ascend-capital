@@ -3444,6 +3444,282 @@ app.get('/api/admin/referrals-overview', adminLimiter, requireAdminSession, asyn
     });
   });
 
+  // =========================================================================
+// ADMIN DEPOSIT MANAGEMENT ENDPOINTS
+// =========================================================================
+
+// ✅ GET: Fetch all deposits for a member
+app.get('/api/admin/deposits/member/:memberId', adminLimiter, requireAdminSession, async (request, response) => {
+  try {
+    const { memberId } = request.params;
+
+    const deposits = await sql`
+      SELECT
+        id,
+        amount_cents,
+        reference,
+        status,
+        created_at
+      FROM transactions
+      WHERE account_id = ${memberId} AND type = 'deposit'
+      ORDER BY created_at DESC
+      LIMIT 50
+    `;
+
+    return response.json({
+      deposits: deposits.map(d => ({
+        id: d.id,
+        amount: d.amount_cents / 100,
+        reference: d.reference,
+        status: d.status,
+        createdAt: d.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching member deposits:', error);
+    return response.status(500).json({ error: 'Failed to fetch deposits' });
+  }
+});
+
+// ✅ POST: Add new deposit for a member
+app.post('/api/admin/deposits/add', adminLimiter, requireAdminSession, async (request, response, next) => {
+  try {
+    const { accountId, depositAmount, depositDate } = request.body ?? {};
+
+    if (!accountId || typeof accountId !== 'string') {
+      return response.status(400).json({ error: 'Account ID required' });
+    }
+
+    const amountCents = parseAmountCents(depositAmount);
+    if (amountCents === null) {
+      return response.status(400).json({ error: 'Enter a valid amount' });
+    }
+
+    // Validate date
+    if (!depositDate || !/^\d{4}-\d{2}-\d{2}$/.test(depositDate)) {
+      return response.status(400).json({ error: 'Valid deposit date required (YYYY-MM-DD)' });
+    }
+
+    const id = randomBytes(16).toString('hex');
+    const now = new Date().toISOString();
+
+    await sql`
+      INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+      VALUES (${id}, ${accountId}, 'deposit', ${amountCents}, ${'Admin added deposit'}, 'approved', ${now})
+    `;
+
+    await recordAudit(request, 'admin.deposit_added', accountId, {
+      amount: depositAmount,
+      depositDate,
+    });
+
+    return response.status(201).json({
+      message: `Added deposit of $${depositAmount} to member account`,
+      transactionId: id,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ✅ POST: Deduct deposit amount from member balance
+app.post('/api/admin/deposits/deduct', adminLimiter, requireAdminSession, async (request, response, next) => {
+  try {
+    const { accountId, depositAmount, reason } = request.body ?? {};
+
+    // Validate inputs
+    if (!accountId || typeof accountId !== 'string') {
+      return response.status(400).json({ error: 'Account ID required' });
+    }
+
+    const amountCents = parseAmountCents(depositAmount);
+    if (amountCents === null) {
+      return response.status(400).json({ error: 'Enter a valid amount' });
+    }
+
+    const deductReason = cleanText(reason, { min: 3, max: 200 });
+    if (deductReason === null) {
+      return response.status(400).json({ error: 'Reason required (3-200 characters)' });
+    }
+
+    // Get current balance
+    const currentBalance = await approvedBalanceCents(accountId);
+
+    if (amountCents > currentBalance) {
+      return response.status(409).json({ error: 'Insufficient balance for deduction' });
+    }
+
+    // Create deduction as withdrawal
+    const id = randomBytes(16).toString('hex');
+    const now = new Date().toISOString();
+
+    await sql`
+      INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+      VALUES (${id}, ${accountId}, 'withdrawal', ${amountCents}, ${'[Admin] ' + deductReason}, 'approved', ${now})
+    `;
+
+    const newBalance = currentBalance - amountCents;
+
+    await recordAudit(request, 'admin.deposit_deduction', accountId, {
+      amountDeducted: depositAmount,
+      reason: deductReason,
+      previousBalance: currentBalance / 100,
+      newBalance: newBalance / 100,
+    });
+
+    return response.status(201).json({
+      ok: true,
+      message: `Deducted $${depositAmount} from member's balance`,
+      amountDeducted: depositAmount,
+      previousBalance: currentBalance / 100,
+      newBalance: newBalance / 100,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ✅ POST: Reverse a specific deposit
+app.post('/api/admin/deposits/:depositId/reverse', adminLimiter, requireAdminSession, async (request, response, next) => {
+  try {
+    const { depositId } = request.params;
+    const { reason } = request.body ?? {};
+
+    const reverseReason = cleanText(reason, { min: 3, max: 200 });
+    if (reverseReason === null) {
+      return response.status(400).json({ error: 'Reason required (3-200 characters)' });
+    }
+
+    // Get the deposit transaction
+    const deposit = await sql`
+      SELECT id, account_id, amount_cents, status FROM transactions
+      WHERE id = ${depositId} AND type = 'deposit'
+    `;
+
+    if (deposit.length === 0) {
+      return response.status(404).json({ error: 'Deposit not found' });
+    }
+
+    const dep = deposit[0];
+    const accountId = dep.account_id;
+    const amount = dep.amount_cents;
+
+    // Create reversal transaction (as withdrawal)
+    const reversalId = randomBytes(16).toString('hex');
+    const now = new Date().toISOString();
+
+    await sql`
+      INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+      VALUES (${reversalId}, ${accountId}, 'withdrawal', ${amount}, ${'Reversal: ' + reverseReason}, 'approved', ${now})
+    `;
+
+    await recordAudit(request, 'admin.deposit_reversal', accountId, {
+      originalDepositId: depositId,
+      amountReversed: amount / 100,
+      reason: reverseReason,
+    });
+
+    return response.status(201).json({
+      ok: true,
+      message: `Deposit reversed: $${amount / 100} deducted from balance`,
+      amount: amount / 100,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// =========================================================================
+// ADMIN TRADING MANAGEMENT ENDPOINTS
+// =========================================================================
+
+// ✅ GET: Fetch all trades for a member
+app.get('/api/admin/trading/member/:memberId', adminLimiter, requireAdminSession, async (request, response) => {
+  try {
+    const { memberId } = request.params;
+
+    const trades = await sql`
+      SELECT
+        tl.id,
+        tl.profit_cents,
+        tl.profit_date,
+        tl.created_at,
+        t.amount_cents AS deposit_amount,
+        t.status
+      FROM trading_ledger tl
+      JOIN transactions t ON t.id = tl.deposit_transaction_id
+      WHERE tl.account_id = ${memberId}
+      ORDER BY tl.profit_date DESC
+      LIMIT 100
+    `;
+
+    return response.json({
+      trades: trades.map(t => ({
+        id: t.id,
+        depositAmount: t.deposit_amount / 100,
+        profitAmount: t.profit_cents / 100,
+        profitDate: t.profit_date,
+        status: t.status || 'active',
+        createdAt: t.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching member trades:', error);
+    return response.status(500).json({ error: 'Failed to fetch trades' });
+  }
+});
+
+// ✅ POST: Reverse a specific trade
+app.post('/api/admin/trading/:tradeId/reverse', adminLimiter, requireAdminSession, async (request, response, next) => {
+  try {
+    const { tradeId } = request.params;
+    const { reason } = request.body ?? {};
+
+    const reverseReason = cleanText(reason, { min: 3, max: 200 });
+    if (reverseReason === null) {
+      return response.status(400).json({ error: 'Reason required (3-200 characters)' });
+    }
+
+    // Get the trade
+    const trade = await sql`
+      SELECT tl.id, tl.account_id, tl.profit_cents
+      FROM trading_ledger tl
+      WHERE tl.id = ${tradeId}
+    `;
+
+    if (trade.length === 0) {
+      return response.status(404).json({ error: 'Trade not found' });
+    }
+
+    const t = trade[0];
+    const accountId = t.account_id;
+    const profitAmount = t.profit_cents;
+
+    // Create reversal transaction (as withdrawal of profit)
+    const reversalId = randomBytes(16).toString('hex');
+    const now = new Date().toISOString();
+
+    await sql`
+      INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
+      VALUES (${reversalId}, ${accountId}, 'withdrawal', ${profitAmount}, ${'Trade reversal: ' + reverseReason}, 'approved', ${now})
+    `;
+
+    await recordAudit(request, 'admin.trade_reversal', accountId, {
+      tradeId: tradeId,
+      profitReversed: profitAmount / 100,
+      reason: reverseReason,
+    });
+
+    return response.status(201).json({
+      ok: true,
+      message: `Trade reversed: $${profitAmount / 100} profit deducted from balance`,
+      profitAmount: profitAmount / 100,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
   app.post('/api/admin/trading/apply-profits', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       await applyDailyTradingProfits();
