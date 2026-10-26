@@ -1919,6 +1919,13 @@ function App() {
               <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
               <h1>{account ? `${timeGreeting}, ${account.name.split(/\s+/)[0]}` : `${timeGreeting}`}<span className="title-period">.</span></h1>
               <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
+              <div className="header-wallet">
+                <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
+                <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
+                <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy prime wallet address">
+                  <Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
             </div>
             <button className="date-chip"><span className="date-dot" /> Member overview</button>
           </section>
@@ -2328,10 +2335,12 @@ function App() {
             <form onSubmit={submitShowcaseAction}>
               <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
               <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
-              {modal === 'withdraw' && (
+              {modal === 'withdraw' ? (
                 <>
                   <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} /></label>
                 </>
+              ) : (
+                <input type="hidden" />
               )}
               {notice && <div className="modal-message" role="alert">{notice}</div>}
               <button className="button button-primary modal-submit" type="submit" disabled={transactionLoading}>{transactionLoading ? 'Processing...' : (modal === 'withdraw' ? 'Request withdrawal' : 'Make deposit')} <Icon name="arrow" size={15} /></button>
