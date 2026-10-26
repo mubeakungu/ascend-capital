@@ -646,6 +646,147 @@ function TradingManagement() {
 }
 
 // ============================================================================
+// REVERSE TRADES MANAGEMENT
+// ============================================================================
+
+function ReverseTradesManagement() {
+  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [{ data: tradesData, loading: loadingTrades }, reloadTrades] = useLoad(
+    () => selectedMemberId ? api(`/admin/trading/member/${selectedMemberId}`) : Promise.resolve({ trades: [] }),
+    [selectedMemberId]
+  );
+  const [notice, setNotice] = useState(null);
+  const [reverseId, setReverseId] = useState(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const members = membersData?.accounts || [];
+  const trades = tradesData?.trades || [];
+
+  async function handleReverseTrade() {
+    if (!reverseId || !reverseReason.trim()) {
+      setNotice({ text: 'Reason required', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api(`/admin/trading/${reverseId}/reverse`, {
+        method: 'POST',
+        body: { reason: reverseReason },
+      });
+      setNotice({ text: `✓ Trade reversed: ${money(response.profitAmount)} profit deducted from balance` });
+      setReverseId(null);
+      setReverseReason('');
+      reloadTrades();
+      reloadMembers();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <h2>Reverse Trades</h2>
+
+      <div className="ad-row" style={{ marginBottom: '16px' }}>
+        <div style={{ flex: 1 }}>
+          <label>Select Member</label>
+          <select
+            value={selectedMemberId}
+            onChange={(e) => {
+              setSelectedMemberId(e.target.value);
+              setNotice(null);
+            }}
+          >
+            <option value="">-- Choose a member --</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+            ))}
+          </select>
+        </div>
+        {selectedMemberId && (
+          <button className="ad-btn ghost" onClick={reloadTrades} style={{ alignSelf: 'flex-end', marginBottom: '0' }}>
+            Refresh
+          </button>
+        )}
+      </div>
+
+      <Notice notice={notice} />
+
+      {selectedMemberId && (
+        <>
+          {loadingTrades ? (
+            <p className="ad-empty">Loading trades…</p>
+          ) : trades.length === 0 ? (
+            <p className="ad-empty">No trades for this member</p>
+          ) : (
+            <>
+              <h3>Member Trades</h3>
+              <div className="ad-scroll">
+                <table className="ad-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Deposit</th>
+                      <th>Profit</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trades.map((t) => (
+                      <tr key={t.id}>
+                        <td>{new Date(t.profitDate).toLocaleString()}</td>
+                        <td className="num">{money(t.depositAmount)}</td>
+                        <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
+                        <td><Badge value={t.status || 'active'} /></td>
+                        <td>
+                          <button
+                            className="ad-btn ghost sm danger"
+                            onClick={() => setReverseId(t.id)}
+                          >
+                            Reverse
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {reverseId && (
+        <div className="ad-overlay" onClick={() => { setReverseId(null); setReverseReason(''); }}>
+          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleReverseTrade(); }}>
+            <h3>Reverse Trade</h3>
+            <p style={{ color: 'var(--muted)', fontSize: '13px', margin: '0 0 12px' }}>
+              This will deduct the profit amount from the member's balance.
+            </p>
+            <label>Reason for Reversal</label>
+            <textarea
+              rows={3}
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="e.g., Incorrect profit, Member dispute, Manual correction, etc."
+              required
+              autoFocus
+            />
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => { setReverseId(null); setReverseReason(''); }}>Cancel</button>
+              <button className="ad-btn danger" disabled={busy}>{busy ? 'Reversing…' : 'Confirm Reversal'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
 // BALANCE MANAGEMENT - ✅ FIXED - CAPTURES SERVER RESPONSE
 // ============================================================================
 
@@ -1299,16 +1440,12 @@ function ReverseDepositsManagement() {
                         <td className="num" style={{ color: 'var(--accent)' }}>+{money(d.amount)}</td>
                         <td><Badge value={d.status} /></td>
                         <td>
-                          {d.status === 'approved' ? (
-                            <button
-                              className="ad-btn ghost sm danger"
-                              onClick={() => setReverseId(d.id)}
-                            >
-                              Reverse
-                            </button>
-                          ) : (
-                            <span className="ad-muted" style={{ fontSize: '12px' }}>Cannot reverse</span>
-                          )}
+                          <button
+                            className="ad-btn ghost sm danger"
+                            onClick={() => setReverseId(d.id)}
+                          >
+                            Reverse
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1573,6 +1710,7 @@ export default function AdminDashboard() {
     ['withdrawals', 'Withdrawals'],
     ['referrals', 'Referrals'],
     ['trading', 'Trading'],
+    ['reverse-trades', 'Reverse Trades'],
     ['prime-hour', 'Prime Hour'],
     ['balance', 'Balances'],
     ['passwords', 'Passwords'],
@@ -1626,6 +1764,7 @@ export default function AdminDashboard() {
           {tab === 'withdrawals' && <WithdrawalHistory />}
           {tab === 'referrals' && <ReferralsManagement />}
           {tab === 'trading' && <TradingManagement />}
+          {tab === 'reverse-trades' && <ReverseTradesManagement />}
           {tab === 'prime-hour' && <PrimeHourManagement />}
           {tab === 'balance' && <BalanceManagement />}
           {tab === 'passwords' && <MemberPasswordManagement />}
