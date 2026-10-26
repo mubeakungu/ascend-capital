@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import postgres from 'postgres';
 import express from 'express';
 import nodemailer from 'nodemailer';
+import { DatabaseSync } from 'node:sqlite';
 import {
   initializeTierRewardsTable,
   checkAndCreditTierReward,
@@ -89,19 +90,27 @@ const TIER_REQUIREMENTS_DETAILED = [
 ];
 
 // Email configuration
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD;
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'your-email@gmail.com',
-    pass: process.env.EMAIL_PASSWORD || 'your-app-password',
+    user: EMAIL_USER,
+    pass: EMAIL_PASSWORD,
   },
 });
 
+if (!EMAIL_USER || !EMAIL_PASSWORD) {
+  console.warn('⚠️  Email credentials not configured. Password reset functionality will not work.');
+  console.warn('   Set EMAIL_USER and EMAIL_PASSWORD environment variables to enable email features.');
+}
+
 // Function to send password reset email
-async function sendPasswordResetEmail(email, resetToken) {
-  const resetLink = `https://ascend-capital.onrender.com/reset-password?token=${resetToken}`;
+async function sendPasswordResetEmail(email, resetToken, baseUrl) {
+  const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
   const mailOptions = {
-    from: process.env.EMAIL_USER || 'noreply@ascendcapital.com',
+    from: EMAIL_USER || 'noreply@ascendcapital.com',
     to: email,
     subject: 'Ascend Capital - Password Reset Request',
     html: `
@@ -113,7 +122,7 @@ async function sendPasswordResetEmail(email, resetToken) {
       <p>If you didn't request this, please ignore this email.</p>
     `,
   };
-  
+
   return transporter.sendMail(mailOptions);
 }
 
@@ -360,8 +369,43 @@ async function findAccountByIdentifier(sql, identifier) {
   return account.length > 0 ? account[0] : null;
 }
 
-export async function createApp() {
-  const sql = postgres(process.env.DATABASE_URL);
+function createSqliteWrapper(db) {
+  return function sql(strings, ...values) {
+    let query = strings[0];
+    for (let i = 0; i < values.length; i++) {
+      query += '?' + strings[i + 1];
+    }
+
+    return Promise.resolve().then(() => {
+      const stmt = db.prepare(query);
+      const result = stmt.all(...values);
+      return result || [];
+    });
+  };
+}
+
+function createSqliteConnection(databasePath) {
+  const db = new DatabaseSync(databasePath);
+  try {
+    db.exec('PRAGMA journal_mode = WAL');
+  } catch {
+    // Ignore pragma errors, WAL is optional
+  }
+
+  const sql = createSqliteWrapper(db);
+  sql.end = () => db.close();
+
+  return sql;
+}
+
+export async function createApp({ databasePath } = {}) {
+  let sql;
+
+  if (databasePath) {
+    sql = createSqliteConnection(databasePath);
+  } else {
+    sql = postgres(process.env.DATABASE_URL);
+  }
 
   // Initialize tables
   await sql`
@@ -1106,14 +1150,19 @@ export async function createApp() {
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
       await sql`
-        UPDATE accounts 
+        UPDATE accounts
         SET password_reset_token = ${resetTokenHash}, password_reset_expires = ${expiresAt}
         WHERE id = ${accountId}
       `;
 
+      // Build base URL from request
+      const protocol = request.get('x-forwarded-proto') || request.protocol || 'https';
+      const host = request.get('x-forwarded-host') || request.get('host') || 'ascend-capital.onrender.com';
+      const baseUrl = `${protocol}://${host}`;
+
       // Send email with reset link
-      await sendPasswordResetEmail(email, resetToken);
-      
+      await sendPasswordResetEmail(email, resetToken, baseUrl);
+
       return response.status(200).json({ message: 'Password reset link sent to email' });
     } catch (err) {
       console.error('Forgot password error:', err);
