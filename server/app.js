@@ -1698,9 +1698,13 @@ export async function createApp({ databasePath } = {}) {
       for (const deposit of activeDeposits) {
         const dailyProfit = getDailyProfitForDeposit(deposit.amount_cents);
         if (dailyProfit > 0) {
-          totalProfitCents += Math.round(dailyProfit * 100);
+          const profitCentsForDeposit = Math.round(dailyProfit * 100);
+          totalProfitCents += profitCentsForDeposit;
+          console.log(`[Claim] Deposit: ${deposit.amount_cents} cents → Daily profit: ${dailyProfit} → Cents: ${profitCentsForDeposit}`);
         }
       }
+
+      console.log(`[Claim] Total profit to claim: ${totalProfitCents} cents ($${(totalProfitCents / 100).toFixed(2)})`);
 
       if (totalProfitCents <= 0) {
         return response.status(409).json({ error: 'No profit available to claim.' });
@@ -1712,16 +1716,26 @@ export async function createApp({ databasePath } = {}) {
       const now_iso = new Date().toISOString();
 
       // Insert into trading_ledger
+      console.log(`[Claim] Inserting into trading_ledger: ledgerId=${ledgerId}, account=${request.account.id}, profit=${totalProfitCents}, date=${today}`);
       await sql`
         INSERT INTO trading_ledger (id, account_id, deposit_transaction_id, profit_cents, profit_date, created_at)
         VALUES (${ledgerId}, ${request.account.id}, ${activeDeposits[0].id}, ${totalProfitCents}, ${today}, ${now_iso})
       `;
+      console.log(`[Claim] ✓ trading_ledger insert successful`);
+
+      // Validate transaction amount before insert
+      if (!Number.isInteger(totalProfitCents) || totalProfitCents <= 0) {
+        console.error('Invalid profit amount for transaction:', { totalProfitCents, type: typeof totalProfitCents });
+        throw new Error(`Invalid profit amount: ${totalProfitCents} cents. Must be positive integer.`);
+      }
 
       // Insert into transactions with APPROVED status immediately
+      console.log(`[Claim] Inserting into transactions: txId=${txId}, account=${request.account.id}, amount=${totalProfitCents}`);
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
         VALUES (${txId}, ${request.account.id}, 'trading_profit', ${totalProfitCents}, ${'Manual daily trade claim from ' + today}, 'approved', ${now_iso})
       `;
+      console.log(`[Claim] ✓ transactions insert successful`);
 
       // Record audit
       await recordAudit(request, 'trading.claim_daily_trade', ledgerId, {
@@ -2439,7 +2453,7 @@ export async function createApp({ databasePath } = {}) {
       // Create approved transaction (adds directly to balance)
       await sql`
         INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
-        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'pending', ${now})
+        VALUES (${txId}, ${accountId}, 'trading_profit', ${profitCents}, ${`Manual trade added on ${profitDate}`}, 'approved', ${now})
       `;
 
       // Record audit
@@ -3565,9 +3579,17 @@ app.post('/api/admin/deposits/add', adminLimiter, requireAdminSession, async (re
       depositDate,
     });
 
+    // Calculate daily trading profit from nearest deposit plan
+    const dailyProfit = getDailyProfitForDeposit(amountCents);
+
     return response.status(201).json({
       message: `Added deposit of $${depositAmount} to member account`,
       transactionId: id,
+      tradingProfitInfo: {
+        dailyProfitAmount: dailyProfit,
+        claimingMethod: 'Manual - member must claim daily via /api/trading/claim-daily-trade during 1:00-1:30 PM EAT',
+        depositTierMatched: dailyProfit > 0 ? `$${dailyProfit}/day` : 'No matching tier',
+      },
     });
   } catch (error) {
     return next(error);
