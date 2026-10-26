@@ -76,7 +76,7 @@ function getTimeGreeting() {
 
 function maskAddress(address) {
   if (!address || address.length < 12) return address;
-  return address.slice(0, 4) + '•'.repeat(address.length - 8) + address.slice(-4);
+  return '•'.repeat(address.length);
 }
 
 function Icon({ name, size = 18 }) {
