@@ -2326,11 +2326,54 @@ function App() {
             <h2 id="modal-title">{modal === 'withdraw' ? 'Request a withdrawal' : 'Make a deposit'}</h2>
             <p className="modal-subtitle">This will be processed immediately against your account balance.</p>
             <form onSubmit={submitShowcaseAction}>
-              <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
-              <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
-              {modal === 'withdraw' && (
+              {modal === 'withdraw' ? (
                 <>
+                  <label className="amount-label" htmlFor="showcase-amount">Withdrawal amount</label>
+                  <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min="40" step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
                   <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} /></label>
+                </>
+              ) : (
+                <>
+                  <label className="amount-label">Select a deposit plan</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', margin: '16px 0' }}>
+                    {plans.map((plan) => (
+                      <button
+                        key={plan.deposit}
+                        type="button"
+                        onClick={() => { setAmount(String(plan.deposit)); setDestination(''); setNotice(''); }}
+                        disabled={transactionLoading}
+                        style={{
+                          padding: '12px',
+                          border: amount === String(plan.deposit) ? '2px solid #D4AF37' : '2px solid rgba(212, 175, 55, 0.3)',
+                          background: amount === String(plan.deposit) ? 'rgba(212, 175, 55, 0.15)' : 'rgba(212, 175, 55, 0.05)',
+                          borderRadius: '6px',
+                          cursor: transactionLoading ? 'not-allowed' : 'pointer',
+                          color: 'var(--text-light)',
+                          fontSize: '13px',
+                          fontWeight: amount === String(plan.deposit) ? '600' : '500',
+                          transition: 'all 0.2s ease',
+                          opacity: transactionLoading ? 0.6 : 1,
+                        }}
+                        onMouseEnter={(e) => !transactionLoading && (e.target.style.background = 'rgba(212, 175, 55, 0.15)')}
+                        onMouseLeave={(e) => !transactionLoading && (e.target.style.background = amount === String(plan.deposit) ? 'rgba(212, 175, 55, 0.15)' : 'rgba(212, 175, 55, 0.05)')}
+                      >
+                        <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '4px' }}>${plan.deposit}</div>
+                        <div style={{ fontSize: '11px', color: '#aaa' }}>Daily: ${plan.dailyIncome}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {amount && (
+                    <>
+                      <div style={{ textAlign: 'center', fontSize: '12px', color: '#D4AF37', marginBottom: '16px' }}>Selected: ${amount}</div>
+                      <div style={{ background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '6px', padding: '12px', marginBottom: '16px', fontSize: '12px' }}>
+                        <div style={{ color: '#D4AF37', fontWeight: '600', marginBottom: '8px' }}>📤 Send crypto to this address:</div>
+                        <code style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', display: 'block', wordBreak: 'break-all', marginBottom: '8px', color: '#aaa', fontSize: '11px' }}>{binanceWalletAddress || 'Loading...'}</code>
+                        <div style={{ color: '#aaa', fontSize: '11px', marginBottom: '6px' }}>Reference/Memo (include in transfer):</div>
+                        <code style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', display: 'block', color: '#D4AF37', fontWeight: '600' }}>{destination || 'Enter your Binance address'}</code>
+                      </div>
+                      <label className="account-field showcase-field">Your Binance Address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} placeholder="Your receiving address" /></label>
+                    </>
+                  )}
                 </>
               )}
               {notice && <div className="modal-message" role="alert">{notice}</div>}
