@@ -1919,13 +1919,6 @@ function App() {
               <div className="eyebrow"><span className="eyebrow-line" /> MEMBER DASHBOARD</div>
               <h1>{account ? `${timeGreeting}, ${account.name.split(/\s+/)[0]}` : `${timeGreeting}`}<span className="title-period">.</span></h1>
               <p className="welcome-subtitle">Here's your Ascend Capital account at a glance.</p>
-              <div className="header-wallet">
-                <span className="header-wallet-label"><Icon name="wallet" size={14} /> PRIME WALLET ADDRESS</span>
-                <code>{walletAddressError ? 'Address unavailable' : walletAddressLoading ? 'Loading wallet address…' : binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured in Render'}</code>
-                <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} aria-label="Copy prime wallet address">
-                  <Icon name={walletCopied ? 'check' : 'copy'} size={14} /> {walletCopied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
             </div>
             <button className="date-chip"><span className="date-dot" /> Member overview</button>
           </section>
