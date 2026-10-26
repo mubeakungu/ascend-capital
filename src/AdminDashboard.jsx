@@ -1205,6 +1205,149 @@ function DepositsManagement() {
 }
 
 // ============================================================================
+// REVERSE DEPOSITS MANAGEMENT
+// ============================================================================
+
+function ReverseDepositsManagement() {
+  const [{ data: membersData }, reloadMembers] = useLoad(() => api('/admin/accounts'), []);
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [{ data: depositsData, loading: loadingDeposits }, reloadDeposits] = useLoad(
+    () => selectedMemberId ? api(`/admin/deposits/member/${selectedMemberId}`) : Promise.resolve({ deposits: [] }),
+    [selectedMemberId]
+  );
+  const [notice, setNotice] = useState(null);
+  const [reverseId, setReverseId] = useState(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const members = membersData?.accounts || [];
+  const deposits = depositsData?.deposits || [];
+
+  async function handleReverseDeposit() {
+    if (!reverseId || !reverseReason.trim()) {
+      setNotice({ text: 'Reason required', bad: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api(`/admin/deposits/${reverseId}/reverse`, {
+        method: 'POST',
+        body: { reason: reverseReason },
+      });
+      setNotice({ text: `✓ Deposit reversed: ${money(response.amount)} deducted from balance` });
+      setReverseId(null);
+      setReverseReason('');
+      reloadDeposits();
+      reloadMembers();
+    } catch (err) {
+      setNotice({ text: err.message, bad: true });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section>
+      <h2>Reverse Deposits</h2>
+
+      <div className="ad-row" style={{ marginBottom: '16px' }}>
+        <div style={{ flex: 1 }}>
+          <label>Select Member</label>
+          <select
+            value={selectedMemberId}
+            onChange={(e) => {
+              setSelectedMemberId(e.target.value);
+              setNotice(null);
+            }}
+          >
+            <option value="">-- Choose a member --</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+            ))}
+          </select>
+        </div>
+        {selectedMemberId && (
+          <button className="ad-btn ghost" onClick={reloadDeposits} style={{ alignSelf: 'flex-end', marginBottom: '0' }}>
+            Refresh
+          </button>
+        )}
+      </div>
+
+      <Notice notice={notice} />
+
+      {selectedMemberId && (
+        <>
+          {loadingDeposits ? (
+            <p className="ad-empty">Loading deposits…</p>
+          ) : deposits.length === 0 ? (
+            <p className="ad-empty">No deposits for this member</p>
+          ) : (
+            <>
+              <h3>Recent Deposits</h3>
+              <div className="ad-scroll">
+                <table className="ad-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deposits.map((d) => (
+                      <tr key={d.id}>
+                        <td>{new Date(d.createdAt).toLocaleString()}</td>
+                        <td className="num" style={{ color: 'var(--accent)' }}>+{money(d.amount)}</td>
+                        <td><Badge value={d.status} /></td>
+                        <td>
+                          {d.status === 'approved' ? (
+                            <button
+                              className="ad-btn ghost sm danger"
+                              onClick={() => setReverseId(d.id)}
+                            >
+                              Reverse
+                            </button>
+                          ) : (
+                            <span className="ad-muted" style={{ fontSize: '12px' }}>Cannot reverse</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {reverseId && (
+        <div className="ad-overlay" onClick={() => { setReverseId(null); setReverseReason(''); }}>
+          <form className="ad-modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); handleReverseDeposit(); }}>
+            <h3>Reverse Deposit</h3>
+            <p style={{ color: 'var(--muted)', fontSize: '13px', margin: '0 0 12px' }}>
+              This will deduct the deposit amount from the member's balance.
+            </p>
+            <label>Reason for Reversal</label>
+            <textarea
+              rows={3}
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="e.g., Duplicate deposit, Member request, etc."
+              required
+              autoFocus
+            />
+            <div className="ad-row end" style={{ marginTop: '16px' }}>
+              <button type="button" className="ad-btn ghost" onClick={() => { setReverseId(null); setReverseReason(''); }}>Cancel</button>
+              <button className="ad-btn danger" disabled={busy}>{busy ? 'Reversing…' : 'Confirm Reversal'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
 // WITHDRAWAL HISTORY
 // ============================================================================
 
@@ -1425,6 +1568,7 @@ export default function AdminDashboard() {
     ['dashboard', 'Dashboard'],
     ['accounts', 'Accounts'],
     ['deposits', 'Deposits'],
+    ['reverse-deposits', 'Reverse Deposits'],
     ['transactions', 'Approvals'],
     ['withdrawals', 'Withdrawals'],
     ['referrals', 'Referrals'],
@@ -1477,6 +1621,7 @@ export default function AdminDashboard() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'accounts' && <AccountsManagement />}
           {tab === 'deposits' && <DepositsManagement />}
+          {tab === 'reverse-deposits' && <ReverseDepositsManagement />}
           {tab === 'transactions' && <TransactionApproval />}
           {tab === 'withdrawals' && <WithdrawalHistory />}
           {tab === 'referrals' && <ReferralsManagement />}
