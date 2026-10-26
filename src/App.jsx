@@ -2328,13 +2328,9 @@ function App() {
             <form onSubmit={submitShowcaseAction}>
               <label className="amount-label" htmlFor="showcase-amount">{modal === 'withdraw' ? 'Withdrawal amount' : 'Deposit amount'}</label>
               <div className="amount-input-wrap"><span>$</span><input id="showcase-amount" type="number" min={modal === 'withdraw' ? '40' : '1'} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setNotice(''); }} placeholder="0.00" required disabled={transactionLoading} /></div>
-              {modal === 'withdraw' ? (
+              {modal === 'withdraw' && (
                 <>
                   <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} /></label>
-                </>
-              ) : (
-                <>
-                  <label className="account-field showcase-field">Your wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={transactionLoading} placeholder="Enter the address you're sending from" /></label>
                 </>
               )}
               {notice && <div className="modal-message" role="alert">{notice}</div>}
