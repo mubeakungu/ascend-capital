@@ -423,6 +423,8 @@ export async function createApp({ databasePath } = {}) {
       held_at TEXT,
       must_change_password INTEGER NOT NULL DEFAULT 0,
       last_deposit_time TEXT,
+      password_reset_token TEXT,
+      password_reset_expires TEXT,
       created_at TEXT NOT NULL
     );
   `;
@@ -1198,14 +1200,15 @@ export async function createApp({ databasePath } = {}) {
 
       const accountId = row[0].id;
       const salt = randomBytes(16);
-      const hash = await scryptAsync(newPassword, salt, PASSWORD_BYTES);
+      const hash = await scryptAsync(newPassword, salt, PASSWORD_BYTES, PASSWORD_OPTIONS);
 
       await sql`
-        UPDATE accounts 
-        SET hashed_password = ${Buffer.concat([salt, hash])}, 
+        UPDATE accounts
+        SET password_salt = ${salt.toString('hex')},
+            password_hash = ${hash.toString('hex')},
             password_reset_token = NULL,
             password_reset_expires = NULL,
-            must_change_password = FALSE
+            must_change_password = 0
         WHERE id = ${accountId}
       `;
 
