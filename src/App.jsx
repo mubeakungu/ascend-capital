@@ -2001,7 +2001,7 @@ function App() {
               <div className="balance-value"><span className="currency">$</span>{(comprehensiveWallet?.totalDeposits || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               <div className="balance-bottom"><span className="balance-caption">Active investments</span><span className="muted-metric">{(comprehensiveWallet?.totalDeposits || 0) === 0 ? 'No activity yet' : 'Locked'}</span></div>
             </article>
-            <article className="balance-card">
+            {false && <article className="balance-card">
               <div className="card-topline">
                 <span className="balance-label">Daily trade income</span>
                 <span className="balance-icon subdued"><Icon name="spark" size={18} /></span>
@@ -2011,7 +2011,7 @@ function App() {
                 <span className="balance-caption">Claimable during trading hours</span>
                 <span style={{ fontSize: '11px', color: '#D4AF37', fontWeight: '500' }}>1:00 PM - 1:30 PM EAT</span>
               </div>
-            </article>
+            </article>}
           </section>
 
 
