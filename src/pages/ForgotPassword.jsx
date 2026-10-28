@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 
-export default function ForgotPassword() {
+export default function ForgotPassword({ onNavigate }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +30,7 @@ export default function ForgotPassword() {
       setEmail('');
 
       // Redirect to login after 3 seconds
-      setTimeout(() => navigate('/login'), 3000);
+      setTimeout(() => onNavigate('/login'), 3000);
     } catch (err) {
       setError('Network error. Please try again.');
       console.error(err);
@@ -94,7 +92,7 @@ export default function ForgotPassword() {
           {/* Back to Login */}
           <div className="mt-6 text-center">
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => onNavigate('/login')}
               className="text-slate-400 hover:text-emerald-400 text-sm transition"
             >
               Back to Login

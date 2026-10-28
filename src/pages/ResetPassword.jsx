@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 
-export default function ResetPassword() {
+export default function ResetPassword({ onNavigate }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -10,10 +9,8 @@ export default function ResetPassword() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
 
-  const token = searchParams.get('token');
+  const token = new URLSearchParams(window.location.search).get('token');
 
   // Validate token on mount
   useEffect(() => {
@@ -79,7 +76,7 @@ export default function ResetPassword() {
       setConfirmPassword('');
 
       // Redirect to login after 2 seconds
-      setTimeout(() => navigate('/login'), 2000);
+      setTimeout(() => onNavigate('/login'), 2000);
     } catch (err) {
       setError('Network error. Please try again.');
       console.error(err);
@@ -184,7 +181,7 @@ export default function ResetPassword() {
               {/* Back to Login */}
               <div className="mt-6 text-center">
                 <button
-                  onClick={() => navigate('/login')}
+                  onClick={() => onNavigate('/login')}
                   className="text-slate-400 hover:text-emerald-400 text-sm transition"
                 >
                   Back to Login

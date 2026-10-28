@@ -1296,11 +1296,11 @@ function App() {
   }
 
   if (route === '/forgot-password') {
-    return <ForgotPassword />;
+    return <ForgotPassword onNavigate={navigate} />;
   }
 
   if (route === '/reset-password') {
-    return <ResetPassword />;
+    return <ResetPassword onNavigate={navigate} />;
   }
 
   if (!account && !accountLoading) {
