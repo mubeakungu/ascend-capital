@@ -87,76 +87,81 @@ export default function ResetPassword({ onNavigate }) {
 
   if (validating) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-300">Validating reset link...</p>
+      <div style={{minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+        <div style={{textAlign: 'center'}}>
+          <div style={{width: '48px', height: '48px', border: '4px solid rgba(212, 175, 55, 0.3)', borderTop: '4px solid #D4AF37', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px'}}></div>
+          <p style={{color: '#f5f5f5'}}>Validating reset link...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div style={{minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'}}>
+      <div style={{width: '100%', maxWidth: '400px'}}>
         {/* Logo/Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 mb-4">
-            <span className="text-white font-bold text-2xl">🔐</span>
+        <div style={{textAlign: 'center', marginBottom: '32px'}}>
+          <div style={{display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '64px', height: '64px', borderRadius: '8px', background: 'linear-gradient(135deg, #D4AF37 0%, #AA8C2C 100%)', marginBottom: '16px'}}>
+            <span style={{fontSize: '32px'}}>🔐</span>
           </div>
-          <h1 className="text-3xl font-bold text-white">Create New Password</h1>
-          <p className="text-slate-400 mt-2">Choose a strong password for your account</p>
+          <h1 style={{fontSize: '28px', fontWeight: 'bold', color: '#f5f5f5', margin: '0 0 8px 0'}}>Create New Password</h1>
+          <p style={{color: '#888', marginTop: '8px', fontSize: '14px'}}>Choose a strong password for your account</p>
         </div>
 
         {/* Form Card */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 backdrop-blur-sm">
+        <div style={{background: 'rgba(26, 26, 26, 0.5)', border: '2px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', padding: '32px', backdropFilter: 'blur(8px)'}}>
           {!tokenValid ? (
-            <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg text-red-300 text-sm mb-4">
+            <div style={{padding: '16px', background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.3)', borderRadius: '8px', color: '#ef4444', fontSize: '14px', marginBottom: '16px'}}>
               {error || 'Invalid or expired reset link'}
             </div>
           ) : (
             <>
               {message && (
-                <div className="mb-6 p-4 bg-emerald-500/20 border border-emerald-500/30 rounded-lg text-emerald-300 text-sm">
+                <div style={{marginBottom: '24px', padding: '16px', background: 'rgba(212, 175, 55, 0.1)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', color: '#D4AF37', fontSize: '14px'}}>
                   ✓ {message}
                 </div>
               )}
 
               {error && (
-                <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg text-red-300 text-sm">
+                <div style={{marginBottom: '24px', padding: '16px', background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.3)', borderRadius: '8px', color: '#ef4444', fontSize: '14px'}}>
                   ✗ {error}
                 </div>
               )}
 
               <form onSubmit={handleSubmit}>
                 {/* New Password */}
-                <div className="mb-6">
-                  <label className="block text-slate-300 text-sm font-medium mb-2">
+                <div style={{marginBottom: '24px'}}>
+                  <label style={{display: 'block', color: '#f5f5f5', fontSize: '14px', fontWeight: '500', marginBottom: '8px'}}>
                     New Password
                   </label>
-                  <div className="relative">
+                  <div style={{position: 'relative'}}>
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="w-full px-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                      style={{width: '100%', padding: '8px 32px 8px 16px', background: 'rgba(26, 26, 26, 0.5)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', color: '#f5f5f5', fontSize: '14px', outline: 'none', boxSizing: 'border-box', transition: 'all 0.2s'}}
+                      onFocus={(e) => e.target.style.borderColor = '#D4AF37'}
+                      onBlur={(e) => e.target.style.borderColor = 'rgba(212, 175, 55, 0.3)'}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-emerald-400 transition"
+                      style={{position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#888', fontSize: '16px', transition: 'color 0.2s'}}
+                      onMouseEnter={(e) => e.target.style.color = '#D4AF37'}
+                      onMouseLeave={(e) => e.target.style.color = '#888'}
                     >
                       {showPassword ? '👁️' : '👁️‍🗨️'}
                     </button>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">At least 8 characters</p>
+                  <p style={{fontSize: '12px', color: '#666', marginTop: '4px'}}>At least 8 characters</p>
                 </div>
 
                 {/* Confirm Password */}
-                <div className="mb-6">
-                  <label className="block text-slate-300 text-sm font-medium mb-2">
+                <div style={{marginBottom: '24px'}}>
+                  <label style={{display: 'block', color: '#f5f5f5', fontSize: '14px', fontWeight: '500', marginBottom: '8px'}}>
                     Confirm Password
                   </label>
                   <input
@@ -165,24 +170,28 @@ export default function ResetPassword({ onNavigate }) {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
                     required
-                    className="w-full px-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                    style={{width: '100%', padding: '8px 16px', background: 'rgba(26, 26, 26, 0.5)', border: '1px solid rgba(212, 175, 55, 0.3)', borderRadius: '8px', color: '#f5f5f5', fontSize: '14px', outline: 'none', boxSizing: 'border-box', transition: 'all 0.2s'}}
+                    onFocus={(e) => e.target.style.borderColor = '#D4AF37'}
+                    onBlur={(e) => e.target.style.borderColor = 'rgba(212, 175, 55, 0.3)'}
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition duration-200"
+                  style={{width: '100%', padding: '12px', background: loading ? 'rgba(212, 175, 55, 0.5)' : 'linear-gradient(135deg, #D4AF37 0%, #AA8C2C 100%)', color: '#003366', fontWeight: '600', borderRadius: '8px', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', transition: 'all 0.2s', opacity: loading ? 0.6 : 1}}
                 >
                   {loading ? 'Resetting...' : 'Reset Password'}
                 </button>
               </form>
 
               {/* Back to Login */}
-              <div className="mt-6 text-center">
+              <div style={{marginTop: '24px', textAlign: 'center'}}>
                 <button
                   onClick={() => onNavigate('/login')}
-                  className="text-slate-400 hover:text-emerald-400 text-sm transition"
+                  style={{background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '14px', transition: 'color 0.2s', padding: 0}}
+                  onMouseEnter={(e) => e.target.style.color = '#D4AF37'}
+                  onMouseLeave={(e) => e.target.style.color = '#888'}
                 >
                   Back to Login
                 </button>
@@ -192,7 +201,7 @@ export default function ResetPassword({ onNavigate }) {
         </div>
 
         {/* Help Text */}
-        <p className="text-center text-slate-500 text-xs mt-6">
+        <p style={{textAlign: 'center', color: '#666', fontSize: '12px', marginTop: '24px', lineHeight: '1.5'}}>
           Make sure to use a strong password with a mix of letters, numbers, and symbols.
         </p>
       </div>
