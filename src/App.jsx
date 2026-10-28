@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import DownloadAndroidButton from './components/DownloadAndroidButton';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 const plans = [
   { deposit: 300, earning: '8', dailyIncome: 8 },
@@ -227,6 +229,9 @@ function AuthPage({ mode, name, email, password, phone, pin, error, storageMode,
           {error && <div className="modal-message" role="alert">{error}</div>}
           <button className="button button-primary modal-submit" type="submit">{registering ? 'Create account' : 'Sign in'} <Icon name="arrow" size={15} /></button>
         </form>
+        {!registering && (
+          <button className="account-switch" onClick={() => onNavigate('/forgot-password')} style={{fontSize: '13px', opacity: 0.8, marginBottom: '8px'}}>Forgot your password?</button>
+        )}
         <button className="account-switch" onClick={() => onNavigate(registering ? '/login' : '/register')}>{registering ? 'Already registered? Sign in' : 'New here? Create an account'}</button>
         <p className="modal-footnote"><Icon name="shield" size={13} /> Secure authentication · Real transactions</p>
       </section>
@@ -1267,7 +1272,7 @@ function App() {
   }
 
   function navigate(id) {
-    if (id === '/login' || id === '/register' || id === '/referrals' || id === '/admin' || id === '/') {
+    if (id === '/login' || id === '/register' || id === '/referrals' || id === '/admin' || id === '/' || id === '/forgot-password' || id === '/reset-password') {
       window.history.pushState({}, '', id);
       setRoute(id);
       if (id === '/login' || id === '/register') setAccountMode(id.slice(1));
@@ -1288,6 +1293,14 @@ function App() {
     } else {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  }
+
+  if (route === '/forgot-password') {
+    return <ForgotPassword />;
+  }
+
+  if (route === '/reset-password') {
+    return <ResetPassword />;
   }
 
   if (!account && !accountLoading) {
