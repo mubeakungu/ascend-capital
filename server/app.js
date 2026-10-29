@@ -898,6 +898,12 @@ export async function createApp({ databasePath } = {}) {
       SELECT t.id, t.account_id, t.amount_cents, t.created_at
       FROM transactions t
       WHERE t.type = 'deposit' AND t.status = 'approved'
+      AND t.id IN (
+        SELECT DISTINCT ON (account_id) id
+        FROM transactions
+        WHERE type = 'deposit' AND status = 'approved'
+        ORDER BY account_id, created_at DESC
+      )
       ORDER BY t.account_id
     `;
 
