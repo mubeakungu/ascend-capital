@@ -518,13 +518,21 @@ export async function createApp({ databasePath } = {}) {
       deposit_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
       profit_cents INTEGER NOT NULL CHECK(profit_cents > 0),
       profit_date TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      reversed INTEGER DEFAULT 0
     );
   `;
 
   await sql`CREATE INDEX IF NOT EXISTS trading_ledger_account_idx ON trading_ledger(account_id)`;
   await sql`CREATE INDEX IF NOT EXISTS trading_ledger_deposit_idx ON trading_ledger(deposit_transaction_id)`;
   await sql`CREATE INDEX IF NOT EXISTS trading_ledger_date_idx ON trading_ledger(profit_date)`;
+
+  // Migration: Add reversed column if it doesn't exist
+  try {
+    await sql`ALTER TABLE trading_ledger ADD COLUMN reversed INTEGER DEFAULT 0`;
+  } catch (err) {
+    // Column already exists, ignore error
+  }
 
   await sql`
     CREATE TABLE IF NOT EXISTS weekly_salary_payments (
@@ -3485,10 +3493,11 @@ app.get('/api/admin/referrals-overview', adminLimiter, requireAdminSession, asyn
       FROM trading_ledger tl
       JOIN accounts a ON a.id = tl.account_id
       JOIN transactions t ON t.id = tl.deposit_transaction_id
+      WHERE (tl.reversed IS NULL OR tl.reversed = 0)
     `;
 
     if (accountId) {
-      query = sql`${query} WHERE tl.account_id = ${accountId}`;
+      query = sql`${query} AND tl.account_id = ${accountId}`;
     }
 
     const rows = await sql`${query} ORDER BY tl.profit_date DESC LIMIT 500`;
@@ -3722,7 +3731,7 @@ app.get('/api/admin/trading/member/:memberId', adminLimiter, requireAdminSession
         t.status
       FROM trading_ledger tl
       JOIN transactions t ON t.id = tl.deposit_transaction_id
-      WHERE tl.account_id = ${memberId}
+      WHERE tl.account_id = ${memberId} AND (tl.reversed IS NULL OR tl.reversed = 0)
       ORDER BY tl.profit_date DESC
       LIMIT 100
     `;
@@ -3776,6 +3785,13 @@ app.post('/api/admin/trading/:tradeId/reverse', adminLimiter, requireAdminSessio
     await sql`
       INSERT INTO transactions (id, account_id, type, amount_cents, reference, status, created_at)
       VALUES (${reversalId}, ${accountId}, 'withdrawal', ${profitAmount}, ${'Trade reversal: ' + reverseReason}, 'approved', ${now})
+    `;
+
+    // Mark the trade as reversed so it doesn't appear in trade lists
+    await sql`
+      UPDATE trading_ledger
+      SET reversed = 1
+      WHERE id = ${tradeId}
     `;
 
     await recordAudit(request, 'admin.trade_reversal', accountId, {
