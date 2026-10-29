@@ -113,6 +113,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [tradingFrequency, setTradingFrequency] = useState(1);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
 
@@ -120,6 +121,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     if (data?.account) {
       setName(data.account.name);
       setEmail(data.account.email);
+      setTradingFrequency(data.account.tradingFrequency || 1);
     }
   }, [data]);
 
@@ -130,7 +132,7 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
     try {
       await api(`/admin/accounts/${accountId}`, {
         method: 'PATCH',
-        body: { name, email },
+        body: { name, email, tradingFrequency: parseInt(tradingFrequency, 10) },
       });
       setNotice({ text: 'Account updated' });
       setEditMode(false);
@@ -187,6 +189,8 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
             <label>Email</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <label>Trading Frequency (trades per day)</label>
+            <input type="number" min="1" max="10" value={tradingFrequency} onChange={(e) => setTradingFrequency(e.target.value)} required />
             <Notice notice={notice} />
             <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
               <button type="button" className="ad-btn ghost" onClick={() => setEditMode(false)}>Cancel</button>
@@ -202,6 +206,10 @@ function AccountDetailModal({ accountId, onClose, onUpdate }) {
             <div className="ad-detail-row">
               <span className="ad-detail-label">Email</span>
               <span className="ad-detail-value">{account.email}</span>
+            </div>
+            <div className="ad-detail-row">
+              <span className="ad-detail-label">Trading Frequency</span>
+              <span className="ad-detail-value">{account.tradingFrequency || 1} trade{(account.tradingFrequency || 1) !== 1 ? 's' : ''}/day</span>
             </div>
             <div className="ad-row end" style={{ marginTop: '16px', gap: '8px' }}>
               <button type="button" className="ad-btn ghost" onClick={onClose}>Close</button>

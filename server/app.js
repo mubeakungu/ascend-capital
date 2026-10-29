@@ -136,6 +136,7 @@ function accountView(row) {
     role: row.role ?? 'member',
     status: row.status ?? 'active',
     mustChangePassword: Boolean(row.must_change_password),
+    tradingFrequency: row.trading_frequency ?? 1,
     createdAt: row.created_at,
   };
 }
@@ -425,6 +426,7 @@ export async function createApp({ databasePath } = {}) {
       last_deposit_time TEXT,
       password_reset_token TEXT,
       password_reset_expires TEXT,
+      trading_frequency INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
   `;
@@ -574,6 +576,16 @@ export async function createApp({ databasePath } = {}) {
   await sql`CREATE INDEX IF NOT EXISTS prime_hour_transactions_created_idx ON prime_hour_transactions(created_at)`;
 
   await initializeTierRewardsTable(sql);
+
+  // Migration: Add trading_frequency column if it doesn't exist
+  try {
+    await sql`ALTER TABLE accounts ADD COLUMN trading_frequency INTEGER NOT NULL DEFAULT 1`;
+  } catch (e) {
+    // Column might already exist, which is fine
+    if (!e.message?.includes('already exists') && !e.message?.includes('duplicate')) {
+      console.warn('Failed to add trading_frequency column (may already exist):', e.message);
+    }
+  }
 
   const app = express();
   const secureCookie = process.env.NODE_ENV === 'production';
@@ -1610,23 +1622,34 @@ export async function createApp({ databasePath } = {}) {
         return response.json({
           canClaimToday: false,
           hasActiveDeposit: false,
-          alreadyClaimedToday: false,
+          tradesClaimed: 0,
+          tradingFrequency: 1,
           dailyProfitAmount: 0,
         });
       }
 
-      // Check if already claimed today
-      const alreadyClaimed = await sql`
-        SELECT id FROM trading_ledger
+      // Get account's trading frequency
+      const accountData = await sql`
+        SELECT trading_frequency FROM accounts WHERE id = ${request.account.id}
+      `;
+
+      const tradingFrequency = accountData[0]?.trading_frequency || 1;
+
+      // Check how many trades claimed today
+      const tradesClaimed = await sql`
+        SELECT COUNT(*) as count FROM trading_ledger
         WHERE account_id = ${request.account.id} AND profit_date = ${today}
       `;
 
+      const tradesClaimedToday = tradesClaimed[0].count;
+      const canClaim = tradesClaimedToday < tradingFrequency;
       const dailyProfit = getDailyProfitForDeposit(activeDeposits[0].amount_cents);
 
       return response.json({
-        canClaimToday: alreadyClaimed.length === 0,
+        canClaimToday: canClaim,
         hasActiveDeposit: true,
-        alreadyClaimedToday: alreadyClaimed.length > 0,
+        tradesClaimed: tradesClaimedToday,
+        tradingFrequency: tradingFrequency,
         dailyProfitAmount: dailyProfit,
       });
     } catch (error) {
@@ -1683,14 +1706,25 @@ export async function createApp({ databasePath } = {}) {
         return response.status(409).json({ error: 'No active deposits found.' });
       }
 
-      // Check if already claimed today
-      const alreadyClaimed = await sql`
-        SELECT id FROM trading_ledger
+      // Get account's trading frequency
+      const accountData = await sql`
+        SELECT trading_frequency FROM accounts WHERE id = ${request.account.id}
+      `;
+
+      const tradingFrequency = accountData[0]?.trading_frequency || 1;
+
+      // Check trading frequency limit
+      const tradesClaimed = await sql`
+        SELECT COUNT(*) as count FROM trading_ledger
         WHERE account_id = ${request.account.id} AND profit_date = ${today}
       `;
 
-      if (alreadyClaimed.length > 0) {
-        return response.status(409).json({ error: 'You have already claimed your trade today.' });
+      const tradesClaimedToday = tradesClaimed[0].count;
+      if (tradesClaimedToday >= tradingFrequency) {
+        const remaining = tradingFrequency - tradesClaimedToday;
+        return response.status(409).json({
+          error: `You have reached your daily trading limit of ${tradingFrequency} trade${tradingFrequency !== 1 ? 's' : ''} per day. You have already claimed ${tradesClaimedToday}.`
+        });
       }
 
       // Calculate total daily profit from all active deposits
@@ -2761,7 +2795,7 @@ export async function createApp({ databasePath } = {}) {
 
   app.get('/api/admin/accounts', adminLimiter, requireAdminSession, async (request, response) => {
     const accounts = await sql`
-      SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at,
+      SELECT a.id, a.name, a.email, a.created_at, a.role, a.status, a.hold_reason, a.held_at, a.trading_frequency,
         COALESCE((
           SELECT SUM(amount_cents)
           FROM transactions t
@@ -2811,7 +2845,7 @@ export async function createApp({ databasePath } = {}) {
 
   app.get('/api/admin/accounts/:id/activity', adminLimiter, requireAdminSession, async (request, response) => {
     const account = await sql`
-      SELECT id, name, email, created_at, role, status, hold_reason, held_at
+      SELECT id, name, email, created_at, role, status, hold_reason, held_at, trading_frequency
       FROM accounts WHERE id = ${request.params.id}
     `;
     if (account.length === 0) return response.status(404).json({ error: 'Account not found.' });
@@ -2855,12 +2889,13 @@ export async function createApp({ databasePath } = {}) {
 
   app.patch('/api/admin/accounts/:id', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
-      const target = await sql`SELECT id, name, email, role, status FROM accounts WHERE id = ${request.params.id}`;
+      const target = await sql`SELECT id, name, email, role, status, trading_frequency FROM accounts WHERE id = ${request.params.id}`;
       if (target.length === 0) return response.status(404).json({ error: 'Account not found.' });
       if (target[0].role === 'admin') return response.status(403).json({ error: 'Cannot edit administrator accounts.' });
 
       const name = request.body?.name;
       const email = request.body?.email;
+      const tradingFrequency = request.body?.tradingFrequency;
 
       if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) {
         return response.status(400).json({ error: 'Name must be between 2 and 80 characters.' });
@@ -2876,14 +2911,23 @@ export async function createApp({ databasePath } = {}) {
         if (existing.length > 0) return response.status(409).json({ error: 'This email is already in use.' });
       }
 
-      await sql`UPDATE accounts SET name = ${name.trim()}, email = ${cleanEmail} WHERE id = ${target[0].id}`;
+      if (tradingFrequency !== undefined) {
+        const freq = parseInt(tradingFrequency, 10);
+        if (!Number.isInteger(freq) || freq < 1 || freq > 10) {
+          return response.status(400).json({ error: 'Trading frequency must be between 1 and 10.' });
+        }
+      }
+
+      const finalTradingFrequency = tradingFrequency !== undefined ? parseInt(tradingFrequency, 10) : target[0].trading_frequency;
+      await sql`UPDATE accounts SET name = ${name.trim()}, email = ${cleanEmail}, trading_frequency = ${finalTradingFrequency} WHERE id = ${target[0].id}`;
       await recordAudit(request, 'account.edit', target[0].id, {
         email: target[0].email,
         newName: name.trim(),
         newEmail: cleanEmail,
+        tradingFrequency: finalTradingFrequency,
       });
 
-      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password FROM accounts WHERE id = ${target[0].id}`;
+      const account = await sql`SELECT id, name, email, phone, created_at, role, status, must_change_password, trading_frequency FROM accounts WHERE id = ${target[0].id}`;
       return response.json({ account: accountView(account[0]) });
     } catch (error) {
       return next(error);
