@@ -69,7 +69,7 @@ export default function DepositCard({ deposit, onClaimed = () => {} }) {
           <strong>Status:</strong> {deposit.status}
         </span>
         <span className="meta-item">
-          <strong>Created:</strong> {new Date(deposit.createdAt).toLocaleDateString()}
+          <strong>Created:</strong> {new Date(deposit.createdAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}
         </span>
       </div>
 

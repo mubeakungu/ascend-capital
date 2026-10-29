@@ -9,8 +9,8 @@ const when = (iso) => {
   const date = new Date(iso);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   return isMobile
-    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    : date.toLocaleString();
+    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Africa/Nairobi' })
+    : date.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
 };
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -293,7 +293,7 @@ function AccountsManagement() {
               </div>
               <div className="ad-account-card-row">
                 <span className="label">Created:</span>
-                <span className="value">{new Date(a.createdAt).toLocaleDateString()}</span>
+                <span className="value">{new Date(a.createdAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</span>
               </div>
             </div>
             <div className="ad-account-card-actions">
@@ -329,7 +329,7 @@ function AccountsManagement() {
                   <td><Badge value={a.status} /></td>
                   <td className="num">{money(a.balance)}</td>
                   <td><Badge value={a.role} /></td>
-                  <td>{new Date(a.createdAt).toLocaleDateString()}</td>
+                  <td>{new Date(a.createdAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                   <td>
                     <div className="ad-actions" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
                       <button className="ad-btn ghost sm" onClick={() => setSelectedId(a.id)} style={{ width: '100%' }}>View</button>
@@ -474,7 +474,7 @@ function ReferralsManagement() {
                 <td>{r.referredName}</td>
                 <td>{r.referredEmail}</td>
                 <td className="num" style={{ color: 'var(--accent)' }}>{money(r.totalDeposits)}</td>
-                <td>{new Date(r.signedUpAt).toLocaleDateString()}</td>
+                <td>{new Date(r.signedUpAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
               </tr>
             ))}
           </tbody>
@@ -737,7 +737,7 @@ function ReverseTradesManagement() {
                   <tbody>
                     {trades.map((t) => (
                       <tr key={t.id}>
-                        <td>{new Date(t.profitDate).toLocaleString()}</td>
+                        <td>{new Date(t.profitDate).toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                         <td className="num">{money(t.depositAmount)}</td>
                         <td className="num" style={{ color: 'var(--accent)' }}>+{money(t.profitAmount)}</td>
                         <td><Badge value={t.status || 'active'} /></td>
@@ -1436,7 +1436,7 @@ function ReverseDepositsManagement() {
                   <tbody>
                     {deposits.map((d) => (
                       <tr key={d.id}>
-                        <td>{new Date(d.createdAt).toLocaleString()}</td>
+                        <td>{new Date(d.createdAt).toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                         <td className="num" style={{ color: 'var(--accent)' }}>+{money(d.amount)}</td>
                         <td><Badge value={d.status} /></td>
                         <td>

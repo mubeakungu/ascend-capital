@@ -313,7 +313,7 @@ function AdminPage({ account, accountLoading, onNavigate }) {
                             : member.name}</td>
                           <td>{member.email}</td>
                           <td><span className={`admin-role ${member.role === 'admin' ? 'admin-role-active' : ''}`}>{member.role}</span></td>
-                          <td>{new Date(member.createdAt).toLocaleDateString()}</td>
+                          <td>{new Date(member.createdAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                           <td>{member.role === 'admin' ? <span className="admin-protected">Protected</span> : editingId === member.id
                             ? <button className="admin-action" disabled={saving} onClick={() => saveName(member.id)}>{saving ? 'Saving…' : 'Save'}</button>
                             : <button className="admin-action" onClick={() => { setEditingId(member.id); setEditedName(member.name); }}>Edit name</button>}</td>
@@ -404,7 +404,7 @@ function ReferredMembersList() {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
                 <span style={{ color: '#888' }}>Joined</span>
                 <span style={{ color: '#bbb' }}>
-                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Africa/Nairobi' })}
                 </span>
               </div>
             </div>
@@ -605,7 +605,8 @@ function App() {
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
-          hour12: true
+          hour12: true,
+          timeZone: 'Africa/Nairobi'
         });
         setNextTradingTime(timeStr);
       }
