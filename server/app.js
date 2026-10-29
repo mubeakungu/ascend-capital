@@ -17,6 +17,7 @@ const scryptAsync = promisify(scrypt);
 const SESSION_COOKIE = 'ascend_session_v2';
 const ADMIN_SESSION_COOKIE = 'ascend_admin_session';
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_REFRESH_THRESHOLD = 60 * 60 * 24 * 7; // Refresh if less than 7 days left
 const PASSWORD_BYTES = 64;
 const PASSWORD_OPTIONS = { N: 16384, r: 8, p: 1 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -686,6 +687,20 @@ export async function createApp({ databasePath } = {}) {
   }
 
   async function requireAdminSession(request, response, next) {
+    const token = readCookie(request, ADMIN_SESSION_COOKIE);
+    if (!token) return response.status(401).json({ error: 'Admin authentication required.' });
+
+    const tokenHash = hashToken(token);
+    const now = Date.now();
+
+    const sessionRows = await sql`SELECT expires_at FROM sessions WHERE token_hash = ${tokenHash}`;
+    if (sessionRows.length > 0) {
+      const timeUntilExpiry = sessionRows[0].expires_at - now;
+      if (timeUntilExpiry > 0 && timeUntilExpiry <= SESSION_REFRESH_THRESHOLD) {
+        await refreshSession(tokenHash, response, ADMIN_SESSION_COOKIE);
+      }
+    }
+
     const account = await getCurrentAccountAsync(request, ADMIN_SESSION_COOKIE, true);
     if (!account) return response.status(401).json({ error: 'Admin authentication required.' });
     request.account = account;
@@ -730,6 +745,21 @@ export async function createApp({ databasePath } = {}) {
     const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
     await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${hashToken(token)}, ${accountId}, ${expiresAt})`;
     setSessionCookie(response, token, secureCookie);
+  }
+
+  async function refreshSession(oldTokenHash, response, cookieName = SESSION_COOKIE) {
+    const oldSession = await sql`SELECT account_id FROM sessions WHERE token_hash = ${oldTokenHash}`;
+    if (oldSession.length === 0) return false;
+
+    const now = Date.now();
+    const newExpiresAt = now + SESSION_DURATION_SECONDS * 1000;
+    const newToken = randomBytes(32).toString('base64url');
+    const newTokenHash = hashToken(newToken);
+
+    await sql`DELETE FROM sessions WHERE token_hash = ${oldTokenHash}`;
+    await sql`INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (${newTokenHash}, ${oldSession[0].account_id}, ${newExpiresAt})`;
+    setSessionCookie(response, newToken, secureCookie, cookieName);
+    return true;
   }
 
   async function trackReferralSignup(accountId, referralCode) {
@@ -1362,6 +1392,21 @@ export async function createApp({ databasePath } = {}) {
       if (token) await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
       clearSessionCookie(response, secureCookie, ADMIN_SESSION_COOKIE);
       return response.status(204).end();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post('/api/admin/auth/refresh', async (request, response, next) => {
+    try {
+      const token = readCookie(request, ADMIN_SESSION_COOKIE);
+      if (!token) return response.status(401).json({ error: 'Admin authentication required.' });
+
+      const tokenHash = hashToken(token);
+      const refreshed = await refreshSession(tokenHash, response, ADMIN_SESSION_COOKIE);
+
+      if (!refreshed) return response.status(401).json({ error: 'Session not found or expired.' });
+      return response.json({ ok: true, message: 'Session refreshed.' });
     } catch (error) {
       return next(error);
     }
@@ -2913,6 +2958,38 @@ export async function createApp({ databasePath } = {}) {
       await recordAudit(request, 'account.delete', target[0].id, { email: target[0].email });
 
       return response.status(204).end();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/admin/clients-for-adjustment', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const clients = await sql`
+        SELECT a.id, a.name, a.email, a.status,
+          COALESCE((
+            SELECT SUM(CASE
+              WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
+              WHEN type = 'withdrawal' THEN -amount_cents
+              ELSE 0
+            END)
+            FROM transactions t
+            WHERE t.account_id = a.id AND t.status = 'approved'
+          ), 0) AS balance_cents
+        FROM accounts a
+        WHERE a.role = 'member'
+        ORDER BY a.name ASC
+      `;
+
+      return response.json({
+        clients: clients.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          status: row.status,
+          balance: row.balance_cents / 100
+        }))
+      });
     } catch (error) {
       return next(error);
     }
