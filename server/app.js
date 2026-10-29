@@ -2963,6 +2963,38 @@ export async function createApp({ databasePath } = {}) {
     }
   });
 
+  app.get('/api/admin/clients-for-adjustment', adminLimiter, requireAdminSession, async (request, response, next) => {
+    try {
+      const clients = await sql`
+        SELECT a.id, a.name, a.email, a.status,
+          COALESCE((
+            SELECT SUM(CASE
+              WHEN type IN ('deposit', 'tier_reward', 'trading_profit', 'tier_salary', 'referral_commission') THEN amount_cents
+              WHEN type = 'withdrawal' THEN -amount_cents
+              ELSE 0
+            END)
+            FROM transactions t
+            WHERE t.account_id = a.id AND t.status = 'approved'
+          ), 0) AS balance_cents
+        FROM accounts a
+        WHERE a.role = 'member'
+        ORDER BY a.name ASC
+      `;
+
+      return response.json({
+        clients: clients.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          status: row.status,
+          balance: row.balance_cents / 100
+        }))
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post('/api/admin/accounts/:id/balance', adminLimiter, requireAdminSession, async (request, response, next) => {
     try {
       const { action, amountCents, reason } = request.body ?? {};
