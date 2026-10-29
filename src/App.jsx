@@ -2379,7 +2379,13 @@ function App() {
                   <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={primeHourLoading} /></label>
                 </>
               ) : (
-                <input type="hidden" />
+                <>
+                  <label className="account-field showcase-field" style={{ color: '#FF9900' }}>Deposit to this address<input type="text" autoComplete="off" value={binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured'} readOnly disabled={true} style={{ cursor: 'default' }} />
+                  </label>
+                  <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} style={{ width: '100%', padding: '8px', marginTop: '8px', marginBottom: '12px', background: 'rgba(255, 153, 0, 0.2)', color: '#FF9900', border: '1px solid #FF9900', borderRadius: '4px', cursor: !binanceWalletAddress ? 'not-allowed' : 'pointer' }}>
+                    <Icon name={walletCopied ? 'check' : 'copy'} size={14} style={{ marginRight: '6px' }} /> {walletCopied ? 'Copied!' : 'Copy Address'}
+                  </button>
+                </>
               )}
               {primeHourMessage && <div className={`modal-message ${primeHourMessage.includes('✅') ? 'success' : 'error'}`} role="alert">{primeHourMessage}</div>}
               <button className="button button-primary modal-submit" type="submit" disabled={primeHourLoading}>{primeHourLoading ? 'Processing...' : (primeHourModal === 'withdraw' ? 'Withdraw from Prime' : 'Deposit to Prime')} <Icon name="arrow" size={15} /></button>
