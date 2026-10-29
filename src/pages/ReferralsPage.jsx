@@ -215,7 +215,7 @@ export function ReferralPage({ account, onNavigate }) {
                         <tr key={ref.id}>
                           <td>{ref.name}</td>
                           <td>{ref.email}</td>
-                          <td>{new Date(ref.signedUpAt).toLocaleDateString()}</td>
+                          <td>{new Date(ref.signedUpAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                           <td>
                             ${ref.totalDeposits.toLocaleString('en-US', {
                               minimumFractionDigits: 2,

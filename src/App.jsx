@@ -313,7 +313,7 @@ function AdminPage({ account, accountLoading, onNavigate }) {
                             : member.name}</td>
                           <td>{member.email}</td>
                           <td><span className={`admin-role ${member.role === 'admin' ? 'admin-role-active' : ''}`}>{member.role}</span></td>
-                          <td>{new Date(member.createdAt).toLocaleDateString()}</td>
+                          <td>{new Date(member.createdAt).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' })}</td>
                           <td>{member.role === 'admin' ? <span className="admin-protected">Protected</span> : editingId === member.id
                             ? <button className="admin-action" disabled={saving} onClick={() => saveName(member.id)}>{saving ? 'Saving…' : 'Save'}</button>
                             : <button className="admin-action" onClick={() => { setEditingId(member.id); setEditedName(member.name); }}>Edit name</button>}</td>
@@ -404,7 +404,7 @@ function ReferredMembersList() {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
                 <span style={{ color: '#888' }}>Joined</span>
                 <span style={{ color: '#bbb' }}>
-                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {new Date(member.signedUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Africa/Nairobi' })}
                 </span>
               </div>
             </div>
@@ -605,7 +605,8 @@ function App() {
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
-          hour12: true
+          hour12: true,
+          timeZone: 'Africa/Nairobi'
         });
         setNextTradingTime(timeStr);
       }
@@ -2378,7 +2379,13 @@ function App() {
                   <label className="account-field showcase-field">Destination wallet address<input type="text" autoComplete="off" value={destination} onChange={(event) => setDestination(event.target.value)} required disabled={primeHourLoading} /></label>
                 </>
               ) : (
-                <input type="hidden" />
+                <>
+                  <label className="account-field showcase-field" style={{ color: '#FF9900' }}>Deposit to this address<input type="text" autoComplete="off" value={binanceWalletAddress ? maskAddress(binanceWalletAddress) : 'Not configured'} readOnly disabled={true} style={{ cursor: 'default' }} />
+                  </label>
+                  <button type="button" onClick={copyBinanceWalletAddress} disabled={walletAddressLoading || Boolean(walletAddressError) || !binanceWalletAddress} style={{ width: '100%', padding: '8px', marginTop: '8px', marginBottom: '12px', background: 'rgba(255, 153, 0, 0.2)', color: '#FF9900', border: '1px solid #FF9900', borderRadius: '4px', cursor: !binanceWalletAddress ? 'not-allowed' : 'pointer' }}>
+                    <Icon name={walletCopied ? 'check' : 'copy'} size={14} style={{ marginRight: '6px' }} /> {walletCopied ? 'Copied!' : 'Copy Address'}
+                  </button>
+                </>
               )}
               {primeHourMessage && <div className={`modal-message ${primeHourMessage.includes('✅') ? 'success' : 'error'}`} role="alert">{primeHourMessage}</div>}
               <button className="button button-primary modal-submit" type="submit" disabled={primeHourLoading}>{primeHourLoading ? 'Processing...' : (primeHourModal === 'withdraw' ? 'Withdraw from Prime' : 'Deposit to Prime')} <Icon name="arrow" size={15} /></button>
