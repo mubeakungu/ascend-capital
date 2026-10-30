@@ -1678,7 +1678,7 @@ function MemberPasswordManagement() {
     }
     setBusy(true);
     try {
-      await api(`/admin/accounts/${memberId}/password-reset`, {
+      await api(`/admin/accounts/${memberId}/password`, {
         method: 'POST',
         body: { newPassword },
       });
